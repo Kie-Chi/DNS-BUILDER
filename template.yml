@@ -1,0 +1,126 @@
+# DNS Builder - Config File
+#
+# This file demonstrates all the major features of the DNS Builder.
+# It sets up a complete mini-environment with a root server, an authoritative
+# server for "example.com", a recursor that uses them, and a client for testing.
+
+# ---
+# 1. Top-Level Project Configuration
+# ---
+name: "demo" # name of the Docker Environment
+inet: 10.88.0.0/24 # the subnet used for the Environment
+
+# ---
+# 2. Image Definitions
+#
+# This section defines the Docker images that our services will use.
+# ---
+images:
+  # --- Image 1: Build from Source ---
+  # This is a "base" image definition. Since 'ref' is not used, the builder
+  # will create a Dockerfile from scratch based on the software, version,
+  # and package lists provided.
+  - name: "bind-from-source" # the only flag to determine a image
+    software: "bind"    # REQUIRED!!!!!!
+    version: "9.18.0"   # REQUIRED!!!!!!
+    dependency:         # Packages needed to COMPILE BIND.
+      - build-essential
+      - pkg-config
+      - wget
+      - xz-utils
+      - libssl-dev
+      - libperl-dev
+      - libcap-dev
+      - libuv1-dev
+      - libnghttp2-dev
+      # ... etc
+    util:               # Utility packages for the FINAL container.
+      - vim
+      - dnsutils
+      - tcpdump
+      - tmux
+      # ... etc
+
+  # --- Image 2: Inherit and Extend ---
+  # This image inherits everything from our 'bind-from-source' image above.
+  # We use 'ref' to point to another image defined in this file.
+  # We then extend it by adding a new utility package, 'tshark'.
+  - name: "bind-extended"
+    ref: "bind-from-source"
+    # dependency: add as you like
+    util: # will added to original util provided by ref-image
+      - tshark
+
+  # --- Image 3: Quick Alias ---
+  # This is a shortcut. The 'ref' points to a known software format 'software:version'.
+  # The ImageFactory understands this and creates a standard BIND image without
+  # needing the full software, version, and dependency definitions here.
+  - name: "quick-bind-alias"
+    ref: "bind:9.18.0"
+    # dependency: add as you like
+    # util: add as you like
+
+# ---
+# 3. Build Definitions (Services)
+#
+# This section defines the actual containers that will be orchestrated.
+# ---
+builds:
+  # --- Service 1: The Root Server ---
+  # This server will act as the authority for the root zone (.).
+  root-server:
+    image: "bind-from-source"   # Use our custom-built image.
+    ref: "std:auth"             # Use the standard "authoritative" template.
+    address: 10.88.0.10         # Assign a static, predictable IP address.
+    volumes:
+      # We provide the configuration and zone file for the root zone.
+      - ./user/root.zones.conf:/usr/local/etc/zones.conf
+      - ./user/db.root:/usr/local/var/named/db.root
+
+  # --- Service 2: Authoritative Server for example.com ---
+  # This server is the authority for the "example.com" domain.
+  auth-server:
+    image: "quick-bind-alias"   # Use the shortcut alias image.
+    ref: "std:auth"             # Also use the standard "authoritative" template.
+    volumes:
+      # Provide the configuration and zone file for example.com.
+      - ./user/auth_zones.conf:/usr/local/etc/zones.conf
+      - ./user/db.example.com:/usr/local/var/named/db.example.com
+
+  # --- Service 3: The Main Recursor ---
+  # This is the central resolving server that clients will talk to.
+  # It demonstrates the powerful 'behavior' key.
+  recursor:
+    image: "bind-extended"      # Use our extended image that includes tshark.
+    ref: "std:recursor"         # Use the standard "recursor" template.
+    
+    # The 'behavior' key automatically generates and injects DNS configuration.
+    # The '|' allows for a multi-line string. Each line is a separate rule.
+    behavior: |
+      # Rule 1: Use 'root-server' for root hints.
+      # The builder generates a hints file pointing to root-server's IP (10.88.0.10)
+      # and configures this recursor to use it.
+      . hint root-server
+
+      # Rule 2: Configure a stub zone for "example.com".
+      # This tells the recursor to always ask 'auth-server' directly for anything
+      # related to example.com, making resolution faster.
+      example.com stub auth-server
+
+  # --- Service 4: A Simple Client Container ---
+  # This container doesn't run a DNS server. It's just a place for us to
+  # run 'dig' commands from, to test the other servers.
+  client:
+    image: "bind-from-source" # We use this image because it has 'dnsutils'.
+    
+    # We need to override the default command of the BIND image, as we don't
+    # want to run 'named'. 'sleep infinity' keeps the container running.
+    command: ["sleep", "infinity"]
+
+    # This is a standard docker-compose key. It configures the container's
+    # /etc/resolv.conf to use our recursor for all DNS queries.
+    dns: 10.88.0.13 # This IP will be auto-assigned to the 'recursor' service.
+
+    # Demonstrate overriding capabilities for a less-privileged container.
+    cap_add: 
+    - NET_RAW # Remove the default NET_ADMIN capability.

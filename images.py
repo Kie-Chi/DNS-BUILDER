@@ -38,6 +38,8 @@ ENV LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
 RUN groupadd -r named && useradd -r -g named named
 RUN mkdir -p /usr/local/var/named && \\
     mkdir -p /var/cache/named && \\
+    mkdir -p /usr/local/var/run/named && \\
+    chown -R named:named /usr/local/var/run/named && \\
     chown -R named:named /var/cache/named && \\
     chown -R named:named /usr/local/var/named && \\
     chown -R named:named /usr/local/etc

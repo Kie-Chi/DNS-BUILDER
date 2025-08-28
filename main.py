@@ -15,7 +15,8 @@ def main():
     # Get a logger for this module
     logger = logging.getLogger(__name__)
 
-    config_file = 'kaminsky.yml'
+    # config_file = 'kaminsky.yml'
+    config_file = "template.yml"
     
     logger.info(f"Reading configuration from {config_file}...")
     try:
