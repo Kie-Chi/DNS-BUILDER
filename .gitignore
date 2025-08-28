@@ -1,0 +1,9 @@
+**/
+.*
+*.txt
+*.md
+!.gitignore
+!configs
+!users
+!requirements.txt
+!README.md
