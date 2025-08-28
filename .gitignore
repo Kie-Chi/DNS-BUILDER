@@ -2,8 +2,10 @@
 .*
 *.txt
 *.md
+*.yml
 !.gitignore
 !configs
 !users
 !requirements.txt
 !README.md
+!template.yml
