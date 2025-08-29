@@ -1,6 +1,6 @@
 # behavior.py
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, NamedTuple
+from typing import Dict, Optional, NamedTuple, List, Tuple
 
 # --- Data Structures for Clarity ---
 
@@ -84,6 +84,16 @@ class BehaviorFactory:
             # ("unbound", "stub"): UnboundStubBehavior, 
         }
 
+    def _parse_behavior(self, line: str) -> Tuple[str, List[str]]:
+        """
+            parse a behavior
+            :param line: A line from behavior config
+        """
+        parts = line.strip().split()
+        if len(parts) == 3:
+            _type = parts.pop(1);
+            return (_type, parts);
+
     def create(self, line: str, software_type: str) -> Behavior:
         """
         Parses a behavior line and returns the correct Behavior instance.
@@ -91,11 +101,7 @@ class BehaviorFactory:
         :param software_type: The software of the service, e.g., "bind".
         :return: An instance of a Behavior subclass.
         """
-        parts = line.strip().split()
-        if len(parts) != 3:
-            raise ValueError(f"Invalid behavior line format: '{line}'")
-        
-        zone, behavior_type, target_name = parts
+        behavior_type, args = self._parse_behavior(line)
         
         key = (software_type, behavior_type)
         behavior_class = self._behaviors.get(key)
@@ -105,4 +111,4 @@ class BehaviorFactory:
                 f"Behavior '{behavior_type}' is not supported for software '{software_type}'."
             )
             
-        return behavior_class(zone, target_name)
+        return behavior_class(*args)
