@@ -6,10 +6,10 @@ import yaml
 import copy
 import logging
 import json
-from typing import Dict, Any, Optional, List
-
+from typing import Dict, Any, Optional, List, Tuple
+from behaviors import BehaviorFactory
 from config import Config
-from images import ImageFactory
+from images import ImageFactory, Image
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ class Builder:
         self.service_ips: Dict[str, str] = {}
         
         self.predefined_builds = self._load_predefined_builds()
+        self.behavior_factory = BehaviorFactory()
 
     def _load_predefined_builds(self) -> Dict[str, Dict]:
         template_path = "configs/build_templates.json"
@@ -93,24 +94,6 @@ class Builder:
         self.resolved_builds[service_name] = final_conf
         return final_conf
 
-    def _generate_bind_behavior_artifacts(self, service_name: str, zone: str, type: str, name: str) -> Dict[str, Any]:
-        target_ip = self.service_ips.get(name)
-        if not target_ip: raise ValueError(f"Behavior references undefined service '{name}'.")
-
-        if type in ["forward", "stub"]:
-            block_type = "forwarders" if type == "forward" else "masters"
-            config_line = f'zone "{zone}" {{ type {type}; {block_type} {{ {target_ip}; }}; }};'
-            return {'config_line': config_line, 'new_volume': None}
-        elif type == "hint":
-            filename = f"gen_{service_name}_root.hints"
-            container_path = f"/usr/local/etc/{self.GENERATED_ZONES_SUBDIR}/{filename}"
-            file_content = f".\t3600000\tIN\tNS\t{name}.\n{name}.\t3600000\tIN\tA\t{target_ip}\n"
-            config_line = f'zone "{zone}" {{ type hint; file "{container_path}"; }};'
-            new_volume = {'filename': filename, 'content': file_content, 'container_path': container_path}
-            return {'config_line': config_line, 'new_volume': new_volume}
-        else:
-            raise NotImplementedError(f"BIND behavior type '{type}' is not supported.")
-
     def _preprocess_and_allocate_ips(self):
         logger.info("Resolving all service configurations and allocating IPs...")
         for service_name in self.config.builds_config.keys(): self._resolve_service(service_name)
@@ -121,90 +104,128 @@ class Builder:
             self.service_ips[service_name] = ip_address
             logger.debug(f"Allocated IP {ip_address} for service '{service_name}'")
 
+    def _setup_service_directory(self, service_name: str, build_conf: Dict) -> Tuple[Image, str]:
+        """Creates the output directory for a service and writes its Dockerfile."""
+        logger.info(f"Processing service: '{service_name}'")
+        image_obj = self.images[build_conf['image']]
+        
+        service_dir = os.path.join(self.output_dir, service_name)
+        contents_dir = os.path.join(service_dir, 'contents')
+        os.makedirs(contents_dir, exist_ok=True)
+        
+        image_obj.write(service_dir)
+        return image_obj, contents_dir
+
+    def _process_user_volumes(self, service_name: str, build_conf: Dict, contents_dir: str) -> Tuple[List[str], Optional[str]]:
+        """Copies user-defined volumes and identifies the main configuration file."""
+        processed_volumes: List[str] = []
+        main_conf_output_path: Optional[str] = None
+
+        for volume_str in build_conf.get('volumes', []):
+            host_path, container_path = volume_str.split(':', 1)
+            if not os.path.exists(host_path):
+                raise FileNotFoundError(f"Volume source for '{service_name}' not found: {host_path}")
+            
+            filename = os.path.basename(host_path)
+            target_path = os.path.join(contents_dir, filename)
+            shutil.copy(host_path, target_path)
+            
+            if container_path.endswith('.conf'):
+                main_conf_output_path = target_path
+                logger.debug(f"Identified '{host_path}' as main config for '{service_name}'.")
+
+            processed_volumes.append(f"./{service_name}/contents/{filename}:{container_path}")
+        
+        return processed_volumes, main_conf_output_path
+
+    def _process_behavior(self, service_name: str, build_conf: Dict, image_obj: Image, contents_dir: str, main_conf_path: Optional[str], volumes: List[str]):
+        """Generates artifacts from the 'behavior' key and updates volumes and config."""
+        behavior_str = build_conf.get('behavior')
+        if not behavior_str:
+            return
+
+        if not main_conf_path:
+            raise ValueError(f"Service '{service_name}' has 'behavior' but no main .conf file was found in its volumes to include it.")
+        if not image_obj.software:
+            raise ValueError(f"Cannot process 'behavior' for service '{service_name}' as its image '{image_obj.name}' has no 'software' type defined.")
+
+        all_config_lines: List[str] = []
+        for line in behavior_str.strip().split('\n'):
+            line = line.strip()
+            if not line or line.startswith('#'): continue
+            
+            behavior_obj = self.behavior_factory.create(line, image_obj.software)
+            target_ip = self.service_ips.get(behavior_obj.target_name)
+            if not target_ip:
+                raise ValueError(f"Behavior references undefined service '{behavior_obj.target_name}'.")
+            
+            artifacts = behavior_obj.generate(service_name, target_ip)
+            all_config_lines.append(artifacts.config_line)
+
+            if artifacts.new_volume:
+                vol = artifacts.new_volume
+                zones_dir = os.path.join(contents_dir, self.GENERATED_ZONES_SUBDIR)
+                os.makedirs(zones_dir, exist_ok=True)
+                filepath = os.path.join(zones_dir, vol.filename)
+                with open(filepath, 'w') as f: f.write(vol.content)
+                logger.info(f"Generated behavior file for '{service_name}' at '{filepath}'")
+                volumes.append(f"./{service_name}/contents/{self.GENERATED_ZONES_SUBDIR}/{vol.filename}:{vol.container_path}")
+        
+        generated_zones_content = "\n".join(all_config_lines)
+        gen_zones_path = os.path.join(contents_dir, self.GENERATED_ZONES_FILENAME)
+        with open(gen_zones_path, 'w') as f:
+            f.write(f"# Auto-generated by DNS Builder for '{service_name}'\n{generated_zones_content}\n")
+        
+        volumes.append(f"./{service_name}/contents/{self.GENERATED_ZONES_FILENAME}:{self.GENERATED_ZONES_CONTAINER_PATH}")
+        
+        with open(main_conf_path, 'a') as f:
+            f.write(f'\n# Auto-included by DNS Builder\ninclude "{self.GENERATED_ZONES_CONTAINER_PATH}";\n')
+        logger.info(f"Injected 'include' statement into '{os.path.basename(main_conf_path)}' for '{service_name}'.")
+
+    def _assemble_compose_service(self, service_name: str, build_conf: Dict, ip_address: str, volumes: List[str]) -> Dict:
+        """Constructs the final service dictionary for docker-compose.yml."""
+        service_config = {
+            'container_name': f"{self.config.name}-{service_name}",
+            'hostname': service_name, 'build': f"./{service_name}",
+            'networks': {'app_net': {'ipv4_address': ip_address}}
+        }
+        if volumes:
+            service_config['volumes'] = volumes
+        
+        service_config['cap_add'] = build_conf.get('cap_add', ['NET_ADMIN']) or ['NET_ADMIN']
+        
+        for key, value in build_conf.items():
+            if key not in ['image', 'volumes', 'cap_add', 'address', 'ref', 'behavior']:
+                service_config[key] = value
+        
+        return service_config
+
     def _process_builds(self, compose_config: Dict):
+        """
+        Orchestrates the processing of each service to generate its configuration
+        and Docker Compose definition.
+        """
         self._preprocess_and_allocate_ips()
         
         logger.info("Processing resolved services for Docker Compose...")
         for service_name, build_conf in self.resolved_builds.items():
             if 'image' not in build_conf: continue
 
-            logger.info(f"Processing service: '{service_name}'")
-            image_obj = self.images[build_conf['image']]
-            
-            service_dir = os.path.join(self.output_dir, service_name)
-            contents_dir = os.path.join(service_dir, 'contents')
-            os.makedirs(contents_dir, exist_ok=True)
-            
-            image_obj.write(service_dir)
-
-            processed_volumes: List[str] = []
-            main_conf_output_path: Optional[str] = None
-            
-            # 1. Process USER-DEFINED volumes first. Copy them and find the main conf.
-            for volume_str in build_conf.get('volumes', []):
-                host_path, container_path = volume_str.split(':', 1)
-                if not os.path.exists(host_path): raise FileNotFoundError(f"Volume source for '{service_name}' not found: {host_path}")
-                
-                filename = os.path.basename(host_path)
-                target_path = os.path.join(contents_dir, filename)
-                shutil.copy(host_path, target_path)
-                
-                if container_path.endswith('.conf'):
-                    main_conf_output_path = target_path
-                    logger.debug(f"Identified '{host_path}' as main config for '{service_name}'.")
-
-                processed_volumes.append(f"./{service_name}/contents/{filename}:{container_path}")
-
-            # 2. Process BEHAVIOR. This generates new files and config lines.
-            behavior_str = build_conf.get('behavior')
-            if behavior_str:
-                if not main_conf_output_path:
-                    raise ValueError(f"Service '{service_name}' has 'behavior' but no main .conf file was found in its volumes to include it.")
-                
-                all_config_lines: List[str] = []
-                for line in behavior_str.strip().split('\n'):
-                    line = line.strip()
-                    if not line or line.startswith('#'): continue
-                    parts = line.split()
-                    if len(parts) != 3: raise ValueError(f"Invalid behavior for '{service_name}': '{line}'")
-                    
-                    artifacts = self._generate_bind_behavior_artifacts(service_name, *parts)
-                    all_config_lines.append(artifacts['config_line'])
-
-                    new_volume = artifacts.get('new_volume')
-                    if new_volume:
-                        zones_dir = os.path.join(contents_dir, self.GENERATED_ZONES_SUBDIR)
-                        os.makedirs(zones_dir, exist_ok=True)
-                        filepath = os.path.join(zones_dir, new_volume['filename'])
-                        with open(filepath, 'w') as f: f.write(new_volume['content'])
-                        logger.info(f"Generated behavior file for '{service_name}' at '{filepath}'")
-                        processed_volumes.append(f"./{service_name}/contents/{self.GENERATED_ZONES_SUBDIR}/{new_volume['filename']}:{new_volume['container_path']}")
-                
-                # 3. Write the generated zones config and append the include statement.
-                generated_zones_content = "\n".join(all_config_lines)
-                gen_zones_path = os.path.join(contents_dir, self.GENERATED_ZONES_FILENAME)
-                with open(gen_zones_path, 'w') as f:
-                    f.write(f"# Auto-generated by DNS Builder for '{service_name}'\n{generated_zones_content}\n")
-                
-                processed_volumes.append(f"./{service_name}/contents/{self.GENERATED_ZONES_FILENAME}:{self.GENERATED_ZONES_CONTAINER_PATH}")
-                
-                with open(main_conf_output_path, 'a') as f:
-                    f.write(f'\n# Auto-included by DNS Builder\ninclude "{self.GENERATED_ZONES_CONTAINER_PATH}";\n')
-                logger.info(f"Injected 'include' statement into '{os.path.basename(main_conf_output_path)}' for '{service_name}'.")
-
-            # 4. Assemble final service config for docker-compose.
-            service_config = {
-                'container_name': f"{self.config.name}-{service_name}",
-                'hostname': service_name, 'build': f"./{service_name}",
-                'networks': {'app_net': {'ipv4_address': self.service_ips[service_name]}}
-            }
-            if processed_volumes: service_config['volumes'] = processed_volumes
-            service_config['cap_add'] = build_conf.get('cap_add', ['NET_ADMIN']) or ['NET_ADMIN']
-            
-            for key, value in build_conf.items():
-                if key not in ['image', 'volumes', 'cap_add', 'address', 'ref', 'behavior']:
-                    service_config[key] = value
-            compose_config['services'][service_name] = service_config
+            # Step 1: Create directories and write Dockerfile
+            image_obj, contents_dir = self._setup_service_directory(service_name, build_conf)
+            # Step 2: Handle user-provided volumes
+            processed_volumes, main_conf_path = self._process_user_volumes(
+                service_name, build_conf, contents_dir
+            )
+            # Step 3: Handle behavior-driven configuration
+            self._process_behavior(
+                service_name, build_conf, image_obj, contents_dir, main_conf_path, processed_volumes
+            )
+            # Step 4: Assemble the final docker-compose service entry
+            service_ip = self.service_ips[service_name]
+            compose_config['services'][service_name] = self._assemble_compose_service(
+                service_name, build_conf, service_ip, processed_volumes
+            )
 
     def run(self):
         logger.info(f"Starting build for project '{self.config.name}'...")
