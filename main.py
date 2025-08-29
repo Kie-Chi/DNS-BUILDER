@@ -4,6 +4,7 @@ import os
 import logging
 from config import Config
 from build import Builder
+import traceback
 from logger import setup_logger # Import the setup function
 
 def main():
@@ -16,16 +17,17 @@ def main():
     logger = logging.getLogger(__name__)
 
     # config_file = 'kaminsky.yml'
-    config_file = "template.yml"
+    config_file = "bind_test.yml"
     
     logger.info(f"Reading configuration from {config_file}...")
     try:
         config = Config(config_file)
         builder = Builder(config)
         builder.run()
-    except (FileNotFoundError, ValueError, TypeError) as e:
+    except Exception as e:
         # Use the logger to report errors
         logger.critical(f"Build failed due to an error: {e}")
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import os
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set
 import copy
+from rules import Rule, Version
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,14 +22,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # These packages are required to compile the software. They change infrequently.
 RUN apt-get update && apt-get install -y --no-install-recommends {dep_packages}
 
+# if there is any Python-deps
+{py3_packages}
+
 # --- STAGE 2: Download and Compile Source ---
 WORKDIR /usr/src
-RUN wget --no-check-certificate https://downloads.isc.org/isc/bind9/{version}/bind-{version}.tar.xz && \\
-    tar -xvf bind-{version}.tar.xz
+RUN (wget --no-check-certificate https://downloads.isc.org/isc/bind9/{version}/bind-{version}.tar.xz && tar -xvf bind-{version}.tar.xz) || (wget --no-check-certificate https://downloads.isc.org/isc/bind9/{version}/bind-{version}.tar.gz && tar -xzvf bind-{version}.tar.gz)
 
 WORKDIR /usr/src/bind-{version}
 RUN ./configure --prefix=/usr/local --sysconfdir=/usr/local/etc --localstatedir=/usr/local/var && \\
-    make -j$(nproc) && \\
+    make && \\
     make install
 
 # --- STAGE 3: Final Configuration ---
@@ -64,6 +67,44 @@ USER named
 CMD ["/usr/local/sbin/named", "-g", "-c", "/usr/local/etc/named.conf"]
 """
 
+BIND_RULE_SETS = {
+    # Valid Versions
+    "[9.0.0, 9.0.1]": None, # means actual version range
+    "[9.1.0, 9.1.3]": None,
+    "[9.2.0, 9.2.9]": None,
+    "[9.3.0, 9.3.6]": None,
+    "[9.4.0, 9.4.3]": None,
+    "[9.5.0, 9.5.2]": None,
+    "[9.6.0, 9.6.3]": None,
+    "[9.7.0, 9.7.7]": None,
+    "[9.8.0, 9.8.8]": None,
+    "[9.9.0, 9.9.13]": None,
+    "[9.10.0, 9.10.8]": None,
+    "[9.11.0, 9.11.37]": None,
+    "[9.12.0, 9.12.4]": None,
+    "[9.13.0, 9.13.7]": None,
+    "[9.14.0, 9.14.12]": None,
+    "[9.15.0, 9.15.8]": None,
+    "[9.16.0, 9.16.45]": None,
+    "[9.17.0, 9.17.22]": None,
+    "[9.18.0, 9.18.18]": None,
+    "[9.19.0, 9.19.16]": None,
+    # Base Image Versions
+    "<= 9.10.4": "14.04",
+    "[9.10.5, 9.11.4]": "16.04",
+    "(9.11.4, 9.11.26]": "18.04",
+    "[9.12.0, 9.17.22]": "18.04",
+    "[9.11.27, 9.11.37]": "20.04",
+    "[9.18.0, 9.20.0)": "20.04",
+    # dependency
+    ">= 9.15.0": "libuv1-dev",
+    "[9.17.3, 9.17.10]": "libtool-bin",
+    "[9.19.12, 9.19.16]": "liburcu-dev",
+    ">= 9.11.0": "libnghttp2-dev",
+    "< 9.18.0": "python3-ply",
+    "9.13.4": "python3-dnspython"
+}
+
 class Image(ABC):
     # ... (rest of the class is the same) ...
     def __init__(self, config: Dict[str, Any]):
@@ -73,6 +114,7 @@ class Image(ABC):
         self.version: Optional[str] = config.get('version')
         self.util: List[str] = config.get('util', [])
         self.dependency: List[str] = config.get('dependency', [])
+        self.os, self.os_version = str(config.get('from', ":")).split(":")
 
     def write(self, directory: str):
         if not self.software or not self.version:
@@ -84,33 +126,140 @@ class Image(ABC):
             f.write(content)
         logger.info(f"Dockerfile for '{self.name}' written to {dockerfile_path}")
 
+    @abstractmethod
+    def _generate_deps(self, version: Version, ruleset: Dict[str, Optional[str]]):
+        pass
+
+    @abstractmethod
     def _generate_dockerfile_content(self) -> str:
         return ""
 
+    def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Merges a parent Image object's attributes with a child's config dict.
+        Child's config takes precedence. Lists are merged (union).
+        """
+        logger.debug(f"[Image] Merging parent '{self.name}' into child '{child_config['name']}'.")
+        merged = {
+            'from': f"{self.os}:{self.os_version}",
+            'name': child_config['name'], 'ref': child_config.get('ref'),
+            'software': self.software, 'version': self.version,
+            'dependency': copy.deepcopy(self.dependency), 
+            'util': copy.deepcopy(self.util),
+        }
+        merged['software'] = child_config.get('software', merged['software'])
+        merged['version'] = child_config.get('version', merged['version'])
+        
+        child_deps = set(child_config.get('dependency', []))
+        child_utils = set(child_config.get('util', []))
+        merged['dependency'] = sorted(list(set(merged['dependency']).union(child_deps)))
+        merged['util'] = sorted(list(set(merged['util']).union(child_utils)))
+        logger.debug(f"[Image] Merge result for '{child_config['name']}': {merged}")
+        return merged
+
 class BindImage(Image):
-    # ... (rest of the class is the same) ...
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         
-        self.base_image = 'ubuntu:20.04'
-
-        default_deps = {'build-essential', 'pkg-config', 'wget', 'xz-utils', 'libssl-dev', 'libperl-dev', 'libcap-dev', 'libuv1-dev', 'libnghttp2-dev'}
-        default_utils = {'vim', 'dnsutils', 'tcpdump', 'tmux'}
-        logger.debug(f"[{self.name}] Initializing BindImage with default deps: {default_deps} and utils: {default_utils}")
-
-        self.dependency = sorted(list(default_deps.union(set(self.dependency))))
-        self.util = sorted(list(default_utils.union(set(self.util))))
+        # without ref
+        if ":" not in self.name:
+            self.base_image = f"{self.os}:{self.os_version}"
+            self.default_deps = set()
+            self.default_py3_deps = set()
+            self.default_utils = set()
+        # with ref to preset Images
+        else:
+            self.base_image = 'ubuntu:20.04'
+            self.os = 'ubuntu'
+            self.os_version = ''
+            self.default_deps = {
+                'build-essential', # must
+                'pkg-config', # must
+                'wget', # must
+                'xz-utils', # must
+                'libssl-dev', # must
+                'perl', # must
+                'libcap-dev', # must
+                }
+            self.default_py3_deps = set() # default python package deps
+            self.default_utils = {'vim', 'dnsutils', 'tcpdump', 'tmux'}
+            self._generate_deps(Version(self.version), BIND_RULE_SETS)
+            logger.debug(f"[{self.name}] Initializing BindImage with default deps: {self.default_deps.union(self.default_py3_deps)} and utils: {self.default_utils}")
+        
+        self.py3_deps = [] # init python3 packages 
+        self._parse_deps() # get packages from original dependency
+        self.dependency = sorted(list(self.default_deps.union(set(self.dependency))))
+        self.util = sorted(list(self.default_utils.union(set(self.util))))
+        self.py3_deps = sorted(list(self.default_py3_deps.union(set(self.py3_deps))))
         logger.debug(f"[{self.name}] Final merged dependencies: {self.dependency}")
+        logger.debug(f"[{self.name}] Final merged python3-package: {self.py3_deps}")
         logger.debug(f"[{self.name}] Final merged utilities: {self.util}")
+
+    def _parse_deps(self):
+        self.py3_deps = [dep.split("-")[-1] for dep in self.dependency if "python3-" in dep]
+
+        try:
+            self.py3_deps.remove("pip")
+        except ValueError:
+            logger.debug(f"[{self.name}] fail to remove pip from py3_packages, pass")
+
+        if self.py3_deps:
+            self.dependency = [dep for dep in self.dependency if "python3-" not in dep]
+            self.dependency.append("python3")
+            self.dependency.append("python3-pip")
+
+    def _generate_deps(self, version, ruleset):
+        is_valid = False
+        os_version = None
+        for raw_rule, dep in ruleset.items():
+            if not dep:
+                # validate version 
+                if version in Rule(raw_rule):
+                    is_valid = True
+                    logger.debug(f"[{self.name}] has passed Validation Rule {raw_rule}")
+            elif "." in dep:
+                # base image version
+                if not os_version and version in Rule(raw_rule):
+                    os_version = dep
+            else:
+                # deps
+                if version in Rule(raw_rule):
+                    logger.debug(f"[{self.name}] Rule {raw_rule} meet, add dep {dep}")
+                    if "python" in dep:
+                        self.default_deps.add("python3")
+                        self.default_deps.add("python3-pip")
+                        self.default_py3_deps.add(dep.split('-')[-1])
+                    else:
+                        self.default_deps.add(dep)
+        if not os_version:
+            raise ValueError(f"[{self.name}] Failed OS Fetch Rule, Can't get a OS Version for {self.version}")
+        self.base_image = f"{self.os}:{os_version}"
+        self.os_version = os_version
+        if not is_valid:
+            raise ValueError(f"[{self.name}] Failed Validation Rule, Can't Recognize the Version {self.version}")
 
     def _generate_dockerfile_content(self) -> str:
         dep_packages = " ".join(self.dependency)
         util_packages = " ".join(self.util)
+        py3_packages = " ".join(self.py3_deps)
         if not util_packages:
             util_packages = "''"
         
+        if not py3_packages:
+            py3_packages = ""
+        else:
+            py3_packages = "RUN pip3 install " + py3_packages
+        
         logger.debug(f"[{self.name}] Generating Dockerfile content with version={self.version}, base_image={self.base_image}")
-        return BIND_DOCKERFILE_TEMPLATE.format(name=self.name, version=self.version, base_image=self.base_image, dep_packages=dep_packages, util_packages=util_packages)
+
+        return BIND_DOCKERFILE_TEMPLATE.format(name=self.name, version=self.version, base_image=self.base_image, dep_packages=dep_packages, py3_packages=py3_packages, util_packages=util_packages)
+    
+    def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
+        merged = super().merge(child_config)
+        merged['dependency'].extend([f"python3-{dep}" for dep in self.py3_deps])
+        logger.debug(f"[BindImage] Fully Merged Result : {merged}")
+        return merged
 
 def _instantiate_from_config(config: Dict[str, Any]) -> Image:
     """Helper function to create a concrete Image instance from a resolved config."""
@@ -153,49 +302,30 @@ class ImageFactory:
         
         logger.debug(f"Resolving image '{name}'...")
         self.resolving_stack.add(name)
-        config = self.configs[name]
-        ref = config.get('ref')
+        if ":" not in name:
+            config = self.configs[name]
+            ref = config.get('ref')
+        else:
+            # software:version preset Image
+            ref = None
+            config = {}
 
         if not ref:
-            logger.debug(f"Image '{name}' is a base image. Instantiating directly.")
-            final_image = _instantiate_from_config(config)
-        else:
-            if ':' in ref:
-                logger.debug(f"Image '{name}' references a pre-defined software: '{ref}'.")
-                sw, version = ref.split(':', 1)
-                parent_config = {'name': ref, 'software': sw, 'version': version}
-                parent_image = _instantiate_from_config(parent_config)
+            if ":" not in name:
+                logger.debug(f"Image '{name}' is a base image. Instantiating directly.")
+                final_image = _instantiate_from_config(config)
             else:
-                logger.debug(f"Image '{name}' references another image: '{ref}'. Resolving parent first.")
-                parent_image = self._resolve(ref)
-
-            merged_config = self._merge(parent_image, config)
+                logger.debug(f"Image '{name}' references a pre-defined software.")
+                sw, version = name.split(':', 1)
+                parent_config = {'name': name, 'software': sw, 'version': version}
+                final_image = _instantiate_from_config(parent_config)
+        else:
+            logger.debug(f"Image '{name}' references another image: '{ref}'. Resolving '{ref}' first.")
+            parent_image = self._resolve(ref)
+            merged_config = parent_image.merge(config)
             final_image = _instantiate_from_config(merged_config)
 
         self.resolving_stack.remove(name)
         self.resolved_images[name] = final_image
         logger.debug(f"Successfully resolved and cached image '{name}'.")
         return final_image
-
-    def _merge(self, parent: Image, child_config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Merges a parent Image object's attributes with a child's config dict.
-        Child's config takes precedence. Lists are merged (union).
-        """
-        logger.debug(f"Merging parent '{parent.name}' into child '{child_config['name']}'.")
-        merged = {
-            'name': child_config['name'], 'ref': child_config.get('ref'),
-            'software': parent.software, 'version': parent.version,
-            'dependency': copy.deepcopy(parent.dependency), 'util': copy.deepcopy(parent.util)
-        }
-
-        merged['software'] = child_config.get('software', merged['software'])
-        merged['version'] = child_config.get('version', merged['version'])
-        
-        child_deps = set(child_config.get('dependency', []))
-        child_utils = set(child_config.get('util', []))
-        
-        merged['dependency'] = sorted(list(set(merged['dependency']).union(child_deps)))
-        merged['util'] = sorted(list(set(merged['util']).union(child_utils)))
-        logger.debug(f"Merge result for '{child_config['name']}': {merged}")
-        return merged

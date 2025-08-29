@@ -56,9 +56,19 @@ class Config:
             if 'name' not in image_conf:
                 raise ValueError(f"Image definition at index {idx} is missing required 'name' field.")
             name = image_conf['name']
+            if ":" in name:
+                raise ValueError(f"Can't name a image with ':', {name}.")
             if name in images_by_name:
                 raise ValueError(f"Duplicate image name found: '{name}'.")
             images_by_name[name] = image_conf
+
+            if 'ref' in image_conf and image_conf['ref']:
+                if 'software' in image_conf or 'version' in image_conf or 'from' in image_conf:
+                    raise ValueError(f"Conflicting config found, with 'ref' and 'software/version/from'")
+            else:
+                if 'software' not in image_conf or 'versino' not in image_conf or 'from' not in image_conf:
+                    raise ValueError(f"Images without 'ref', should have 'software, version, from'")
+
         logger.debug(f"Found {len(images_by_name)} unique image definitions: {list(images_by_name.keys())}")
 
         # --- Cycle Detection ---
