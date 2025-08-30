@@ -7,7 +7,7 @@ import copy
 import logging
 import json
 from typing import Dict, Any, Optional, List, Tuple
-from behaviors import BehaviorFactory
+from behaviors import BehaviorFactory, IncluderFactory
 from config import Config
 from images import ImageFactory, Image
 
@@ -37,6 +37,7 @@ class Builder:
         
         self.predefined_builds = self._load_predefined_builds()
         self.behavior_factory = BehaviorFactory()
+        self.includer_factory = IncluderFactory()
 
     def _load_predefined_builds(self) -> Dict[str, Dict]:
         template_path = "configs/build_templates.json"
@@ -116,7 +117,7 @@ class Builder:
         image_obj.write(service_dir)
         return image_obj, contents_dir
 
-    def _process_user_volumes(self, service_name: str, build_conf: Dict, contents_dir: str) -> Tuple[List[str], Optional[str]]:
+    def _process_user_volumes(self, service_name: str, software: str, build_conf: Dict, contents_dir: str) -> Tuple[List[str], Optional[str]]:
         """Copies user-defined volumes and identifies the main configuration file."""
         processed_volumes: List[str] = []
         main_conf_output_path: Optional[str] = None
@@ -131,8 +132,20 @@ class Builder:
             shutil.copy(host_path, target_path)
             
             if container_path.endswith('.conf'):
-                main_conf_output_path = target_path
-                logger.debug(f"Identified '{host_path}' as main config for '{service_name}'.")
+                if not main_conf_output_path:
+                    # recognize main config file
+                    main_conf_output_path = target_path
+                    logger.debug(f"Identified '{host_path}' as main config for '{service_name}'.")
+                else:
+                    # try to include other config file
+                    logger.debug(f"Identified '{host_path}' as config to include in main conf.")
+                    contents = ""
+                    with open(main_conf_output_path, "r", encoding="utf-8") as main_conf:
+                        contents = main_conf.read()
+                    if contents.find(container_path) != -1:
+                        logger.debug(f"Find include line for {container_path}, auto-include skip.")
+                    else:
+                        self.includer_factory.create(container_path, software).write(main_conf_output_path)
 
             processed_volumes.append(f"./{service_name}/contents/{filename}:{container_path}")
         
@@ -180,7 +193,7 @@ class Builder:
         
         with open(main_conf_path, 'a') as f:
             f.write(f'\n# Auto-included by DNS Builder\ninclude "{self.GENERATED_ZONES_CONTAINER_PATH}";\n')
-        logger.info(f"Injected 'include' statement into '{os.path.basename(main_conf_path)}' for '{service_name}'.")
+        logger.debug(f"Injected 'include' statement into '{os.path.basename(main_conf_path)}' for '{service_name}'.")
 
     def _assemble_compose_service(self, service_name: str, build_conf: Dict, ip_address: str, volumes: List[str]) -> Dict:
         """Constructs the final service dictionary for docker-compose.yml."""
@@ -215,7 +228,7 @@ class Builder:
             image_obj, contents_dir = self._setup_service_directory(service_name, build_conf)
             # Step 2: Handle user-provided volumes
             processed_volumes, main_conf_path = self._process_user_volumes(
-                service_name, build_conf, contents_dir
+                service_name, image_obj.software, build_conf, contents_dir
             )
             # Step 3: Handle behavior-driven configuration
             self._process_behavior(

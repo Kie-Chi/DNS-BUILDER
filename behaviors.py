@@ -112,3 +112,41 @@ class BehaviorFactory:
             )
             
         return behavior_class(*args)
+    
+
+"""
+    describe the include line used for software
+"""
+class Includer(ABC):
+    
+    def __init__(self, config_line: str):
+        self.config_line = config_line
+
+    @abstractmethod
+    def write(self, conf:str):
+        pass
+
+
+class BindIncluder(Includer):
+    def write(self, conf):
+        with open(conf, "a", encoding="utf-8") as _conf:
+            _conf.write(f"# Auto-Include by DNS Builder\ninclude{self.config_line};\n")
+
+
+class IncluderFactory:
+    def __init__(self):
+        self._includers = {
+            "bind": BindIncluder
+            # other like unbound etc...
+        }
+
+    def create(self, path: str, software_type: str) -> Includer:
+
+        includer_class = self._includers.get(software_type)
+
+        if not includer_class:
+            raise NotImplementedError(
+                f"Includer '{software_type}' is not supported for software '{software_type}'."
+            )
+
+        return includer_class(path)

@@ -18,11 +18,11 @@ inet: 10.88.0.0/24 # the subnet used for the Environment
 images:
   # --- Image 1: Build from Source ---
   # This is a "base" image definition. Since 'ref' is not used, the builder
-  # will create a Dockerfile from scratch based on the software, version,
-  # and package lists provided.
+   # will create a Dockerfile from scratch based on the software, version,  # and package lists provided.
   - name: "bind-from-source" # the only flag to determine a image
-    software: "bind"    # REQUIRED!!!!!!
-    version: "9.18.0"   # REQUIRED!!!!!!
+    from: "ubuntu:20.04" # REQUIRED!!!!!!! Base Image
+    software: "bind"    # REQUIRED!!!!!! SoftWare
+    version: "9.18.0"   # REQUIRED!!!!!! Version of SoftWare
     dependency:         # Packages needed to COMPILE BIND.
       - build-essential
       - pkg-config
