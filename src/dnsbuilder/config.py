@@ -95,11 +95,14 @@ class ConfigModel(BaseModel):
         visited: Set[str] = set()
 
         def detect_image_cycle(name: str):
+            logger.debug(f"[Validation] Checking image '{name}' for cycles...")
             visiting.add(name)
             image_conf = images_by_name[name]
             
             if image_conf.ref and ':' not in image_conf.ref:
                 ref_name = image_conf.ref
+                # DEBUG: Log the reference being followed
+                logger.debug(f"[Validation] Image '{name}' has ref to '{ref_name}'. Following reference.")
                 if ref_name not in defined_image_names:
                     raise ValueError(f"Image '{name}' has a 'ref' to an undefined image: '{ref_name}'.")
                 if ref_name in visiting:
@@ -109,10 +112,13 @@ class ConfigModel(BaseModel):
             
             visiting.remove(name)
             visited.add(name)
+            logger.debug(f"[Validation] Image '{name}' passed cycle check.")
 
+        logger.debug("Starting image dependency and cycle validation...")
         for name in defined_image_names:
             if name not in visited:
                 detect_image_cycle(name)
+        logger.debug("Image validation completed successfully.")
 
         builds_by_name = self.builds
         defined_build_names = set(builds_by_name.keys())
@@ -125,11 +131,13 @@ class ConfigModel(BaseModel):
         visited.clear()
 
         def detect_build_cycle(name: str):
+            logger.debug(f"[Validation] Checking build '{name}' for cycles...")
             visiting.add(name)
             build_conf = builds_by_name[name]
             
             if build_conf.ref and ':' not in build_conf.ref:
                 ref_name = build_conf.ref
+                logger.debug(f"[Validation] Build '{name}' has ref to '{ref_name}'. Following reference.")
                 if ref_name not in defined_build_names:
                     raise ValueError(f"Build '{name}' has a 'ref' to an undefined build: '{ref_name}'.")
                 if ref_name in visiting:
@@ -139,10 +147,13 @@ class ConfigModel(BaseModel):
             
             visiting.remove(name)
             visited.add(name)
+            logger.debug(f"[Validation] Build '{name}' passed cycle check.")
 
+        logger.debug("Starting build dependency and cycle validation...")
         for name in defined_build_names:
             if name not in visited:
                 detect_build_cycle(name)
+        logger.debug("Build validation completed successfully.")
         
         return self
 
@@ -159,6 +170,7 @@ class Config:
         logger.info("Validating configuration structure with Pydantic...")
         try:
             self.model = ConfigModel.model_validate(raw_data)
+            logger.debug(f"Configuration model validated successfully: \n{self.model.model_dump_json(indent=2)}")
             logger.info("Configuration validation passed.")
         except ValidationError as e:
             raise ConfigError(f"Configuration validation failed:\n{e}")

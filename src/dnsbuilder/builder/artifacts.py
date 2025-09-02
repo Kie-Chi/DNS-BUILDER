@@ -1,6 +1,8 @@
-from typing import NamedTuple, Optional
+from typing import Optional, Literal, Final
+from pydantic import BaseModel
+from .. import constants
 
-class VolumeArtifact(NamedTuple):
+class VolumeArtifact(BaseModel):
     """
         Class represents a file that needs to be generated and mounted as a volume.
     """
@@ -8,10 +10,10 @@ class VolumeArtifact(NamedTuple):
     content: str
     container_path: str
 
-class BehaviorArtifact(NamedTuple):
+class BehaviorArtifact(BaseModel):
     """
         Class represents output of a behavior generation process.
     """
     config_line: str
     new_volume: Optional[VolumeArtifact] = None
-    section: str = 'toplevel'
+    section: constants.BehaviorSection = constants.BehaviorSection.TOPLEVEL
