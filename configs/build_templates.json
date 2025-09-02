@@ -33,5 +33,17 @@
                 "./configs/bind_forwarder_base.conf:/usr/local/etc/named.conf"
             ]
         }
+    },
+    "unbound": {
+        "recursor": {
+            "volumes": [
+                "./configs/unbound_recursor_base.conf:/usr/local/etc/unbound/unbound.conf"
+            ]
+        },
+        "forwarder": {
+            "volumes": [
+                "./configs/unbound_forwarder_base.conf:/usr/local/etc/unbound/unbound.conf"
+            ]
+        }
     }
 }

@@ -66,7 +66,7 @@ class Config:
                 if 'software' in image_conf or 'version' in image_conf or 'from' in image_conf:
                     raise ValueError(f"Conflicting config found, with 'ref' and 'software/version/from'")
             else:
-                if 'software' not in image_conf or 'versino' not in image_conf or 'from' not in image_conf:
+                if 'software' not in image_conf or 'version' not in image_conf or 'from' not in image_conf:
                     raise ValueError(f"Images without 'ref', should have 'software, version, from'")
 
         logger.debug(f"Found {len(images_by_name)} unique image definitions: {list(images_by_name.keys())}")

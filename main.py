@@ -17,7 +17,7 @@ def main():
     logger = logging.getLogger(__name__)
 
     # config_file = 'kaminsky.yml'
-    config_file = "bind_test.yml"
+    config_file = "unbound_test.yml"
     
     logger.info(f"Reading configuration from {config_file}...")
     try:

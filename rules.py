@@ -59,7 +59,7 @@ class Version:
         return self.version_str
 
     def __repr__(self):
-        return f"SemVer('{self.version_str}')"
+        return f"Version('{self.version_str}')"
 
     def __eq__(self, other):
         if not isinstance(other, Version):
@@ -100,8 +100,7 @@ class Rule:
         """
             parse a rule
         """
-        match = re.match(r"^(\[|\()\s*([\d\.]+)\s*,\s*([\d\.]+)\s*(\]|\))$", 
-                           self.rule_str, re.VERBOSE)
+        match = re.match(r"^(\[|\()\s*(.+?)\s*,\s*(.+?)\s*(\]|\))$", self.rule_str)
         
         if match:
             start_bracket, start_ver_str, end_ver_str, end_bracket = match.groups()

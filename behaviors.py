@@ -14,6 +14,7 @@ class BehaviorArtifacts(NamedTuple):
     """Represents the output of a behavior generation process."""
     config_line: str
     new_volume: Optional[VolumeArtifact] = None
+    section: str = 'toplevel'
 
 # --- Abstract Base Classes ---
 
@@ -67,6 +68,37 @@ class BindForwardBehavior(Behavior):
     def generate(self, service_name: str, target_ip: str) -> BehaviorArtifacts:
         config_line = f'zone "{self.zone}" {{ type forward; forwarders {{ {target_ip}; }}; }};'
         return BehaviorArtifacts(config_line=config_line)
+    
+# --- Unbound-Specific Behavior Implementations ---
+class UnboundHintBehavior(Behavior):
+    """Generates 'root-hints' configuration for Unbound."""
+    def generate(self, service_name: str, target_ip: str) -> BehaviorArtifacts:
+        filename = f"gen_{service_name}_root.hints"
+        container_path = f"/usr/local/etc/unbound/zones/{filename}"
+
+        file_content = (
+            f".\t3600000\tIN\tNS\t{self.target_name}.\n"
+            f"{self.target_name}.\t3600000\tIN\tA\t{target_ip}\n"
+        )
+        
+        config_line = f'root-hints: "{container_path}"'
+        
+        volume = VolumeArtifact(filename=filename, content=file_content, container_path=container_path)
+        # UPDATED: Specify that this config line belongs inside the 'server:' block.
+        return BehaviorArtifacts(config_line=config_line, new_volume=volume, section='server')
+
+class UnboundStubBehavior(Behavior):
+    """Generates 'stub-zone' configuration for Unbound."""
+    def generate(self, service_name: str, target_ip: str) -> BehaviorArtifacts:
+        config_line = f'stub-zone:\n\tname: "{self.zone}"\n\tstub-addr: {target_ip}'
+        return BehaviorArtifacts(config_line=config_line)
+
+class UnboundForwardBehavior(Behavior):
+    """Generates 'forward-zone' configuration for Unbound."""
+    def generate(self, service_name: str, target_ip: str) -> BehaviorArtifacts:
+        config_line = f'forward-zone:\n\tname: "{self.zone}"\n\tforward-addr: {target_ip}'
+        return BehaviorArtifacts(config_line=config_line)
+
 
 # --- Factory ---
 
@@ -81,7 +113,11 @@ class BehaviorFactory:
             ("bind", "stub"): BindStubBehavior,
             ("bind", "forward"): BindForwardBehavior,
             # To add Unbound, you would add entries here:
-            # ("unbound", "stub"): UnboundStubBehavior, 
+            ("unbound", "hint"): UnboundHintBehavior,
+            ("unbound", "stub"): UnboundStubBehavior,
+            ("unbound", "forward"): UnboundForwardBehavior,
+
+            # To add more SoftWare Implementations
         }
 
     def _parse_behavior(self, line: str) -> Tuple[str, List[str]]:
@@ -130,14 +166,20 @@ class Includer(ABC):
 class BindIncluder(Includer):
     def write(self, conf):
         with open(conf, "a", encoding="utf-8") as _conf:
-            _conf.write(f"# Auto-Include by DNS Builder\ninclude{self.config_line};\n")
+            _conf.write(f'# Auto-Include by DNS Builder\ninclude "{self.config_line}";\n')
+
+class UnboundIncluder(Includer):
+    def write(self, conf: str):
+        with open(conf, "a", encoding="utf-8") as _conf:
+            _conf.write(f'\n# Auto-Include by DNS Builder\ninclude: "{self.config_line}"\n')
 
 
 class IncluderFactory:
     def __init__(self):
         self._includers = {
-            "bind": BindIncluder
-            # other like unbound etc...
+            "bind": BindIncluder,
+            "unbound": UnboundIncluder,
+            # other like PowerDNS etc...
         }
 
     def create(self, path: str, software_type: str) -> Includer:
