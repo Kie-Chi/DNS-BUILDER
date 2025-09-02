@@ -5,6 +5,8 @@ description = "A tool to generate complex DNS test environments using Docker."
 dependencies = [
     "pyyaml",
     "colorlog",
+    "pydantic",
+    "pytest",
 ]
 
 [project.scripts]

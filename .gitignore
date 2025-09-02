@@ -7,6 +7,8 @@
 !users
 !src
 !src/**
+!tests
+!tests/**
 *.egg-info/
 !requirements.txt
 !README.md

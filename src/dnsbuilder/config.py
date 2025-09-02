@@ -1,22 +1,169 @@
 import yaml
 import logging
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Optional
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator, ConfigDict
+from pydantic.networks import IPv4Network
 from .exceptions import ConfigError, CircularDependencyError
-
 logger = logging.getLogger(__name__)
+class ImageModel(BaseModel):
+    """
+        Class Config-Validation Model describe `images`
+    """
+    name: str
+    ref: Optional[str] = None
+    software: Optional[str] = None
+    version: Optional[str] = None
+    from_os: Optional[str] = Field(None, alias='from') # 'from'
+    util: List[str] = Field(default_factory=list)
+    dependency: List[str] = Field(default_factory=list)
+
+    @field_validator('name')
+    @classmethod
+    def name_cannot_contain_colon(cls, v: str) -> str:
+        """ Validate image-name"""
+        if ":" in v:
+            raise ValueError(f"Can't name an image with ':', found in '{v}'.")
+        return v
+
+    @model_validator(mode='after')
+    def check_ref_or_base_image_fields(self) -> 'ImageModel':
+        """ Check ref exists or from/software/version is given"""
+        ref_present = self.ref is not None
+        base_fields_present = self.software is not None or self.version is not None or self.from_os is not None
+
+        if ref_present and base_fields_present:
+            raise ValueError("'ref' cannot be used with 'software', 'version', or 'from'.")
+        
+        if not ref_present and not (self.software and self.version and self.from_os):
+            raise ValueError("An image without 'ref' must have 'software', 'version', and 'from' keys.")
+        
+        return self
+
+class BuildModel(BaseModel):
+    """
+        Class Config-Validation Model describe `builds`
+    """
+    image: Optional[str] = None
+    ref: Optional[str] = None
+    address: Optional[str] = None
+    behavior: Optional[str] = None
+    volumes: List[str] = Field(default_factory=list)
+    cap_add: List[str] = Field(default_factory=list)
+    # other `docker-compose` config, we won't check
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode='after')
+    def check_image_or_ref_present(self) -> 'BuildModel':
+        """Check if Image is present"""
+        if self.image is None and self.ref is None:
+            raise ValueError("Build must have either an 'image' or a 'ref' key.")
+        
+        if self.ref and self.ref.startswith('std:') and self.image is None:
+            raise ValueError("A build using a 'std:' reference requires the 'image' key.")
+        
+        return self
+
+class ConfigModel(BaseModel):
+    """
+        Class Config-Validation Model desribe top-level of config
+    """
+    name: str
+    inet: IPv4Network
+    images: List[ImageModel]
+    builds: Dict[str, BuildModel]
+
+    @field_validator('images')
+    @classmethod
+    def image_names_must_be_unique(cls, v: List[ImageModel]) -> List[ImageModel]:
+        """Check duplicate image name"""
+        names = [img.name for img in v]
+        if len(names) != len(set(names)):
+            seen = set()
+            duplicates = {x for x in names if x in seen or seen.add(x)}
+            raise ValueError(f"Duplicate image names found: {', '.join(duplicates)}")
+        return v
+
+    @model_validator(mode='after')
+    def validate_cross_references_and_cycles(self) -> 'ConfigModel':
+        """Check if ref-chains a circle"""
+        images_by_name = {image.name: image for image in self.images}
+        defined_image_names = set(images_by_name.keys())
+        
+        visiting: Set[str] = set()
+        visited: Set[str] = set()
+
+        def detect_image_cycle(name: str):
+            visiting.add(name)
+            image_conf = images_by_name[name]
+            
+            if image_conf.ref and ':' not in image_conf.ref:
+                ref_name = image_conf.ref
+                if ref_name not in defined_image_names:
+                    raise ValueError(f"Image '{name}' has a 'ref' to an undefined image: '{ref_name}'.")
+                if ref_name in visiting:
+                    raise CircularDependencyError(f"Circular dependency in images: '{name}' -> '{ref_name}' forms a loop.")
+                if ref_name not in visited:
+                    detect_image_cycle(ref_name)
+            
+            visiting.remove(name)
+            visited.add(name)
+
+        for name in defined_image_names:
+            if name not in visited:
+                detect_image_cycle(name)
+
+        builds_by_name = self.builds
+        defined_build_names = set(builds_by_name.keys())
+
+        for build_name, build_conf in builds_by_name.items():
+            if build_conf.image and build_conf.image not in defined_image_names:
+                raise ValueError(f"Build '{build_name}' refers to undefined image: '{build_conf.image}'.")
+        
+        visiting.clear()
+        visited.clear()
+
+        def detect_build_cycle(name: str):
+            visiting.add(name)
+            build_conf = builds_by_name[name]
+            
+            if build_conf.ref and ':' not in build_conf.ref:
+                ref_name = build_conf.ref
+                if ref_name not in defined_build_names:
+                    raise ValueError(f"Build '{name}' has a 'ref' to an undefined build: '{ref_name}'.")
+                if ref_name in visiting:
+                    raise CircularDependencyError(f"Circular dependency in builds: '{name}' -> '{ref_name}' forms a loop.")
+                if ref_name not in visited:
+                    detect_build_cycle(ref_name)
+            
+            visiting.remove(name)
+            visited.add(name)
+
+        for name in defined_build_names:
+            if name not in visited:
+                detect_build_cycle(name)
+        
+        return self
 
 class Config:
     """
-    Loads and validates the config.yml file. 
-    It is the sole gatekeeper for configuration
+    Loads and validates the config.yml file using Pydantic models.
+    It is the sole gatekeeper for configuration.
     """
     def __init__(self, config_path: str):
         self.path = config_path
         logger.info(f"Loading configuration from '{self.path}'...")
-        self.data = self._load_config()
-        self._validate()
+        raw_data = self._load_raw_config()
+        
+        logger.info("Validating configuration structure with Pydantic...")
+        try:
+            self.model = ConfigModel.model_validate(raw_data)
+            logger.info("Configuration validation passed.")
+        except ValidationError as e:
+            raise ConfigError(f"Configuration validation failed:\n{e}")
+        except CircularDependencyError as e:
+            raise e
 
-    def _load_config(self) -> Dict[str, Any]:
+    def _load_raw_config(self) -> Dict[str, Any]:
         try:
             with open(self.path, 'r') as f:
                 config_data = yaml.safe_load(f)
@@ -29,152 +176,18 @@ class Config:
         except yaml.YAMLError as e:
             raise ConfigError(f"Error parsing YAML file: {e}")
 
-    def _validate(self):
-        """Main validation method."""
-        logger.info("Validating configuration structure...")
-        required_keys = ['name', 'inet', 'images', 'builds']
-        for key in required_keys:
-            if key not in self.data:
-                raise ConfigError(f"Missing required top-level key: '{key}'")
-        logger.debug("Top-level keys [name, inet, images, builds] are present.")
-        
-        defined_image_names = self._validate_images()
-        self._validate_builds(defined_image_names)
-        logger.info("Configuration format validation passed.")
-
-    def _validate_images(self) -> Set[str]:
-        """
-        Validates the 'images' section with new inheritance-aware rules.
-        Checks for unique names, valid references, and circular dependencies.
-        """
-        logger.debug("Starting 'images' section validation...")
-        if not isinstance(self.data['images'], list):
-             raise ConfigError("'images' key must contain a list.")
-        
-        images_by_name = {}
-        for idx, image_conf in enumerate(self.data['images']):
-            if not isinstance(image_conf, dict):
-                raise ConfigError(f"Item at index {idx} in 'images' must be a dictionary.")
-            if 'name' not in image_conf:
-                raise ConfigError(f"Image definition at index {idx} is missing required 'name' field.")
-            name = image_conf['name']
-            if ":" in name:
-                raise ConfigError(f"Can't name a image with ':', {name}.")
-            if name in images_by_name:
-                raise ConfigError(f"Duplicate image name found: '{name}'.")
-            images_by_name[name] = image_conf
-
-            if 'ref' in image_conf and image_conf['ref']:
-                if 'software' in image_conf or 'version' in image_conf or 'from' in image_conf:
-                    raise ConfigError(f"Conflicting config found for image '{name}': 'ref' cannot be used with 'software', 'version', or 'from'.")
-            else:
-                if 'software' not in image_conf or 'version' not in image_conf or 'from' not in image_conf:
-                    raise ConfigError(f"Image '{name}' (without 'ref') must have 'software', 'version', and 'from' keys.")
-
-        logger.debug(f"Found {len(images_by_name)} unique image definitions: {list(images_by_name.keys())}")
-
-        # --- Cycle Detection ---
-        visiting = set()
-        visited = set()
-
-        def detect_cycle(name):
-            logger.debug(f"Validating image '{name}'...")
-            visiting.add(name)
-            conf = images_by_name[name]
-            ref = conf.get('ref')
-            
-            ref_name = None
-            if ref and ':' not in ref:
-                ref_name = ref
-                logger.debug(f"Image '{name}' has a ref to another image: '{ref_name}'.")
-
-            if ref_name:
-                if ref_name not in images_by_name:
-                     raise ConfigError(f"Image '{name}' has a 'ref' to an undefined image: '{ref_name}'.")
-                if ref_name in visiting:
-                    raise CircularDependencyError(f"Circular dependency detected in images: '{name}' -> '{ref_name}' forms a loop.")
-                if ref_name not in visited:
-                    detect_cycle(ref_name)
-            
-            if not ref:
-                logger.debug(f"Image '{name}' is a base image (no ref). Checking for 'software' key.")
-                if 'software' not in conf:
-                    raise ConfigError(f"Image '{name}' is a base image (no 'ref') and must have a 'software' key.")
-
-            visiting.remove(name)
-            visited.add(name)
-            logger.debug(f"Validation for image '{name}' passed.")
-
-        for name in images_by_name:
-            if name not in visited:
-                detect_cycle(name)
-        
-        logger.debug("'images' section validation successful.")
-        return set(images_by_name.keys())
-
-
-    def _validate_builds(self, defined_image_names: Set[str]):
-        """
-        Validates the 'builds' section, now including reference and cycle checks.
-        """
-        logger.debug("Starting 'builds' section validation...")
-        builds_conf = self.data['builds']
-        if not isinstance(builds_conf, dict):
-             raise ConfigError("'builds' key must contain a dictionary.")
-
-        for build_name, build_conf in builds_conf.items():
-            if not isinstance(build_conf, dict):
-                raise ConfigError(f"Build definition for '{build_name}' must be a dictionary.")
-            
-            if 'image' not in build_conf and 'ref' not in build_conf:
-                raise ConfigError(f"Build '{build_name}' must have either an 'image' or a 'ref' key.")
-            
-            if 'image' in build_conf:
-                image_ref = build_conf['image']
-                logger.debug(f"Build '{build_name}' uses image '{image_ref}'.")
-                if image_ref not in defined_image_names:
-                    raise ConfigError(f"Build '{build_name}' refers to undefined image: '{image_ref}'.")
-
-            if 'behavior' in build_conf and not isinstance(build_conf['behavior'], str):
-                raise ConfigError(f"Build '{build_name}' has a 'behavior' key that is not a string.")
-
-            ref_val = build_conf.get('ref')
-            if ref_val and ref_val.startswith('std:') and 'image' not in build_conf:
-                raise ConfigError(f"Build '{build_name}' uses a 'std:' reference ('{ref_val}') but is missing the required 'image' key to determine the software type.")
-
-        visiting = set()
-        visited = set()
-        def detect_cycle(name):
-            logger.debug(f"Validating build '{name}'...")
-            visiting.add(name)
-            conf = builds_conf[name]
-            ref_name = conf.get('ref')
-
-            if ref_name and ":" not in ref_name:
-                logger.debug(f"Build '{name}' has a ref to another build: '{ref_name}'.")
-                if ref_name not in builds_conf:
-                    raise ConfigError(f"Build '{name}' has a 'ref' to an undefined build: '{ref_name}'.")
-                if ref_name in visiting:
-                    raise CircularDependencyError(f"Circular dependency detected in builds: '{name}' -> '{ref_name}' forms a loop.")
-                if ref_name not in visited:
-                    detect_cycle(ref_name)
-            
-            visiting.remove(name)
-            visited.add(name)
-            logger.debug(f"Validation for build '{name}' passed.")
-
-        for name in builds_conf:
-            if name not in visited:
-                detect_cycle(name)
-        
-        logger.debug("'builds' section validation successful.")
-
     @property
-    def name(self) -> str: return self.data['name']
+    def name(self) -> str: 
+        return self.model.name
     
     @property
-    def inet(self) -> str: return self.data['inet']
+    def inet(self) -> str: 
+        return str(self.model.inet)
+
     @property
-    def images_config(self) -> List[Dict[str, Any]]: return self.data['images']
+    def images_config(self) -> List[Dict[str, Any]]: 
+        return [img.model_dump(by_alias=True, exclude_none=True) for img in self.model.images]
+
     @property
-    def builds_config(self) -> Dict[str, Any]: return self.data['builds']
+    def builds_config(self) -> Dict[str, Any]: 
+        return {name: build.model_dump(exclude_none=True) for name, build in self.model.builds.items()}
