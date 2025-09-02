@@ -3,7 +3,7 @@ import logging
 from .config import Config
 from .builder.build import Builder
 from .utils.logger import setup_logger
-from .exceptions import DNSBuilderError
+from .exceptions import DNSBuilderError, ConfigError
 import traceback
 
 def main():
@@ -18,8 +18,13 @@ def main():
         config = Config(args.config_file)
         builder = Builder(config)
         builder.run()
+    except ConfigError as e:
+        logging.error(f"A configuration error occurred: {e}")
+        if args.debug:
+            traceback.print_exc()
+        exit(1)
     except DNSBuilderError as e:
-        logging.error(f"A configuration or build error occurred: {e}")
+        logging.error(f"A build error occurred: {e}")
         if args.debug:
             traceback.print_exc()
         exit(1)
