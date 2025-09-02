@@ -1,14 +1,14 @@
-# config.py
 import yaml
 import logging
 from typing import Dict, Any, List, Set
+from .exceptions import ConfigError, CircularDependencyError
 
 logger = logging.getLogger(__name__)
 
 class Config:
     """
-    Loads and validates the config.yml file. It is the sole gatekeeper for configuration,
-    ensuring all subsequent code deals with a valid and well-structured configuration.
+    Loads and validates the config.yml file. 
+    It is the sole gatekeeper for configuration
     """
     def __init__(self, config_path: str):
         self.path = config_path
@@ -20,12 +20,14 @@ class Config:
         try:
             with open(self.path, 'r') as f:
                 config_data = yaml.safe_load(f)
+                if not isinstance(config_data, dict):
+                    raise ConfigError("Configuration file must be a YAML document containing a dictionary.")
                 logger.debug(f"Successfully parsed YAML from '{self.path}'.")
                 return config_data
         except FileNotFoundError:
             raise FileNotFoundError(f"Configuration file not found at: {self.path}")
         except yaml.YAMLError as e:
-            raise ValueError(f"Error parsing YAML file: {e}")
+            raise ConfigError(f"Error parsing YAML file: {e}")
 
     def _validate(self):
         """Main validation method."""
@@ -33,7 +35,7 @@ class Config:
         required_keys = ['name', 'inet', 'images', 'builds']
         for key in required_keys:
             if key not in self.data:
-                raise ValueError(f"Missing required top-level key: '{key}'")
+                raise ConfigError(f"Missing required top-level key: '{key}'")
         logger.debug("Top-level keys [name, inet, images, builds] are present.")
         
         defined_image_names = self._validate_images()
@@ -47,27 +49,27 @@ class Config:
         """
         logger.debug("Starting 'images' section validation...")
         if not isinstance(self.data['images'], list):
-             raise TypeError("'images' key must contain a list.")
+             raise ConfigError("'images' key must contain a list.")
         
         images_by_name = {}
         for idx, image_conf in enumerate(self.data['images']):
             if not isinstance(image_conf, dict):
-                raise TypeError(f"Item at index {idx} in 'images' must be a dictionary.")
+                raise ConfigError(f"Item at index {idx} in 'images' must be a dictionary.")
             if 'name' not in image_conf:
-                raise ValueError(f"Image definition at index {idx} is missing required 'name' field.")
+                raise ConfigError(f"Image definition at index {idx} is missing required 'name' field.")
             name = image_conf['name']
             if ":" in name:
-                raise ValueError(f"Can't name a image with ':', {name}.")
+                raise ConfigError(f"Can't name a image with ':', {name}.")
             if name in images_by_name:
-                raise ValueError(f"Duplicate image name found: '{name}'.")
+                raise ConfigError(f"Duplicate image name found: '{name}'.")
             images_by_name[name] = image_conf
 
             if 'ref' in image_conf and image_conf['ref']:
                 if 'software' in image_conf or 'version' in image_conf or 'from' in image_conf:
-                    raise ValueError(f"Conflicting config found, with 'ref' and 'software/version/from'")
+                    raise ConfigError(f"Conflicting config found for image '{name}': 'ref' cannot be used with 'software', 'version', or 'from'.")
             else:
                 if 'software' not in image_conf or 'version' not in image_conf or 'from' not in image_conf:
-                    raise ValueError(f"Images without 'ref', should have 'software, version, from'")
+                    raise ConfigError(f"Image '{name}' (without 'ref') must have 'software', 'version', and 'from' keys.")
 
         logger.debug(f"Found {len(images_by_name)} unique image definitions: {list(images_by_name.keys())}")
 
@@ -88,16 +90,16 @@ class Config:
 
             if ref_name:
                 if ref_name not in images_by_name:
-                     raise ValueError(f"Image '{name}' has a 'ref' to an undefined image: '{ref_name}'.")
+                     raise ConfigError(f"Image '{name}' has a 'ref' to an undefined image: '{ref_name}'.")
                 if ref_name in visiting:
-                    raise ValueError(f"Circular dependency detected: '{name}' -> '{ref_name}' forms a loop.")
+                    raise CircularDependencyError(f"Circular dependency detected in images: '{name}' -> '{ref_name}' forms a loop.")
                 if ref_name not in visited:
                     detect_cycle(ref_name)
             
             if not ref:
                 logger.debug(f"Image '{name}' is a base image (no ref). Checking for 'software' key.")
                 if 'software' not in conf:
-                    raise ValueError(f"Image '{name}' is a base image (no 'ref') and must have a 'software' key.")
+                    raise ConfigError(f"Image '{name}' is a base image (no 'ref') and must have a 'software' key.")
 
             visiting.remove(name)
             visited.add(name)
@@ -118,28 +120,27 @@ class Config:
         logger.debug("Starting 'builds' section validation...")
         builds_conf = self.data['builds']
         if not isinstance(builds_conf, dict):
-             raise TypeError("'builds' key must contain a dictionary.")
+             raise ConfigError("'builds' key must contain a dictionary.")
 
         for build_name, build_conf in builds_conf.items():
             if not isinstance(build_conf, dict):
-                raise TypeError(f"Build definition for '{build_name}' must be a dictionary.")
+                raise ConfigError(f"Build definition for '{build_name}' must be a dictionary.")
             
             if 'image' not in build_conf and 'ref' not in build_conf:
-                raise ValueError(f"Build '{build_name}' must have either an 'image' or a 'ref' key.")
+                raise ConfigError(f"Build '{build_name}' must have either an 'image' or a 'ref' key.")
             
             if 'image' in build_conf:
                 image_ref = build_conf['image']
                 logger.debug(f"Build '{build_name}' uses image '{image_ref}'.")
                 if image_ref not in defined_image_names:
-                    raise ValueError(f"Build '{build_name}' refers to undefined image: '{image_ref}'.")
+                    raise ConfigError(f"Build '{build_name}' refers to undefined image: '{image_ref}'.")
 
             if 'behavior' in build_conf and not isinstance(build_conf['behavior'], str):
-                raise TypeError(f"Build '{build_name}' has a 'behavior' key that is not a string.")
+                raise ConfigError(f"Build '{build_name}' has a 'behavior' key that is not a string.")
 
-            # to allow for software type inference.
             ref_val = build_conf.get('ref')
             if ref_val and ref_val.startswith('std:') and 'image' not in build_conf:
-                raise ValueError(f"Build '{build_name}' uses a 'std:' reference ('{ref_val}') but is missing the required 'image' key to determine the software type.")
+                raise ConfigError(f"Build '{build_name}' uses a 'std:' reference ('{ref_val}') but is missing the required 'image' key to determine the software type.")
 
         visiting = set()
         visited = set()
@@ -152,9 +153,9 @@ class Config:
             if ref_name and ":" not in ref_name:
                 logger.debug(f"Build '{name}' has a ref to another build: '{ref_name}'.")
                 if ref_name not in builds_conf:
-                    raise ValueError(f"Build '{name}' has a 'ref' to an undefined build: '{ref_name}'.")
+                    raise ConfigError(f"Build '{name}' has a 'ref' to an undefined build: '{ref_name}'.")
                 if ref_name in visiting:
-                    raise ValueError(f"Circular dependency detected in builds: '{name}' -> '{ref_name}' forms a loop.")
+                    raise CircularDependencyError(f"Circular dependency detected in builds: '{name}' -> '{ref_name}' forms a loop.")
                 if ref_name not in visited:
                     detect_cycle(ref_name)
             
@@ -170,6 +171,7 @@ class Config:
 
     @property
     def name(self) -> str: return self.data['name']
+    
     @property
     def inet(self) -> str: return self.data['inet']
     @property

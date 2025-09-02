@@ -2,23 +2,30 @@
 import sys
 import os
 import logging
-from config import Config
-from build import Builder
+from argparse import ArgumentParser, Namespace
+from src.config.config import Config
+from src.build.build import Builder
 import traceback
-from logger import setup_logger # Import the setup function
+from src.log.logger import setup_logger # Import the setup function
+
+
+def parse_args() -> Namespace:
+    parser = ArgumentParser()
+    parser.add_argument(
+        "-c", "--config", type=str, required=True, help="config file path"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="if set, log verbose"
+    )
+    return parser.parse_args()
 
 def main():
     """Main function to run the DNS builder."""
-    
-    is_debug_mode = os.getenv("DNSBUILDER_DEBUG", "0").lower() in ("1", "true", "yes")
+    args = parse_args()
+    config_file = args.config
+    is_debug_mode = True if args.verbose else False
     setup_logger(debug=is_debug_mode)
-    
-    # Get a logger for this module
     logger = logging.getLogger(__name__)
-
-    # config_file = 'kaminsky.yml'
-    config_file = "unbound_test.yml"
-    
     logger.info(f"Reading configuration from {config_file}...")
     try:
         config = Config(config_file)

@@ -4,8 +4,11 @@
 *.md
 *.yml
 !.gitignore
-!configs
 !users
+!src
+!src/**
+*.egg-info/
 !requirements.txt
 !README.md
 !template.yml
+**/__pycache__

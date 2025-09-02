@@ -1,0 +1,17 @@
+[project]
+name = "dnsbuilder"
+version = "0.1.0"
+description = "A tool to generate complex DNS test environments using Docker."
+dependencies = [
+    "pyyaml",
+    "colorlog",
+]
+
+[project.scripts]
+dnsbuilder = "dnsbuilder.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dnsbuilder = ["resources/**"]

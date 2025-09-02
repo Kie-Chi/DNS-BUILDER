@@ -1,0 +1,39 @@
+import argparse
+import logging
+from .config import Config
+from .builder.build import Builder
+from .utils.logger import setup_logger
+from .exceptions import DNSBuilderError
+import traceback
+
+def main():
+    parser = argparse.ArgumentParser(description="DNS Builder CLI")
+    parser.add_argument("config_file", help="Path to the config.yml file.")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
+    args = parser.parse_args()
+
+    setup_logger(debug=args.debug)
+    
+    try:
+        config = Config(args.config_file)
+        builder = Builder(config)
+        builder.run()
+    except DNSBuilderError as e:
+        logging.error(f"A configuration or build error occurred: {e}")
+        if args.debug:
+            traceback.print_exc()
+        exit(1)
+    except FileNotFoundError as e:
+        logging.error(f"A required file was not found: {e}")
+        if args.debug:
+            traceback.print_exc()
+        exit(1)
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        if args.debug:
+            traceback.print_exc()
+        exit(1)
+
+
+if __name__ == "__main__":
+    main()
