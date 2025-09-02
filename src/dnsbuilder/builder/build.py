@@ -9,6 +9,7 @@ import json
 from typing import Dict, Any, Optional, List, Tuple
 from importlib import resources
 
+from .. import constants
 from ..config import Config
 from .behaviors import BehaviorFactory
 from .includers import IncluderFactory
@@ -19,9 +20,6 @@ from ..exceptions import BuildError, VolumeNotFoundError, ConfigError, CircularD
 logger = logging.getLogger(__name__)
 
 class Builder:
-    GENERATED_ZONES_FILENAME = "generated_zones.conf"
-    GENERATED_ZONES_SUBDIR = "zones"
-    RESOURCE_PREFIX = "resource:"
 
     def __init__(self, config: Config):
         self.config = config
@@ -44,7 +42,7 @@ class Builder:
     @property
     def GENERATED_ZONES_CONTAINER_PATH(self) -> str:
         # This can be customized per-software if needed in the future
-        return f"/usr/local/etc/{self.GENERATED_ZONES_FILENAME}"
+        return f"/usr/local/etc/{constants.GENERATED_ZONES_FILENAME}"
 
     def _load_predefined_builds(self) -> Dict[str, Dict]:
         logger.debug("Attempting to load build templates...")
@@ -87,7 +85,7 @@ class Builder:
                 # Predefined build reference (e.g., "std:recursor" or "bind:recursor")
                 software_type, role = None, None
                 predefined_ref = ref
-                if ref.startswith('std:'):
+                if ref.startswith(constants.STD_BUILD_PREFIX):
                     role = ref.split(':', 1)[1]
                     image_name = service_conf.get('image')
                     if not image_name: raise ConfigError(f"Ref '{ref}' requires 'image' key for service '{service_name}'.")
@@ -152,8 +150,8 @@ class Builder:
             filename = Path(container_path).name
             target_path = contents_dir / filename
 
-            if host_path_str.startswith(self.RESOURCE_PREFIX):
-                resource_name = host_path_str[len(self.RESOURCE_PREFIX):]
+            if host_path_str.startswith(constants.RESOURCE_PREFIX):
+                resource_name = host_path_str[len(constants.RESOURCE_PREFIX):]
                 try:
                     content = resources.files('dnsbuilder.resources.configs').joinpath(resource_name).read_bytes()
                     target_path.write_bytes(content)
@@ -193,7 +191,10 @@ class Builder:
         if not image_obj.software:
             raise BuildError(f"Cannot process 'behavior' for service '{service_name}' as its image '{image_obj.name}' has no 'software' type defined.")
 
-        all_config_lines: Dict[str, List[str]] = {'server': [], 'toplevel': []}
+        all_config_lines: Dict[str, List[str]] = {
+            constants.BEHAVIOR_SECTION_SERVER: [], 
+            constants.BEHAVIOR_SECTION_TOPLEVEL: []
+        }
 
         for line in behavior_str.strip().split('\n'):
             line = line.strip()
@@ -209,36 +210,36 @@ class Builder:
 
             if artifacts.new_volume:
                 vol = artifacts.new_volume
-                zones_dir = contents_dir / self.GENERATED_ZONES_SUBDIR
+                zones_dir = contents_dir / constants.GENERATED_ZONES_SUBDIR
                 zones_dir.mkdir(exist_ok=True)
                 filepath = zones_dir / vol.filename
                 filepath.write_text(vol.content)
                 logger.info(f"Generated behavior file for '{service_name}' at '{filepath}'")
-                volumes.append(f"./{service_name}/contents/{self.GENERATED_ZONES_SUBDIR}/{vol.filename}:{vol.container_path}")
+                volumes.append(f"./{service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{vol.filename}:{vol.container_path}")
         
         generated_zones_content = ""
-        if image_obj.software == "unbound":
-            if all_config_lines.get('server'):
+        if image_obj.software == constants.SOFTWARE_UNBOUND:
+            if all_config_lines.get(constants.BEHAVIOR_SECTION_SERVER):
                 generated_zones_content += "server:\n"
-                for config_line in all_config_lines['server']:
+                for config_line in all_config_lines[constants.BEHAVIOR_SECTION_SERVER]:
                     indented_lines = "\n".join([f"\t{sub_line}" for sub_line in config_line.split('\n')])
                     generated_zones_content += f"{indented_lines}\n"
             
-            if all_config_lines.get('toplevel'):
-                generated_zones_content += "\n" + "\n\n".join(all_config_lines['toplevel'])
+            if all_config_lines.get(constants.BEHAVIOR_SECTION_TOPLEVEL):
+                generated_zones_content += "\n" + "\n\n".join(all_config_lines[constants.BEHAVIOR_SECTION_TOPLEVEL])
         else: 
-            all_lines = all_config_lines.get('toplevel', []) + all_config_lines.get('server', [])
+            all_lines = all_config_lines.get(constants.BEHAVIOR_SECTION_TOPLEVEL, []) + all_config_lines.get(constants.BEHAVIOR_SECTION_SERVER, [])
             generated_zones_content = "\n".join(all_lines)
 
         if not generated_zones_content.strip():
             return
 
-        gen_zones_path = contents_dir / self.GENERATED_ZONES_FILENAME
+        gen_zones_path = contents_dir / constants.GENERATED_ZONES_FILENAME
         gen_zones_path.write_text(f"# Auto-generated by DNS Builder for '{service_name}'\n\n{generated_zones_content}\n")
         
-        volumes.append(f"./{service_name}/contents/{self.GENERATED_ZONES_FILENAME}:{self.GENERATED_ZONES_CONTAINER_PATH}")
+        volumes.append(f"./{service_name}/contents/{constants.GENERATED_ZONES_FILENAME}:{constants.GENERATED_ZONES_SUBDIR}")
         
-        includer = self.includer_factory.create(self.GENERATED_ZONES_CONTAINER_PATH, image_obj.software)
+        includer = self.includer_factory.create(constants.GENERATED_ZONES_SUBDIR, image_obj.software)
         includer.write(str(main_conf_path))
         logger.debug(f"Injected include statement into '{main_conf_path.name}' for '{service_name}'.")
 
@@ -247,15 +248,15 @@ class Builder:
         service_config = {
             'container_name': f"{self.config.name}-{service_name}",
             'hostname': service_name, 'build': f"./{service_name}",
-            'networks': {'app_net': {'ipv4_address': ip_address}}
+            'networks': {constants.DEFAULT_NETWORK_NAME: {'ipv4_address': ip_address}}
         }
         if volumes:
             service_config['volumes'] = sorted(list(set(volumes)))
         
-        service_config['cap_add'] = build_conf.get('cap_add', ['NET_ADMIN']) or ['NET_ADMIN']
+        service_config['cap_add'] = build_conf.get('cap_add', constants.DEFAULT_CAP_ADD) or constants.DEFAULT_CAP_ADD
         
         for key, value in build_conf.items():
-            if key not in ['image', 'volumes', 'cap_add', 'address', 'ref', 'behavior']:
+            if key not in constants.RESERVED_BUILD_KEYS:
                 service_config[key] = value
         
         return service_config
@@ -295,10 +296,10 @@ class Builder:
 
     def _generate_compose_structure(self) -> Dict:
         return {"version": "3.9", "name": self.config.name, "services": {},
-                "networks": {"app_net": {"driver": "bridge", "ipam": {"config": [{"subnet": self.config.inet}]}}}}
+                "networks": {constants.DEFAULT_NETWORK_NAME: {"driver": "bridge", "ipam": {"config": [{"subnet": self.config.inet}]}}}}
     
     def _write_compose_file(self, compose_config: Dict):
-        file_path = self.output_dir / "docker-compose.yml"
+        file_path = self.output_dir / constants.DOCKER_COMPOSE_FILENAME
         with file_path.open('w') as f:
             yaml.dump(compose_config, f, default_flow_style=False, sort_keys=False)
-        logger.info(f"docker-compose.yml successfully generated at {file_path}")
+        logger.info(f"{constants.DOCKER_COMPOSE_FILENAME} successfully generated at {file_path}")

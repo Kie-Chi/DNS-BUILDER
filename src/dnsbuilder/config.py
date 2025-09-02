@@ -4,6 +4,8 @@ from typing import Dict, Any, List, Set, Optional
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator, ConfigDict
 from pydantic.networks import IPv4Network
 from .exceptions import ConfigError, CircularDependencyError
+from . import constants
+
 logger = logging.getLogger(__name__)
 class ImageModel(BaseModel):
     """
@@ -58,8 +60,8 @@ class BuildModel(BaseModel):
         if self.image is None and self.ref is None:
             raise ValueError("Build must have either an 'image' or a 'ref' key.")
         
-        if self.ref and self.ref.startswith('std:') and self.image is None:
-            raise ValueError("A build using a 'std:' reference requires the 'image' key.")
+        if self.ref and self.ref.startswith(constants.STD_BUILD_PREFIX) and self.image is None:
+            raise ValueError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key.")
         
         return self
 
