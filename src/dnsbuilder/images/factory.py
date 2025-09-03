@@ -3,6 +3,7 @@ import copy
 from .image import Image
 from .bind import BindImage
 from .unbound import UnboundImage
+from .python import PythonImage
 from ..exceptions import ImageError
 import logging
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class ImageFactory:
         self.software_map: Dict[str, Type[Image]] = {
             "bind": BindImage,
             "unbound": UnboundImage,
+            "python": PythonImage,
         }
         logger.debug("ImageFactory initialized.")
 

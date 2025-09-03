@@ -53,7 +53,7 @@ class Image(ABC):
         
         defaults = IMAGE_DEFAULTS.get(self.software)
         if not defaults:
-            logger.warning(f"No defaults found for software '{self.software}' in image_defaults.json")
+            logger.warning(f"No defaults found for software '{self.software}' in defaults")
             return
 
         # Load defaults only if this is a preset image

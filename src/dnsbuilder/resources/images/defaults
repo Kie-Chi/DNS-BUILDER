@@ -35,5 +35,17 @@
             "libuv1-dev",
             "libcap-dev"
         ]
+    },
+    "python": {
+        "default_deps": [],
+        "default_utils": [
+            "vim",
+            "dnsutils",
+            "tcpdump",
+            "tmux",
+            "cmake",
+            "libuv1-dev",
+            "libcap-dev"
+        ]
     }
 }
