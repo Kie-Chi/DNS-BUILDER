@@ -7,6 +7,7 @@ from typing import Dict, Optional
 from importlib import resources
 
 from .map import Mapper, GraphGenerator
+from .substitute import VariableSubstitutor
 from .resolve import Resolver
 from .net import NetworkManager
 from .service import ServiceHandler
@@ -43,7 +44,12 @@ class Builder:
         logger.debug("[Builder] Resolution")
         resolver = Resolver(initial_context.config, initial_context.images, self.predefined_builds)
         resolved_builds = resolver.resolve_all()
-        resolution_context = initial_context.model_copy(update={'resolved_builds': resolved_builds})
+        buildable_services = {
+            name: conf for name, conf in resolved_builds.items() 
+            if conf.get('build', True)
+        }
+        logger.info(f"Found {len(buildable_services)} buildable services.")
+        resolution_context = initial_context.model_copy(update={'resolved_builds': buildable_services})
         logger.debug("[Builder] Build resolution complete.")
 
         # Network Planning
@@ -52,6 +58,19 @@ class Builder:
         service_ips = network_manager.plan_network(resolution_context.resolved_builds)
         final_context = resolution_context.model_copy(update={'service_ips': service_ips})
         logger.debug("[Builder] Network planning complete.")
+
+        logger.debug("[Builder] Variable Substitution")
+        substitutor = VariableSubstitutor(
+            config=self.config, 
+            images=initial_context.images, 
+            service_ips=service_ips
+        )
+        substituted_builds = substitutor.run(resolution_context.resolved_builds)
+        
+        final_context = resolution_context.model_copy(
+            update={'resolved_builds': substituted_builds, 'service_ips': service_ips}
+        )
+        logger.debug("[Builder] Variable substitution complete.")
 
         # Topology Mapping
         logger.debug("[Builder] Topology Mapping")

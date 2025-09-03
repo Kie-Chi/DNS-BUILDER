@@ -3,6 +3,8 @@ import logging
 from typing import Dict, Any, List, Set, Optional
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator, ConfigDict
 from pydantic.networks import IPv4Network
+
+from .preprocess import Preprocessor
 from .exceptions import ConfigError, CircularDependencyError
 from . import constants
 
@@ -49,6 +51,7 @@ class BuildModel(BaseModel):
     ref: Optional[str] = None
     address: Optional[str] = None
     behavior: Optional[str] = None
+    build: bool = True
     volumes: List[str] = Field(default_factory=list)
     cap_add: List[str] = Field(default_factory=list)
     # other `docker-compose` config, we won't check
@@ -166,10 +169,14 @@ class Config:
         self.path = config_path
         logger.info(f"Loading configuration from '{self.path}'...")
         raw_data = self._load_raw_config()
+
+        # preprocess Python-like builds
+        preprocessor = Preprocessor(raw_data)
+        processed_data = preprocessor.run()
         
         logger.info("Validating configuration structure with Pydantic...")
         try:
-            self.model = ConfigModel.model_validate(raw_data)
+            self.model = ConfigModel.model_validate(processed_data)
             logger.debug(f"Configuration model validated successfully: \n{self.model.model_dump_json(indent=2)}")
             logger.info("Configuration validation passed.")
         except ValidationError as e:

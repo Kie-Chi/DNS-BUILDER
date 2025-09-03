@@ -25,4 +25,4 @@ DEFAULT_NETWORK_NAME = "app_net"
 DEFAULT_DEVICE_NAME = "bridge"
 
 # --- Reserved Keys in Build Configs ---
-RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior'}
+RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build'}
