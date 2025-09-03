@@ -10,13 +10,17 @@ def main():
     parser = argparse.ArgumentParser(description="DNS Builder CLI")
     parser.add_argument("config_file", help="Path to the config.yml file.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
+    parser.add_argument(
+        "-g", "--graph", 
+        help="Generate a DOT file for the network topology graph and save it to the specified path."
+    )
     args = parser.parse_args()
 
     setup_logger(debug=args.debug)
     
     try:
         config = Config(args.config_file)
-        builder = Builder(config)
+        builder = Builder(config, graph_output=args.graph)
         builder.run()
     except ConfigError as e:
         logging.error(f"A configuration error occurred: {e}")

@@ -3,6 +3,8 @@
 *.txt
 *.md
 *.yml
+*.dot
+*.py
 !.gitignore
 !users
 !src

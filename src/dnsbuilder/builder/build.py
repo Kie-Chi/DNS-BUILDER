@@ -3,9 +3,10 @@ import shutil
 import yaml
 import logging
 import json
-from typing import Dict
+from typing import Dict, Optional
 from importlib import resources
 
+from .map import Mapper, GraphGenerator
 from .resolve import Resolver
 from .net import NetworkManager
 from .service import ServiceHandler
@@ -17,8 +18,9 @@ from ..images.factory import ImageFactory
 logger = logging.getLogger(__name__)
 
 class Builder:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, graph_output: Optional[str] = None):
         self.config = config
+        self.graph_output = graph_output
         self.output_dir = Path("output") / self.config.name
         self.predefined_builds = self._load_predefined_builds()
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")
@@ -50,6 +52,18 @@ class Builder:
         service_ips = network_manager.plan_network(resolution_context.resolved_builds)
         final_context = resolution_context.model_copy(update={'service_ips': service_ips})
         logger.debug("[Builder] Network planning complete.")
+
+        # Topology Mapping
+        logger.debug("[Builder] Topology Mapping")
+        mapper = Mapper(final_context.resolved_builds, final_context.service_ips)
+        topology = mapper.map_topology()
+        if self.graph_output:
+            if GraphGenerator is None:
+                pass # nothing happened
+            else:
+                graph_gen = GraphGenerator(topology, final_context.service_ips, self.config.name)
+                graph_gen.generate_dot_file(self.graph_output)
+        logger.debug("[Builder] Topology mapping complete.")
 
         # Service Generation
         logger.debug("[Builder] Service Generation")
