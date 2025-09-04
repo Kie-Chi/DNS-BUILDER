@@ -1,4 +1,20 @@
 {
+    "_std": {
+        "monitor": {
+            "cap_add": [
+                "NET_ADMIN",
+                "NET_RAW"
+            ],
+            "network_mode": "host",
+            "environment": {
+                "ENABLE_PROMETHEUS_EXPORTER": "true"
+            },
+            "expose": [
+                "53",
+                "9153"
+            ]
+        }
+    },
     "bind": {
         "recursor": {
             "command": [

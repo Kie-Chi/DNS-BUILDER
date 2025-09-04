@@ -51,6 +51,7 @@ class BuildModel(BaseModel):
     ref: Optional[str] = None
     address: Optional[str] = None
     behavior: Optional[str] = None
+    mixins: List[str] = Field(default_factory=list)
     build: bool = True
     volumes: List[str] = Field(default_factory=list)
     cap_add: List[str] = Field(default_factory=list)
@@ -66,6 +67,8 @@ class BuildModel(BaseModel):
         if self.ref and self.ref.startswith(constants.STD_BUILD_PREFIX) and self.image is None:
             raise ValueError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key.")
         
+        if not self.build and self.image is None:
+            raise ValueError("A service with 'build: false' must specify an 'image' key for the pre-built image.")
         return self
 
 class ConfigModel(BaseModel):
@@ -127,7 +130,7 @@ class ConfigModel(BaseModel):
         defined_build_names = set(builds_by_name.keys())
 
         for build_name, build_conf in builds_by_name.items():
-            if build_conf.image and build_conf.image not in defined_image_names:
+            if build_conf.build and build_conf.image and build_conf.image not in defined_image_names:
                 raise ValueError(f"Build '{build_name}' refers to undefined image: '{build_conf.image}'.")
         
         visiting.clear()

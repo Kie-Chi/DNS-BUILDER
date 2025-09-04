@@ -45,6 +45,7 @@ class VariableSubstitutor:
             "address": self.service_ips.get(service_name, ""),
             # Project-level
             "project.name": self.config.name,
+            "project.inet": self.config.inet,
         }
 
         # Image-level

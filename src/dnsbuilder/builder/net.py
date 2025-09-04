@@ -28,6 +28,9 @@ class NetworkManager:
                 continue
             
             ip_address = build_conf.get('address')
+            if ip_address == "":
+                logger.debug(f"[Network] Service '{service_name}' explicitly requested no static IP.")
+                continue
             if ip_address:
                 logger.debug(f"[Network] Service '{service_name}' requested static IP: {ip_address}.")
                 if ipaddress.ip_address(ip_address) not in self.network:

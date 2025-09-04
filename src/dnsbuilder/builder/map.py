@@ -80,7 +80,7 @@ class Mapper:
             return
 
         for source, targets in topology_data.items():
-            source_ip = self.service_ips.get(source, "N/A (abstract build)")
+            source_ip = self.service_ips.get(source, "Dynamic/IP")
             logger.info(f"  - Service: {source} ({source_ip})")
             for target in targets:
                 # Check if the target is another service we know or an external entity

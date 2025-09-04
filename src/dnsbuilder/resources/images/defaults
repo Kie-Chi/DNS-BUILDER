@@ -45,7 +45,9 @@
             "tmux",
             "cmake",
             "libuv1-dev",
-            "libcap-dev"
+            "libcap-dev",
+            "python3-dnslib",
+            "python3-scapy"
         ]
     }
 }

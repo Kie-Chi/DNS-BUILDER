@@ -46,6 +46,8 @@ class Resolver:
         ref = service_conf.get('ref')
         parent_conf = {}
         
+        parent_conf = {}
+        # Merge Ref
         if ref:
             logger.debug(f"[Resolver] Service '{service_name}' has ref: '{ref}'.")
             if ':' in ref:
@@ -68,14 +70,30 @@ class Resolver:
                 parent_conf = self.predefined_builds[software_type][role]
                 logger.debug(f"[Resolver] Loaded parent config from predefined build '{predefined_ref}'.")
             else:
-                # Reference to another user-defined build
                 logger.debug(f"[Resolver] Following reference to user-defined build '{ref}'...")
                 parent_conf = self._resolve_service(ref)
                 logger.debug(f"[Resolver] Parent '{ref}' resolved.")
 
-        logger.debug(f"[Resolver] Merging parent config with child config for '{service_name}'.")
+        # MERGE MIXINS
+        mixins = service_conf.get('mixins', [])
+        if mixins:
+            logger.debug(f"[Resolver] Service '{service_name}' has mixins: {mixins}. Merging them.")
+            for mixin_ref in mixins:
+                if mixin_ref.startswith(constants.STD_BUILD_PREFIX):
+                    mixin_name = mixin_ref.split(':', 1)[1]
+                    mixin_conf = self.predefined_builds.get('_std', {}).get(mixin_name)
+                    if not mixin_conf:
+                        raise BuildError(f"Unknown standard mixin '{mixin_ref}' for service '{service_name}'.")
+                    
+                    logger.debug(f"[Resolver] Merging mixin '{mixin_ref}' into '{service_name}'.")
+                    parent_conf = self._merge_configs(parent_conf, mixin_conf)
+                else:
+                    raise BuildError(f"Unsupported mixin format '{mixin_ref}'.")
+
+        logger.debug(f"[Resolver] Merging parent/mixin config with child config for '{service_name}'.")
         final_conf = self._merge_configs(parent_conf, service_conf)
         if 'ref' in final_conf: del final_conf['ref']
+        if 'mixins' in final_conf: del final_conf['mixins']
         
         self.resolving_stack.remove(service_name)
         self.resolved_builds[service_name] = final_conf
@@ -90,6 +108,9 @@ class Resolver:
                 original_len = len(merged[key])
                 merged[key].extend([item for item in value if item not in merged_set])
                 logger.debug(f"[Merge] Merged list for key '{key}': {original_len} parent items, {len(value)} child items -> {len(merged[key])} total unique items.")
+            elif key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                 logger.debug(f"[Merge] Recursively merging dictionary for key '{key}'.")
+                 merged[key] = self._merge_configs(merged[key], value)
             else:
                 if key in merged:
                     logger.debug(f"[Merge] Overriding key '{key}': from '{merged[key]}' to '{value}'.")

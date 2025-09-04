@@ -20,12 +20,13 @@ class ServiceHandler:
         self.context = context
         self.build_conf = context.resolved_builds[service_name]
         self.image_obj = context.images[self.build_conf['image']]
-        self.ip = context.service_ips[service_name]
+        self.ip = context.service_ips.get(service_name)
         
         self.service_dir = self.context.output_dir / self.service_name
         self.contents_dir = self.service_dir / 'contents'
         self.processed_volumes: List[str] = []
-        logger.debug(f"ServiceHandler initialized for '{self.service_name}' with IP '{self.ip}' and image '{self.image_obj.name}'.")
+        ip_display = f"with IP '{self.ip}'" if self.ip else "with dynamic IP"
+        logger.debug(f"ServiceHandler initialized for '{self.service_name}' {ip_display} and image '{self.image_obj.name}'.")
 
     def generate_all(self) -> Dict[str, Any]:
         """Orchestrates artifact generation and returns the docker-compose service block."""
@@ -171,10 +172,17 @@ class ServiceHandler:
         service_config = {
             'container_name': f"{self.context.config.name}-{self.service_name}",
             'hostname': self.service_name, 'build': f"./{self.service_name}",
-            'networks': {constants.DEFAULT_NETWORK_NAME: {'ipv4_address': self.ip}}
         }
+        if self.ip:
+            service_config['networks'] = {
+                constants.DEFAULT_NETWORK_NAME: {'ipv4_address': self.ip}
+            }
+        else:
+            # with no `networks`
+            pass
         if self.processed_volumes: service_config['volumes'] = sorted(list(set(self.processed_volumes)))
         service_config['cap_add'] = self.build_conf.get('cap_add', constants.DEFAULT_CAP_ADD) or constants.DEFAULT_CAP_ADD
         for key, value in self.build_conf.items():
             if key not in constants.RESERVED_BUILD_KEYS: service_config[key] = value
         return service_config
+    
