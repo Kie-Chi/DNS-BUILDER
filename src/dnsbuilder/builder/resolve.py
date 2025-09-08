@@ -50,25 +50,34 @@ class Resolver:
         # Merge Ref
         if ref:
             logger.debug(f"[Resolver] Service '{service_name}' has ref: '{ref}'.")
-            if ':' in ref:
-                software_type, role = None, None
-                predefined_ref = ref
-                if ref.startswith(constants.STD_BUILD_PREFIX):
-                    role = ref.split(':', 1)[1]
-                    image_name = service_conf.get('image')
-                    if not image_name: raise ConfigError(f"Ref '{ref}' requires 'image' key for service '{service_name}'.")
-                    image_obj = self.images[image_name]
-                    software_type = image_obj.software
-                    if not software_type: raise ConfigError(f"Image '{image_name}' has no 'software' type for ref '{ref}'.")
-                    predefined_ref = f"{software_type}:{role}"
-                    logger.debug(f"[Resolver] Interpreted '{ref}' as standard build '{predefined_ref}'.")
-                else:
-                    software_type, role = ref.split(':', 1)
-
+            if ref.startswith(constants.STD_BUILD_PREFIX):
+                role = ref.split(':', 1)[1]
+                image_name = service_conf.get('image')
+                if not image_name:
+                    raise ConfigError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key in service '{service_name}'.")
+                image_obj = self.images.get(image_name)
+                if not image_obj:
+                    raise ConfigError(
+                        f"Service '{service_name}' uses an external image '{image_name}'"
+                    )
+                software_type = image_obj.software
+                if not software_type:
+                    raise ConfigError(f"Image '{image_name}' (used by service '{service_name}') has no 'software' type, which is required for the ref '{ref}'.")
+                
+                predefined_ref = f"{software_type}:{role}"
+                logger.debug(f"[Resolver] Interpreted '{ref}' as standard build '{predefined_ref}'.")
                 if software_type not in self.predefined_builds or role not in self.predefined_builds.get(software_type, {}):
-                    raise BuildError(f"Unknown predefined build: '{predefined_ref}'.")
+                    raise BuildError(f"Unknown predefined build for '{predefined_ref}'.")
+                
                 parent_conf = self.predefined_builds[software_type][role]
                 logger.debug(f"[Resolver] Loaded parent config from predefined build '{predefined_ref}'.")
+
+            elif ':' in ref:
+                software_type, role = ref.split(':', 1)
+                if software_type not in self.predefined_builds or role not in self.predefined_builds.get(software_type, {}):
+                    raise BuildError(f"Unknown predefined build: '{ref}'.")
+                parent_conf = self.predefined_builds[software_type][role]
+                logger.debug(f"[Resolver] Loaded parent config from predefined build '{ref}'.")
             else:
                 logger.debug(f"[Resolver] Following reference to user-defined build '{ref}'...")
                 parent_conf = self._resolve_service(ref)

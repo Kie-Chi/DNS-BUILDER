@@ -54,6 +54,7 @@ class BuildModel(BaseModel):
     mixins: List[str] = Field(default_factory=list)
     build: bool = True
     volumes: List[str] = Field(default_factory=list)
+    mounts: List[str] = Field(default_factory=list)
     cap_add: List[str] = Field(default_factory=list)
     # other `docker-compose` config, we won't check
     model_config = ConfigDict(extra="allow")
@@ -66,9 +67,6 @@ class BuildModel(BaseModel):
         
         if self.ref and self.ref.startswith(constants.STD_BUILD_PREFIX) and self.image is None:
             raise ValueError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key.")
-        
-        if not self.build and self.image is None:
-            raise ValueError("A service with 'build: false' must specify an 'image' key for the pre-built image.")
         return self
 
 class ConfigModel(BaseModel):
@@ -128,19 +126,12 @@ class ConfigModel(BaseModel):
 
         builds_by_name = self.builds
         defined_build_names = set(builds_by_name.keys())
-
-        for build_name, build_conf in builds_by_name.items():
-            if build_conf.build and build_conf.image and build_conf.image not in defined_image_names:
-                raise ValueError(f"Build '{build_name}' refers to undefined image: '{build_conf.image}'.")
-        
         visiting.clear()
         visited.clear()
-
         def detect_build_cycle(name: str):
             logger.debug(f"[Validation] Checking build '{name}' for cycles...")
             visiting.add(name)
             build_conf = builds_by_name[name]
-            
             if build_conf.ref and ':' not in build_conf.ref:
                 ref_name = build_conf.ref
                 logger.debug(f"[Validation] Build '{name}' has ref to '{ref_name}'. Following reference.")

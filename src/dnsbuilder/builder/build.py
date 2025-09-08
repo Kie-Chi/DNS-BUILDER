@@ -87,11 +87,16 @@ class Builder:
         # Service Generation
         logger.debug("[Builder] Service Generation")
         compose_services = {}
-        for name in final_context.resolved_builds.keys():
-            if 'image' not in final_context.resolved_builds[name]:
-                continue
-            handler = ServiceHandler(name, final_context)
-            compose_services[name] = handler.generate_all()
+        for name, conf in final_context.resolved_builds.items():
+            if conf.get('build', True):
+                logger.debug(f"Handling buildable service: '{name}'")
+                if 'image' not in conf:
+                    logger.warning(f"Buildable service '{name}' is missing 'image' key, skipping.")
+                    continue
+                handler = ServiceHandler(name, final_context)
+                compose_services[name] = handler.generate_all()
+            else:
+                logger.debug(f"unbuildable service: '{name}', skipping")
         logger.debug("[Builder] All services generated.")
          
         # Final Assembly

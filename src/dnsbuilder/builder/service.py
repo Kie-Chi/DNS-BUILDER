@@ -19,20 +19,28 @@ class ServiceHandler:
         self.service_name = service_name
         self.context = context
         self.build_conf = context.resolved_builds[service_name]
-        self.image_obj = context.images[self.build_conf['image']]
+
+        self.image_name = self.build_conf.get('image', "")
+        self.image_obj = context.images.get(self.image_name)
+        self.is_internal_image = self.image_obj is not None
+
         self.ip = context.service_ips.get(service_name)
         
         self.service_dir = self.context.output_dir / self.service_name
         self.contents_dir = self.service_dir / 'contents'
         self.processed_volumes: List[str] = []
         ip_display = f"with IP '{self.ip}'" if self.ip else "with dynamic IP"
-        logger.debug(f"ServiceHandler initialized for '{self.service_name}' {ip_display} and image '{self.image_obj.name}'.")
+        logger.debug(f"ServiceHandler initialized for '{self.service_name}' {ip_display} and image '{self.image_name}'.")
 
     def generate_all(self) -> Dict[str, Any]:
         """Orchestrates artifact generation and returns the docker-compose service block."""
         logger.info(f"Generating artifacts for service: '{self.service_name}'...")
         self._setup_service_directory()
-        self.image_obj.write(self.service_dir)
+        if self.is_internal_image:
+            logger.debug(f"Service '{self.service_name}' uses an internal image. Generating Dockerfile...")
+            self.image_obj.write(directory=self.service_dir)
+        else:
+            logger.debug(f"Service '{self.service_name}' uses an external image. Skipping Dockerfile generation.")
         
         main_conf_path = self._process_volumes()
         self._process_behavior(main_conf_path)
@@ -93,6 +101,7 @@ class ServiceHandler:
 
         logger.debug(f"Processing behavior for '{self.service_name}'...")
         if not main_conf_path: raise BuildError(f"Service '{self.service_name}' has 'behavior' but no main .conf file.")
+        if not self.is_internal_image: raise BuildError(f"Cannot create 'behavior' for an external image '{self.image_name}'")
         if not self.image_obj.software: raise BuildError(f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' has no 'software' type.")
 
         all_config_lines: Dict[str, List[str]] = {
@@ -171,8 +180,14 @@ class ServiceHandler:
         logger.debug(f"Assembling final docker-compose service block for '{self.service_name}'.")
         service_config = {
             'container_name': f"{self.context.config.name}-{self.service_name}",
-            'hostname': self.service_name, 'build': f"./{self.service_name}",
+            'hostname': self.service_name
         }
+        if self.is_internal_image:
+            service_config['build'] = f"./{self.service_name}"
+        else:
+            if not self.image_name:
+                 raise BuildError(f"Service '{self.service_name}' is configured for an external image, but the 'image' key is missing.")
+            service_config['image'] = self.image_name
         if self.ip:
             service_config['networks'] = {
                 constants.DEFAULT_NETWORK_NAME: {'ipv4_address': self.ip}
@@ -180,8 +195,16 @@ class ServiceHandler:
         else:
             # with no `networks`
             pass
-        if self.processed_volumes: service_config['volumes'] = sorted(list(set(self.processed_volumes)))
-        service_config['cap_add'] = self.build_conf.get('cap_add', constants.DEFAULT_CAP_ADD) or constants.DEFAULT_CAP_ADD
+        passthrough_mounts = self.build_conf.get('mounts', [])
+        final_volumes = self.processed_volumes + passthrough_mounts
+        if final_volumes: 
+            service_config['volumes'] = sorted(list(set(final_volumes)))
+        if 'mounts' in self.build_conf: del self.build_conf['mounts']
+        
+        if 'cap_add' in self.build_conf:
+            service_config['cap_add'] = self.build_conf['cap_add']
+        else:
+            service_config['cap_add'] = constants.DEFAULT_CAP_ADD
         for key, value in self.build_conf.items():
             if key not in constants.RESERVED_BUILD_KEYS: service_config[key] = value
         return service_config
