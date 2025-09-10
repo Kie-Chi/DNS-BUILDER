@@ -6,6 +6,8 @@ try:
 except ImportError:
     graphviz = None
 
+from ..utils.path import DNSBPath
+
 logger = logging.getLogger(__name__)
 
 class Mapper:
