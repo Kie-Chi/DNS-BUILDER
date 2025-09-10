@@ -127,3 +127,5 @@ class Resolver:
                     logger.debug(f"[Merge] Adding new key '{key}': '{value}'.")
                 merged[key] = value
         return merged
+
+

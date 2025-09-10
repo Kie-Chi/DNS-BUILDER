@@ -15,6 +15,7 @@ from .contexts import BuildContext
 from .. import constants
 from ..config import Config
 from ..images.factory import ImageFactory
+from ..utils.path import DNSBPath
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class Builder:
     def __init__(self, config: Config, graph_output: Optional[str] = None):
         self.config = config
         self.graph_output = graph_output
-        self.output_dir = Path("output") / self.config.name
+        self.output_dir = DNSBPath("output") / self.config.name
         self.predefined_builds = self._load_predefined_builds()
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")
 

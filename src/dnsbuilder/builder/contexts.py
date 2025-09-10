@@ -7,6 +7,7 @@ from ..images.image import Image
 from .behaviors import BehaviorFactory
 from .includers import IncluderFactory
 from ..config import Config
+from ..utils.path import DNSBPath
 
 class BuildContext(BaseModel):
     """
@@ -16,7 +17,7 @@ class BuildContext(BaseModel):
 
     config: Config
     images: Dict[str, Image]
-    output_dir: Path
+    output_dir: DNSBPath
     
     behavior_factory: BehaviorFactory = Field(default_factory=BehaviorFactory)
     includer_factory: IncluderFactory = Field(default_factory=IncluderFactory)

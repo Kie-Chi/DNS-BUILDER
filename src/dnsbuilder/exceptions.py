@@ -14,7 +14,11 @@ class BuildError(DNSBuilderError):
     """Errors occurring during the build process."""
     pass
 
-class VolumeNotFoundError(BuildError):
+class PathError(ConfigError):
+    """Errors related to path resolution."""
+    pass
+
+class VolumeNotFoundError(PathError):
     """Raised when a source path for a volume does not exist."""
     pass
 

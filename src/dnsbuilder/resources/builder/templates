@@ -6,9 +6,14 @@
                 "NET_RAW"
             ],
             "network_mode": "host",
+            "address": "",
             "environment": {
-                "ENABLE_PROMETHEUS_EXPORTER": "true"
+                "ENABLE_PROMETHEUS_EXPORTER": "true",
+                "INET": "${project.inet}"           
             },
+            "mounts": [
+                "./${name}/contents:/usr/local/etc"
+            ],
             "expose": [
                 "53",
                 "9153"
@@ -75,7 +80,7 @@
                 "8086:8086"
             ],
             "mounts": [
-                "./data/influxdb:/data"
+                "./${name}/contents:/data"
             ]
         },
         "cadvisor": {
@@ -85,15 +90,15 @@
                 "influxdb:influxsrv"
             ],
             "command": [
-                "storage_driver=influxdb",
-                "storage_driver_db=monitor",
-                "storage_driver_host=influxsrv:8086"
+                "-storage_driver=influxdb",
+                "-storage_driver_db=monitor",
+                "-storage_driver_host=influxsrv:8086"
             ],
             "restart": "always",
             "ports": [
                 "8080:8080"
             ],
-            "mounts": [
+            "volumes": [
                 "/:/rootfs:ro",
                 "/var/run:/var/run:rw",
                 "/sys:/sys:ro",
@@ -112,7 +117,7 @@
                 "3000:3000"
             ],
             "mounts": [
-                "grafana_data:/var/lib/grafana"
+                "./${name}/contents:/var/lib/grafana"
             ],
             "environment": {
                 "HTTP_USER": "root",

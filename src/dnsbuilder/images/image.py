@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 import copy
 import os
 import json
-from pathlib import Path
 from importlib import resources
 from typing import Any, Dict, List, Optional
 import logging
@@ -10,6 +9,7 @@ import logging
 from ..rules.rule import Rule
 from ..rules.version import Version
 from ..exceptions import ImageError
+from ..utils.path import DNSBPath
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ class Image(ABC):
         """
         pass
 
-    def write(self, directory: Path):
+    def write(self, directory: DNSBPath):
         if not self.software or not self.version:
             logger.debug(f"Image '{self.name}' is not buildable (likely an alias), skipping Dockerfile generation.")
             return

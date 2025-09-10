@@ -1,4 +1,3 @@
-from pathlib import Path
 import logging
 from typing import Dict, List, Set
 import ipaddress
@@ -123,7 +122,7 @@ class GraphGenerator:
         for source, targets in self.topology.items():
             for target in targets:
                 dot.edge(source, target)
-        output_file = Path(output_path)
+        output_file = DNSBPath(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(dot.source)
         logger.info(f"Network topology graph written to '{output_file}'")

@@ -39,6 +39,7 @@
     "python": {
         "default_deps": [],
         "default_utils": [
+            "iproute2",
             "vim",
             "dnsutils",
             "tcpdump",

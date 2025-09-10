@@ -1,13 +1,13 @@
-from pathlib import Path
 import shutil
 import ipaddress
 import logging
 from typing import Dict, Any,List
-from importlib import resources
 
 from .contexts import BuildContext
+from ..builder.volume import Volume
 from .. import constants
 from ..exceptions import BuildError, VolumeNotFoundError
+from ..utils.path import DNSBPath
 
 logger = logging.getLogger(__name__)
 
@@ -53,47 +53,54 @@ class ServiceHandler:
         self.contents_dir.mkdir(parents=True, exist_ok=True)
         logger.debug(f"Created service directory for '{self.service_name}' at '{self.service_dir}'")
 
-    def _process_volumes(self) -> Path | None:
-        main_conf_output_path: Path | None = None
+    def _process_volumes(self) -> DNSBPath | None:
+        main_conf_output_path: DNSBPath | None = None
         for volume_str in self.build_conf.get('volumes', []):
             logger.debug(f"Processing volume string for '{self.service_name}': '{volume_str}'")
-            host_path_str, container_path = volume_str.rsplit(':', 1)
-            filename = Path(container_path).name
-            target_path = self.contents_dir / filename
+            try:
+                volume = Volume(volume_str)
+            except BuildError as e:
+                raise BuildError(f"Invalid volume format in service '{self.service_name}': {e}")
 
-            if host_path_str.startswith(constants.RESOURCE_PREFIX):
-                resource_name = host_path_str[len(constants.RESOURCE_PREFIX):]
-                logger.debug(f"Handling internal resource volume: '{resource_name}' -> '{target_path}'")
-                try:
-                    content = resources.files('dnsbuilder.resources.configs').joinpath(resource_name).read_bytes()
-                    target_path.write_bytes(content)
-                except FileNotFoundError:
-                    raise VolumeNotFoundError(f"Internal resource for '{self.service_name}' not found: {resource_name}")
-            else:
-                host_path = Path(host_path_str)
-                logger.debug(f"Handling file system volume: '{host_path}' -> '{target_path}'")
+            host_path = volume.src
+            container_path = volume.dst.origin
+
+            if not host_path.is_resource:
                 if not host_path.exists():
-                    raise VolumeNotFoundError(f"Volume source for '{self.service_name}' not found: {host_path}")
-                shutil.copy(host_path, target_path)
-            
-            if container_path.endswith('.conf'):
-                if not main_conf_output_path:
-                    main_conf_output_path = target_path
-                    logger.debug(f"Identified '{filename}' as the main configuration file.")
-                else:
-                    logger.debug(f"Found additional config file '{filename}', will attempt to include it in the main config.")
-                    if main_conf_output_path.read_text().find(container_path) != -1:
-                        logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
+                    if not host_path.is_absolute():
+                        raise VolumeNotFoundError(f"Volume relative source path does not exist: '{host_path.origin}'")
                     else:
-                        self.includer_factory.create(container_path, self.image_obj.software).write(str(main_conf_output_path))
+                        logger.warning(f"Volume absolute source path does not exist: '{host_path.origin}', please check if it is in WSL etc.")
 
-            final_volume_str = f"./{self.service_name}/contents/{filename}:{container_path}"
-            self.processed_volumes.append(final_volume_str)
-            logger.debug(f"Added processed volume to service '{self.service_name}': {final_volume_str}")
-        
+            if not host_path.is_resource and host_path.is_absolute():
+                # absolute path (except resource) we mount, but not copy
+                final_volume_str = volume_str
+                logger.debug(f"Absolute path '{host_path.origin}' detected. It will be mounted directly.")
+                self.processed_volumes.append(final_volume_str)
+            else:
+                # relative path or resource path, copy to contents directory
+                filename = host_path.name
+                target_path = self.contents_dir / filename
+                shutil.copy(host_path, target_path)
+                if container_path.endswith('.conf'):
+                    if not main_conf_output_path:
+                        main_conf_output_path = target_path
+                        logger.debug(f"Identified '{filename}' as the main configuration file.")
+                    else:
+                        logger.debug(f"Found additional config file '{filename}', will attempt to include it in the main config.")
+                        if main_conf_output_path.read_text().find(container_path) != -1:
+                            logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
+                        else:
+                            self.context.includer_factory.create(container_path, self.image_obj.software).write(str(main_conf_output_path))
+                
+                final_volume_str = f"./{self.service_name}/contents/{filename}:{container_path}"
+                if volume.mode:
+                    final_volume_str += f":{volume.mode}"
+                self.processed_volumes.append(final_volume_str)
+                logger.debug(f"Relative/resource path copied and added as processed volume: {final_volume_str}")
         return main_conf_output_path
 
-    def _process_behavior(self, main_conf_path: Path | None):
+    def _process_behavior(self, main_conf_path: DNSBPath | None):
         behavior_str = self.build_conf.get('behavior')
         if not behavior_str: 
             logger.debug(f"Service '{self.service_name}' has no behavior to process.")

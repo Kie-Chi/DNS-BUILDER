@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-dnsbuilder = "dnsbuilder.__main__:main"
+dnsb = "dnsbuilder.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
