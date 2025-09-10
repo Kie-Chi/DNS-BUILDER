@@ -1,11 +1,9 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict
-from pathlib import Path
 
-from ..images.image import Image
-from .behaviors import BehaviorFactory
-from .includers import IncluderFactory
+from ..base import Image
+from ..factories import BehaviorFactory, IncluderFactory
 from ..config import Config
 from ..utils.path import DNSBPath
 

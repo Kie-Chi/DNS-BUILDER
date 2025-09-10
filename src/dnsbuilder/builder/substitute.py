@@ -5,7 +5,8 @@ import os
 from typing import Dict, Any
 
 from ..config import Config
-from ..images.image import Image
+from ..base import Image
+from ..bases.internal import InternalImage
 from ..exceptions import BuildError
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,11 @@ class VariableSubstitutor:
         if image_name and image_name in self.images:
             image_obj = self.images[image_name]
             var_map["image.name"] = image_obj.name
-            if image_obj.software: var_map["image.software"] = image_obj.software
-            if image_obj.version: var_map["image.version"] = image_obj.version
+            if isinstance(image_obj, InternalImage):
+                if image_obj.software: 
+                    var_map["image.software"] = image_obj.software
+                if image_obj.version: 
+                    var_map["image.version"] = image_obj.version
             
         return var_map
 

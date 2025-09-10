@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 from .. import constants
 from ..config import Config
-from ..images.image import Image
+from ..base import Image
 from ..exceptions import BuildError, ConfigError, CircularDependencyError
 
 logger = logging.getLogger(__name__)

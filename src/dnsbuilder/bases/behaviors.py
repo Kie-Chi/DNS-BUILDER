@@ -1,27 +1,9 @@
-from abc import ABC, abstractmethod
-from typing import List, Tuple, Any
-from .artifacts import BehaviorArtifact, VolumeArtifact
+from typing import List
+
+from ..base import Behavior
+from ..datacls.artifacts import BehaviorArtifact, VolumeArtifact
 from ..exceptions import BehaviorError
 
-# BASE CLASS
-class Behavior(ABC):
-    """
-        Abstract Class for a DNS server behavior
-        Each behavior can generate its own configuration artifact
-    """
-    def __init__(self, zone: str, targets: List[str]):
-        self.zone = zone
-        self.targets = targets
-
-    @abstractmethod
-    def generate(self, service_name: str, target_ips: List[str]) -> BehaviorArtifact:
-        """
-        Generates the necessary configuration line and any associated files.
-        :param service_name: The name of the service this behavior is for.
-        :param target_ips: The resolved IP addresses of the target services.
-        :return: A BehaviorArtifact object containing the results.
-        """
-        pass
 
 # -------------------------
 # 
@@ -123,63 +105,3 @@ class UnboundStubBehavior(Behavior):
         return BehaviorArtifact(config_line=config_line)
     
 
-# -------------------------
-# 
-#   BEHAVIOR FACTORY
-# 
-# -------------------------
-
-class BehaviorFactory:
-    def __init__(self):
-        self._behaviors = {
-            # BIND Implementations
-            ("bind", "hint"): BindHintBehavior,
-            ("bind", "stub"): BindStubBehavior,
-            ("bind", "forward"): BindForwardBehavior,
-            # Unbound Implementations
-            ("unbound", "hint"): UnboundHintBehavior,
-            ("unbound", "stub"): UnboundStubBehavior,
-            ("unbound", "forward"): UnboundForwardBehavior,
-            # To add more SoftWare Implementations
-        }
-
-    def _parse_behavior(self, line: str) -> Tuple[str, List[Any]]:
-        """
-            parse a behavior
-            Args:
-                line (str): A line from behavior config
-            
-            Returns:
-                Tuple[str, List[Any]]
-                behavior_type, args used for init behavior (zone, targets)
-        """
-        parts = line.strip().split(maxsplit=2)
-        if len(parts) != 3:
-            raise ValueError(f"Invalid behavior format: '{line}'. Expected '<zone> <type> <target1>,<target2>...'.")
-
-        zone, behavior_type, targets_str = parts
-        targets = [t.strip() for t in targets_str.split(',')]
-        
-        return (behavior_type, [zone, targets])
-
-    def create(self, line: str, software_type: str) -> Behavior:
-        """
-            Parses a behavior line and returns the correct Behavior instance
-            Args:
-                line (str): A line from the 'behavior' config, e.g., ". forward root-server,8.8.8.8"
-                software_type (str): The software of the service, e.g., "bind"
-            
-            Returns:
-                behavior(Behavior): An instance of a Behavior subclass
-        """
-        behavior_type, args = self._parse_behavior(line)
-        
-        key = (software_type, behavior_type)
-        behavior_class = self._behaviors.get(key)
-        
-        if not behavior_class:
-            raise NotImplementedError(
-                f"Behavior '{behavior_type}' is not supported for software '{software_type}'."
-            )
-            
-        return behavior_class(*args)

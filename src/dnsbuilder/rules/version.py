@@ -24,7 +24,7 @@ class Version:
             if '-' in version_str:
                 core_part, prerelease_part = version_str.split('-', 1)
                 try:
-                    test_core = Version(core_part) # raise ValueError if core_part invalid
+                    Version(core_part) # raise ValueError if core_part invalid
                 except ValueError:
                     raise ValueError(f"Unrecognized Version '{version_str}'")
             else:

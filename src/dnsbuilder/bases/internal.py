@@ -1,0 +1,360 @@
+from abc import ABC, abstractmethod
+import copy
+import json
+from importlib import resources
+from typing import Any, Dict, List, Optional, override
+import logging
+
+from ..base import Image
+from ..rules.rule import Rule
+from ..rules.version import Version
+from ..exceptions import ImageError
+from ..utils.path import DNSBPath
+
+logger = logging.getLogger(__name__)
+
+# Load all image defaults
+IMAGE_DEFAULTS_TEXT = (
+    resources.files("dnsbuilder.resources.images")
+    .joinpath("defaults")
+    .read_text(encoding="utf-8")
+)
+IMAGE_DEFAULTS = json.loads(IMAGE_DEFAULTS_TEXT)
+
+# -------------------------
+#
+#   INTERNAL IMAGE
+#
+# -------------------------
+
+class InternalImage(Image, ABC):
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.software: Optional[str] = config.get("software")
+        self.version: Optional[str] = config.get("version")
+        self.util: List[str] = config.get("util", [])
+        self.dependency: List[str] = config.get("dependency", [])
+        self.os, self.os_version = str(config.get("from", ":")).split(":")
+
+        self.base_image: str = ""
+        self.default_deps = set()
+        self.default_utils = set()
+
+        self._load_defaults()
+        self._generate_deps_from_rules()
+        self._post_init_hook()
+
+        # Final merge of default, rule-based, and user-defined dependencies
+        self.dependency = sorted(list(self.default_deps.union(set(self.dependency))))
+        self.util = sorted(list(self.default_utils.union(set(self.util))))
+
+        logger.debug(f"[{self.name}] Final merged dependencies: {self.dependency}")
+        logger.debug(f"[{self.name}] Final merged utilities: {self.util}")
+
+    @abstractmethod
+    def _post_init_hook(self):
+        """
+        A hook for subclasses to run specific logic after the main __init__ setup.
+        """
+        pass
+
+    def _load_defaults(self):
+        """Loads default settings from the 'defaults' resource."""
+        if not self.software:
+            logger.critical(f"[{self.name}] No SoftWare defined in Image")
+            return  # Likely an abstract/alias image without software type
+
+        defaults = IMAGE_DEFAULTS.get(self.software)
+        if not defaults:
+            logger.warning(
+                f"No defaults found for software '{self.software}' in defaults"
+            )
+            return
+
+        # Load defaults only if this is a preset image
+        if ":" in self.name:
+            self.os = "ubuntu"  # set actually Ubuntu
+            self.base_image = ""  # will be modified later
+            self.default_deps = set(defaults.get("default_deps", []))
+            self.default_utils = set(defaults.get("default_utils", []))
+            logger.debug(
+                f"[{self.name}] Initialized with defaults for '{self.software}'."
+            )
+        else:
+            # User-defined image with 'from'
+            self.base_image = f"{self.os}:{self.os_version}"
+
+    def _generate_deps_from_rules(self):
+        """
+        Parses the rule set for the given software version to determine
+        the base OS version and additional dependencies.
+        """
+        if not self.software or not self.version:
+            logger.critical(f"[{self.name}] No SoftWare or No Version defined in Image")
+            return  # Not a buildable image
+
+        try:
+            rules_text = (
+                resources.files("dnsbuilder.resources.images.rules")
+                .joinpath(f"{self.software}")
+                .read_text(encoding="utf-8")
+            )
+            ruleset = json.loads(rules_text)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            raise ImageError(f"Failed to load rules for '{self.software}': {e}")
+
+        version_obj = Version(self.version)
+        is_valid = False
+        os_version_from_rule = None
+
+        for raw_rule, dep in ruleset.items():
+            rule = Rule(raw_rule)
+            if version_obj not in rule:
+                continue
+
+            if dep is None:
+                # Version Validation
+                is_valid = True
+            elif "." in dep:
+                # OS Version Fetch
+                if not os_version_from_rule:
+                    os_version_from_rule = dep
+            else:
+                # Added Dependency
+                logger.debug(
+                    f"[{self.name}] Rule '{raw_rule}' met, adding dependency '{dep}'."
+                )
+                self.default_deps.add(dep)
+
+        if not is_valid:
+            raise ImageError(
+                f"[{self.name}] Version '{self.version}' is not valid according to the ruleset."
+            )
+
+        if os_version_from_rule:
+            self.os_version = os_version_from_rule
+            self.base_image = f"{self.os}:{self.os_version}"
+            logger.debug(
+                f"[{self.name}] OS version set to '{os_version_from_rule}' by rule."
+            )
+        elif ":" in self.name and not self.os_version:
+            raise ImageError(
+                f"[{self.name}] Failed to determine OS version from rules for version '{self.version}'."
+            )
+
+    def _generate_dockerfile_content(self) -> str:
+        """
+        Loads the appropriate Dockerfile template and formats it with instance variables.
+        Subclasses can override this to provide additional template variables.
+        """
+        try:
+            template = (
+                resources.files("dnsbuilder.resources.images.templates")
+                .joinpath(f"{self.software}")
+                .read_text(encoding="utf-8")
+            )
+        except FileNotFoundError:
+            raise ImageError(f"Dockerfile template for '{self.software}' not found.")
+
+        template_vars = self._get_template_vars()
+        return template.format(**template_vars)
+
+    def _get_template_vars(self) -> Dict[str, Any]:
+        """Provides a dictionary of variables for formatting the Dockerfile template."""
+        dep_packages = " ".join(self.dependency)
+        util_packages = " ".join(self.util)
+
+        return {
+            "name": self.name,
+            "version": self.version,
+            "base_image": self.base_image,
+            "dep_packages": dep_packages,
+            "util_packages": util_packages or "''",
+        }
+
+    def write(self, directory: DNSBPath):
+        if not self.software or not self.version:
+            logger.debug(
+                f"Image '{self.name}' is not buildable (likely an alias), skipping Dockerfile generation."
+            )
+            return
+
+        content = self._generate_dockerfile_content()
+        dockerfile_path = directory / "Dockerfile"
+        dockerfile_path.write_text(content, encoding="utf-8")
+        logger.info(f"Dockerfile for '{self.name}' written to {dockerfile_path}")
+
+    def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Merges a parent Image object's attributes with a child's config dict.
+        Child's config takes precedence. Lists are merged (union).
+        """
+        merged = super().merge(child_config)
+        logger.debug(
+            f"[{self.name}] [InternalImage] Merging parent '{self.name}' into child '{child_config['name']}'."
+        )
+        parent_values = {
+            "from": f"{self.os}:{self.os_version}",
+            "software": self.software,
+            "version": self.version,
+            "dependency": copy.deepcopy(self.dependency),
+            "util": copy.deepcopy(self.util),
+        }
+        merged.update(parent_values)
+        merged["software"] = child_config.get("software", merged["software"])
+        merged["version"] = child_config.get("version", merged["version"])
+
+        child_deps = set(child_config.get("dependency", []))
+        child_utils = set(child_config.get("util", []))
+        merged["dependency"] = sorted(list(set(merged["dependency"]).union(child_deps)))
+        merged["util"] = sorted(list(set(merged["util"]).union(child_utils)))
+        logger.debug(
+            f"[{self.name}] [InternalImage] Merge result for '{child_config['name']}': {merged}"
+        )
+        return merged
+
+# -------------------------
+#
+#   BIND IMAGE
+#
+# -------------------------
+
+class BindImage(InternalImage):
+    """
+    Concrete Image class for BIND
+    """
+
+    def __init__(self, config: Dict[str, Any]):
+        self.py3_deps = []  # will init in hook
+        super().__init__(config)
+
+    @override
+    def _post_init_hook(self):
+        """
+        Handle BIND's specific python3 dependency logic after base setup.
+        """
+        py3_pkg_names = [
+            dep.split("python3-")[-1] for dep in self.dependency if "python3-" in dep
+        ]
+
+        if "pip" in py3_pkg_names:
+            py3_pkg_names.remove("pip")
+
+        self.py3_deps = sorted(list(set(py3_pkg_names)))
+
+        if self.py3_deps:
+            self.dependency = [dep for dep in self.dependency if "python3-" not in dep]
+            self.dependency.extend(["python3", "python3-pip"])
+            logger.debug(
+                f"[{self.name}] Processed Python dependencies: {self.py3_deps}"
+            )
+
+    @override
+    def _get_template_vars(self) -> Dict[str, Any]:
+        """
+        Extend base template variables with BIND-specific ones.
+        """
+        base_vars = super()._get_template_vars()
+        py3_packages = " ".join(self.py3_deps)
+        base_vars["py3_packages"] = (
+            f"RUN pip3 install {py3_packages}" if py3_packages else ""
+        )
+        return base_vars
+
+    @override
+    def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Ensure python3 dependencies from the parent are correctly carried over.
+        """
+        merged = super().merge(child_config)
+        # Re-add the python3- prefixed deps for accurate merging with child deps
+        merged["dependency"].extend([f"python3-{dep}" for dep in self.py3_deps])
+        merged["dependency"] = sorted(list(set(merged["dependency"])))
+        logger.debug(f"[{self.name}] [BindImage] Fully Merged Result : {merged}")
+        return merged
+
+# -------------------------
+#
+#   UNBOUND IMAGE
+#
+# -------------------------
+
+class UnboundImage(InternalImage):
+    """
+    Concrete Image class for Unbound.
+    """
+
+    @override
+    def _post_init_hook(self):
+        """
+        Nothing to do
+        """
+        pass  # Unbound has nothing to do
+
+# -------------------------
+#
+#   PYTHON IMAGE
+#
+# -------------------------
+
+class PythonImage(InternalImage):
+    """
+    Concrete Image class for Python
+    """
+
+    def __init__(self, config: Dict[str, Any]):
+        self.pip_deps = []
+        super().__init__(config)
+
+    @override
+    def _load_defaults(self):
+        super()._load_defaults()
+        if ":" in self.name:
+            # ensure the base os is 'python', not 'ubuntu'
+            self.os = "python"
+
+    @override
+    def _post_init_hook(self):
+        """
+        Handle Python's specific dependency logic.
+        """
+        self.dependency = []
+
+        pip_pkg_names = [
+            dep.split("python3-")[-1] for dep in self.util if dep.startswith("python3-")
+        ]
+
+        self.pip_deps = sorted(list(set(pip_pkg_names)))
+
+        if self.pip_deps:
+            # Filter out pip packages from the system utility list
+            self.util = [dep for dep in self.util if not dep.startswith("python3-")]
+            logger.debug(
+                f"[{self.name}] Processed Python pip dependencies: {self.pip_deps}"
+            )
+
+    @override
+    def _get_template_vars(self) -> Dict[str, Any]:
+        """
+        Extend base template variables with Python-specific ones.
+        """
+        base_vars = super()._get_template_vars()
+        pip_packages = " ".join(self.pip_deps)
+        base_vars["pip_packages"] = (
+            f"RUN pip install --no-cache-dir {pip_packages}" if pip_packages else ""
+        )
+        # Ensure dep_packages is empty for the template
+        base_vars["dep_packages"] = ""
+        return base_vars
+
+    @override
+    def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Ensure python dependencies from the parent are correctly carried over.
+        """
+        merged = super().merge(child_config)
+        # Re-add the python3- prefixed deps to the 'util' list for accurate merging
+        merged["util"].extend([f"python3-{dep}" for dep in self.pip_deps])
+        merged["util"] = sorted(list(set(merged["util"])))
+        logger.debug(f"[{self.name}] [PythonImage] Fully Merged Result : {merged}")
+        return merged

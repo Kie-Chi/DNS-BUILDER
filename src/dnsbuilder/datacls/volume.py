@@ -1,5 +1,7 @@
+from typing import List, Dict
+
+from ..exceptions import BuildError
 from ..utils.path import DNSBPath, is_path_valid
-from typing import List, Dict  
 
 """
     Class Volume to resolve volumes like src:dst:mode
