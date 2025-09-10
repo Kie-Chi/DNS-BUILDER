@@ -1,4 +1,3 @@
-from pathlib import Path
 import shutil
 import yaml
 import logging
@@ -108,6 +107,16 @@ class Builder:
             "services": compose_services,
             "networks": network_manager.get_compose_network_block()
         }
+        
+        all_config_data = self.config.model.model_dump()
+        extra_config = {
+            key: value for key, value in all_config_data.items() 
+            if key not in constants.RESERVED_CONFIG_KEYS
+        }
+        if extra_config:
+            logger.debug(f"Adding extra top-level configurations to docker-compose: {list(extra_config.keys())}")
+            compose_config.update(extra_config)
+
         self._write_compose_file(compose_config)
         
         logger.info(f"Build finished. Files are in '{self.output_dir}'")
@@ -120,7 +129,8 @@ class Builder:
             logger.debug("Predefined build templates loaded successfully.")
             return templates
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to load or parse template file: {e}"); return {}
+            logger.error(f"Failed to load or parse template file: {e}")
+            return {}
 
     def _setup_workspace(self):
         if self.output_dir.exists(): 

@@ -1,4 +1,3 @@
-from pathlib import Path
 import copy
 import logging
 from typing import Dict, Any
@@ -34,7 +33,8 @@ class Resolver:
             logger.debug(f"[Resolver] Service '{service_name}' already resolved. Returning cached config.")
             return self.resolved_builds[service_name]
         
-        if service_name in self.resolving_stack: raise CircularDependencyError(f"Circular dependency in builds: '{service_name}'")
+        if service_name in self.resolving_stack: 
+            raise CircularDependencyError(f"Circular dependency in builds: '{service_name}'")
         
         logger.debug(f"[Resolver] Starting resolution for service '{service_name}'...")
         self.resolving_stack.add(service_name)
@@ -101,8 +101,10 @@ class Resolver:
 
         logger.debug(f"[Resolver] Merging parent/mixin config with child config for '{service_name}'.")
         final_conf = self._merge_configs(parent_conf, service_conf)
-        if 'ref' in final_conf: del final_conf['ref']
-        if 'mixins' in final_conf: del final_conf['mixins']
+        if 'ref' in final_conf: 
+            del final_conf['ref']
+        if 'mixins' in final_conf: 
+            del final_conf['mixins']
         
         self.resolving_stack.remove(service_name)
         self.resolved_builds[service_name] = final_conf

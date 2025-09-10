@@ -77,6 +77,7 @@ class ConfigModel(BaseModel):
     inet: IPv4Network
     images: List[ImageModel]
     builds: Dict[str, BuildModel]
+    model_config = ConfigDict(extra="allow")
 
     @field_validator('images')
     @classmethod
