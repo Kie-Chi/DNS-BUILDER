@@ -26,19 +26,31 @@ class Image(ABC):
     def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Merges a parent Image object's attributes with a child's config dict.
-        Child's config takes precedence. Lists are merged (union).
+        
+        Args:
+            child_config: The config dict of the child.
+        Returns:
+            The merged config dict.
         """
         logger.debug(
             f"[{self.name}] [Image] Merging parent '{self.name}' into child '{child_config['name']}'."
         )
         merged = {
-            "name": child_config["name"],
+            "name": child_config.get("name"),
             "ref": child_config.get("ref"),
         }
         return merged
 
     @abstractmethod
     def write(self, directory: DNSBPath):
+        """
+        Writes the image to the specified directory.
+        
+        Args:
+            directory: The directory to write the image to.
+        Returns:
+            None
+        """
         pass
 
 
@@ -62,9 +74,12 @@ class Behavior(ABC):
     def generate(self, service_name: str, target_ips: List[str]) -> BehaviorArtifact:
         """
         Generates the necessary configuration line and any associated files.
-        :param service_name: The name of the service this behavior is for.
-        :param target_ips: The resolved IP addresses of the target services.
-        :return: A BehaviorArtifact object containing the results.
+        
+        Args:
+            service_name: The name of the service this behavior is for.
+            target_ips: The resolved IP addresses of the target services.
+        Returns:
+            A BehaviorArtifact object containing the results.
         """
         pass
 
@@ -85,7 +100,7 @@ class Includer(ABC):
     @abstractmethod
     def write(self, conf: str):
         """
-        write `include: config` line into conf
+        write `include config_line` line into conf
 
         Args:
             conf (str): main configuration file path
