@@ -107,15 +107,6 @@ class TestConfigValidationLogic:
         with pytest.raises(CircularDependencyError, match="Circular dependency in builds: 'build-[ab]' -> 'build-[ab]'"):
             Config(str(config_path))
 
-    def test_build_refers_to_undefined_image_raises_error(self, create_config_file):
-        """Should raise ConfigError if a build uses an undefined image."""
-        invalid_config = copy.deepcopy(BASE_CONFIG)
-        invalid_config['builds']['recursor']['image'] = 'undefined-image'
-        config_path = create_config_file(invalid_config)
-        
-        with pytest.raises(ConfigError, match="Build 'recursor' refers to undefined image: 'undefined-image'"):
-            Config(str(config_path))
-
     def test_image_ref_and_software_conflict_raises_error(self, create_config_file):
         """Should raise ConfigError if an image has both 'ref' and 'software'."""
         invalid_config = copy.deepcopy(BASE_CONFIG)

@@ -1,12 +1,13 @@
 import yaml
 import logging
-from typing import Dict, Any, List, Set, Optional
+from typing import Dict, Any, List, Set, Optional, Union
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator, ConfigDict
 from pydantic.networks import IPv4Network
 
 from .preprocess import Preprocessor
 from .exceptions import ConfigError, CircularDependencyError
 from . import constants
+from .utils.path import DNSBPath
 
 logger = logging.getLogger(__name__)
 class ImageModel(BaseModel):
@@ -77,6 +78,7 @@ class ConfigModel(BaseModel):
     inet: IPv4Network
     images: List[ImageModel]
     builds: Dict[str, BuildModel]
+    include: Optional[Union[str, List[str]]] = None
     model_config = ConfigDict(extra="allow")
 
     @field_validator('images')
@@ -166,7 +168,7 @@ class Config:
         raw_data = self._load_raw_config()
 
         # preprocess Python-like builds
-        preprocessor = Preprocessor(raw_data)
+        preprocessor = Preprocessor(raw_data, self.path)
         processed_data = preprocessor.run()
         
         logger.info("Validating configuration structure with Pydantic...")
@@ -181,7 +183,7 @@ class Config:
 
     def _load_raw_config(self) -> Dict[str, Any]:
         try:
-            with open(self.path, 'r') as f:
+            with DNSBPath(self.path).open('r') as f:
                 config_data = yaml.safe_load(f)
                 if not isinstance(config_data, dict):
                     raise ConfigError("Configuration file must be a YAML document containing a dictionary.")

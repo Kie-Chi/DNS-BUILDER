@@ -1,0 +1,11 @@
+name: traffic-config
+images:
+  - name: traffic
+    ref: "python:3.9.0"
+    util:
+      - supervisor
+builds:
+  traffic:
+    image: traffic
+    ref: monitor:traffic
+    container_name: ${project.name}-monitor

@@ -1,13 +1,12 @@
-import os
 from importlib import resources
 import tempfile
 import atexit
 import shutil
 import logging
 from typing import override
-from pathlib import PurePath, Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from ..exceptions import VolumeNotFoundError, PathError
+from ..exceptions import VolumeNotFoundError
 from .. import constants
 
 # This temporary directory will persist for the life of the program
@@ -62,21 +61,50 @@ class DNSBPath(Path):
                 traversable = resources.files('dnsbuilder.resources').joinpath(resource_name.lstrip('/'))
             else:
                 traversable = resources.files('dnsbuilder.resources.configs').joinpath(resource_name)
+            
+            stable_temp_path = Path(_temp_dir.name).joinpath(resource_name.lstrip('/'))
+            if traversable.is_dir():
+                stable_temp_path.mkdir(parents=True, exist_ok=True)
+                return stable_temp_path
 
             with resources.as_file(traversable) as p:
-                stable_temp_path = Path(_temp_dir.name) / traversable.name
                 if not stable_temp_path.exists():
+                    stable_temp_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy(p, stable_temp_path)
                 return stable_temp_path
-        except (FileNotFoundError, NotADirectoryError, KeyError):
+        except (FileNotFoundError, KeyError):
             raise VolumeNotFoundError(f"Internal resource not found: '{resource_name}'")
     
     @property
     def origin(self):
         return self.original_path_str
 
+
+    @override
+    @property
+    def parent(self):
+        if self.is_resource:
+            parent_str = str(PurePosixPath(rm_resource(self.origin)).parent)
+            return self.__class__(add_resource(parent_str))
+        return super().parent
+    
+    @override
+    def __truediv__(self, other):
+        if self.is_resource:
+            return self.__class__(add_resource(str(PurePosixPath(rm_resource(self.origin)).joinpath(other))))
+        return super().__truediv__(other)   
+    
+    @override
+    def __rtruediv__(self, other):
+        """we should not support this operation for resource:"""
+        if self.is_resource:
+            return NotImplemented
+        return super().__rtruediv__(other)
+
     @override
     def is_absolute(self) -> bool:
+        if self.is_resource:
+            return False
         return is_path_absolute(self.original_path_str)
 
     def __repr__(self):
@@ -87,6 +115,15 @@ class DNSBPath(Path):
     def __reduce__(self):
         return (self.__class__, self.original_path_str)
 
+def rm_resource(path: str):
+    if path.startswith(constants.RESOURCE_PREFIX):
+        return path[len(constants.RESOURCE_PREFIX):]
+    return path
+
+def add_resource(path: str):
+    if path.startswith(constants.RESOURCE_PREFIX):
+        return path
+    return constants.RESOURCE_PREFIX + path
 
 def is_path_valid(path: str) -> bool:
     """

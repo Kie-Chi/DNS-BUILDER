@@ -1,0 +1,24 @@
+name: "SLD-example-config"
+images:
+  - name: "root"
+    ref: "bind:9.18.0"
+  - name: "TLD"
+    ref: "bind:9.18.0"
+  - name: "SLD"
+    ref: "bind:9.18.0"
+  - name: "recursor"
+    ref: "bind:9.18.0"
+builds:
+  - recursor:
+    image: "recursor"
+    ref: "std:recursor"
+    behavior: . hint root
+  - root:
+      image: "root"
+      ref: "std:auth"
+  - TLD:
+      image: "TLD"
+      ref: "std:auth"
+  - SLD:
+      image: "SLD"
+      ref: "std:auth"

@@ -1,28 +1,103 @@
 import logging
+import yaml
 from typing import Dict, Any, List, Union
 from jinja2 import Environment
 
 from .exceptions import ConfigError
+from .utils.path import DNSBPath
 
 logger = logging.getLogger(__name__)
 
+
+def deep_merge(source, destination):
+    """
+    Recursively merges source dict into destination dict.
+    - Lists are merged by extending.
+    - Dicts are recursively merged.
+    - Other types from source overwrite destination.
+    """
+    for key, value in source.items():
+        if isinstance(value, dict) and key in destination and isinstance(destination[key], dict):
+            destination[key] = deep_merge(value, destination[key].copy()) # Create a copy to avoid side effects
+        elif isinstance(value, list) and key in destination and isinstance(destination[key], list):
+            destination[key].extend(value)
+        else:
+            destination[key] = value
+    return destination
+
+
 class Preprocessor:
     """
-    Expands build comprehensions and other syntactic sugar.
+    Recursively processes configurations, handling 'include' directives and expanding build comprehensions.
     """
-    def __init__(self, raw_config: Dict):
+    def __init__(self, raw_config: Dict, config_path: str):
         self.raw_config = raw_config
+        self.config_path = config_path
         self.jinja_env = Environment()
 
     def run(self) -> Dict:
         """
         Executes all preprocessing steps and returns the processed configuration.
         """
-        logger.info("Preprocessing configuration...")
-        if 'builds' in self.raw_config:
-            self.raw_config['builds'] = self._preprocess_builds(self.raw_config['builds'])
-        logger.info("Preprocessing complete.")
-        return self.raw_config
+        logger.info(f"Preprocessing configuration from: {self.config_path}")
+        
+        # Step 1: Handle includes recursively.
+        processed_config = self._process_includes()
+
+        # Step 2: Process other directives like 'for_each' on the merged config.
+        if 'builds' in processed_config:
+            processed_config['builds'] = self._preprocess_builds(processed_config['builds'])
+        
+        logger.info(f"Finished preprocessing for: {self.config_path}")
+        return processed_config
+
+    def _process_includes(self) -> Dict:
+        """
+        Handles the 'include' directive by recursively preprocessing and merging files.
+        """
+        current_config = self.raw_config.copy()
+
+        if 'include' not in current_config:
+            if 'builds' in current_config:
+                current_config['builds'] = self._preprocess_builds(current_config['builds'])
+            return current_config
+
+        include_files = current_config.pop('include')
+        if not isinstance(include_files, list):
+            include_files = [include_files]
+
+        base_dir = DNSBPath(self.config_path).parent
+        
+        merged_from_includes = {}
+
+        for file_path in include_files:
+            path = DNSBPath(file_path)
+            if not path.is_absolute() and not path.is_resource:
+                path = base_dir / path
+
+            abs_path = str(path) if not path.is_resource else path.origin
+
+            logger.debug(f"Including and preprocessing config file from '{abs_path}'")
+            try:
+                with path.open('r') as f:
+                    included_config_raw = yaml.safe_load(f) or {}
+                    
+                    include_preprocessor = Preprocessor(included_config_raw, abs_path)
+                    processed_included_config = include_preprocessor.run()
+                    
+                    merged_from_includes = deep_merge(processed_included_config, merged_from_includes)
+
+            except FileNotFoundError:
+                raise ConfigError(f"Included file not found: {abs_path}")
+            except yaml.YAMLError as e:
+                raise ConfigError(f"Error parsing included YAML file {abs_path}: {e}")
+
+        if 'builds' in current_config:
+            current_config['builds'] = self._preprocess_builds(current_config['builds'])
+
+        # Finally, merge the current config on top of the included configs.
+        final_config = deep_merge(current_config, merged_from_includes)
+        return final_config
 
     def _render_template_recursive(self, item: Any, context: Dict) -> Any:
         """Recursively render Jinja2 templates in strings within a data structure."""

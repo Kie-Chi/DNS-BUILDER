@@ -1,0 +1,12 @@
+name: ""
+include: traffic.yml
+builds:
+  - influxdb:
+      ref: monitor:influxdb
+      container_name: ${project.name}-influxdb 
+  - cadvisor:
+      ref: monitor:cadvisor
+      container_name: ${project.name}-cadvisor
+  - grafana:
+      ref: monitor:grafana
+      container_name: ${project.name}-grafana
