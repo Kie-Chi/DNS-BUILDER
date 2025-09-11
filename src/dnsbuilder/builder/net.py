@@ -23,6 +23,9 @@ class NetworkManager:
         """Allocates an IP for each service, validating any static assignments."""
         logger.info(f"Planning network for subnet {self.network}...")
         for service_name, build_conf in resolved_builds.items():
+            if not build_conf.get('build', True):
+                logger.debug(f"Skipping IP allocation for service '{service_name}' as it has 'build: false'.")
+                continue
             if 'image' not in build_conf:
                 logger.debug(f"Skipping IP allocation for service '{service_name}' as it has no 'image' key (likely an abstract build).")
                 continue

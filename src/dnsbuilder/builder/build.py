@@ -85,6 +85,7 @@ class Builder:
         logger.debug("[Builder] Step 2: Resolving build configurations...")
         resolver = Resolver(context.config, context.images, self.predefined_builds)
         resolved_builds = resolver.resolve_all()
+        resolved_builds = {key : value for key, value in resolved_builds.items() if value.get("build")}
         logger.debug("[Builder] Build resolution complete.")
         return resolved_builds
 
