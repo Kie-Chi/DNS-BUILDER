@@ -3,7 +3,12 @@ import logging
 from .config import Config
 from .builder.build import Builder
 from .utils.logger import setup_logger
-from .exceptions import DNSBuilderError, ConfigError
+from .exceptions import (
+    DNSBuilderError,
+    ConfigurationError,
+    DefinitionError,
+    BuildError,
+)
 import traceback
 
 def main():
@@ -11,24 +16,35 @@ def main():
     parser.add_argument("config_file", help="Path to the config.yml file.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     parser.add_argument(
-        "-g", "--graph", 
-        help="Generate a DOT file for the network topology graph and save it to the specified path."
+        "-g",
+        "--graph",
+        help="Generate a DOT file for the network topology graph and save it to the specified path.",
     )
     args = parser.parse_args()
 
     setup_logger(debug=args.debug)
-    
+
     try:
         config = Config(args.config_file)
         builder = Builder(config, graph_output=args.graph)
         builder.run()
-    except ConfigError as e:
-        logging.error(f"A configuration error occurred: {e}")
+    except ConfigurationError as e:
+        logging.error(f"Configuration error: {e}")
+        if args.debug:
+            traceback.print_exc()
+        exit(1)
+    except DefinitionError as e:
+        logging.error(f"Definition error: {e}")
+        if args.debug:
+            traceback.print_exc()
+        exit(1)
+    except BuildError as e:
+        logging.error(f"Build error: {e}")
         if args.debug:
             traceback.print_exc()
         exit(1)
     except DNSBuilderError as e:
-        logging.error(f"A build error occurred: {e}")
+        logging.error(f"An unexpected application error occurred: {e}")
         if args.debug:
             traceback.print_exc()
         exit(1)

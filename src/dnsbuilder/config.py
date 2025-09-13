@@ -5,9 +5,17 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from pydantic.networks import IPv4Network
 
 from .preprocess import Preprocessor
-from .exceptions import ConfigError, CircularDependencyError
 from . import constants
 from .utils.path import DNSBPath
+from .exceptions import (
+    CircularDependencyError,
+    ImageDefinitionError,
+    ReferenceNotFoundError,
+    ConfigParsingError,
+    ConfigFileMissingError,
+    ConfigValidationError,
+)
+
 
 logger = logging.getLogger(__name__)
 class ImageModel(BaseModel):
@@ -27,7 +35,7 @@ class ImageModel(BaseModel):
     def name_cannot_contain_colon(cls, v: str) -> str:
         """ Validate image-name"""
         if ":" in v:
-            raise ValueError(f"Can't name an image with ':', found in '{v}'.")
+            raise ImageDefinitionError(f"Can't name an image with ':', found in '{v}'.")
         return v
 
     @model_validator(mode='after')
@@ -37,10 +45,10 @@ class ImageModel(BaseModel):
         base_fields_present = self.software is not None or self.version is not None or self.from_os is not None
 
         if ref_present and base_fields_present:
-            raise ValueError("'ref' cannot be used with 'software', 'version', or 'from'.")
+            raise ImageDefinitionError("'ref' cannot be used with 'software', 'version', or 'from'.")
         
         if not ref_present and not (self.software and self.version and self.from_os):
-            raise ValueError("An image without 'ref' must have 'software', 'version', and 'from' keys.")
+            raise ImageDefinitionError("An image without 'ref' must have 'software', 'version', and 'from' keys.")
         
         return self
 
@@ -64,10 +72,10 @@ class BuildModel(BaseModel):
     def check_image_or_ref_present(self) -> 'BuildModel':
         """Check if Image is present"""
         if self.image is None and self.ref is None:
-            raise ValueError("Build must have either an 'image' or a 'ref' key.")
+            raise ImageDefinitionError("Build must have either an 'image' or a 'ref' key.")
         
         if self.ref and self.ref.startswith(constants.STD_BUILD_PREFIX) and self.image is None:
-            raise ValueError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key.")
+            raise ImageDefinitionError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key.")
         return self
 
 class ConfigModel(BaseModel):
@@ -89,7 +97,7 @@ class ConfigModel(BaseModel):
         if len(names) != len(set(names)):
             seen = set()
             duplicates = {x for x in names if x in seen or seen.add(x)}
-            raise ValueError(f"Duplicate image names found: {', '.join(duplicates)}")
+            raise ImageDefinitionError(f"Duplicate image names found: {', '.join(duplicates)}")
         return v
 
     @model_validator(mode='after')
@@ -111,7 +119,7 @@ class ConfigModel(BaseModel):
                 # DEBUG: Log the reference being followed
                 logger.debug(f"[Validation] Image '{name}' has ref to '{ref_name}'. Following reference.")
                 if ref_name not in defined_image_names:
-                    raise ValueError(f"Image '{name}' has a 'ref' to an undefined image: '{ref_name}'.")
+                    raise ReferenceNotFoundError(f"Image '{name}' has a 'ref' to an undefined image: '{ref_name}'.")
                 if ref_name in visiting:
                     raise CircularDependencyError(f"Circular dependency in images: '{name}' -> '{ref_name}' forms a loop.")
                 if ref_name not in visited:
@@ -139,7 +147,7 @@ class ConfigModel(BaseModel):
                 ref_name = build_conf.ref
                 logger.debug(f"[Validation] Build '{name}' has ref to '{ref_name}'. Following reference.")
                 if ref_name not in defined_build_names:
-                    raise ValueError(f"Build '{name}' has a 'ref' to an undefined build: '{ref_name}'.")
+                    raise ReferenceNotFoundError(f"Build '{name}' has a 'ref' to an undefined build: '{ref_name}'.")
                 if ref_name in visiting:
                     raise CircularDependencyError(f"Circular dependency in builds: '{name}' -> '{ref_name}' forms a loop.")
                 if ref_name not in visited:
@@ -177,8 +185,8 @@ class Config:
             logger.debug(f"Configuration model validated successfully: \n{self.model.model_dump_json(indent=2)}")
             logger.info("Configuration validation passed.")
         except ValidationError as e:
-            raise ConfigError(f"Configuration validation failed:\n{e}")
-        except CircularDependencyError as e:
+            raise ConfigValidationError(f"Configuration validation failed:\n{e}")
+        except (CircularDependencyError, ReferenceNotFoundError, ImageDefinitionError) as e:
             raise e
 
     def _load_raw_config(self) -> Dict[str, Any]:
@@ -186,13 +194,13 @@ class Config:
             with DNSBPath(self.path).open('r') as f:
                 config_data = yaml.safe_load(f)
                 if not isinstance(config_data, dict):
-                    raise ConfigError("Configuration file must be a YAML document containing a dictionary.")
+                    raise ConfigParsingError("Configuration file must be a YAML document containing a dictionary.")
                 logger.debug(f"Successfully parsed YAML from '{self.path}'.")
                 return config_data
         except FileNotFoundError:
-            raise FileNotFoundError(f"Configuration file not found at: {self.path}")
+            raise ConfigFileMissingError(f"Configuration file not found at: {self.path}")
         except yaml.YAMLError as e:
-            raise ConfigError(f"Error parsing YAML file: {e}")
+            raise ConfigParsingError(f"Error parsing YAML file: {e}")
 
     @property
     def name(self) -> str: 

@@ -6,7 +6,7 @@ from .bases.behaviors import BindForwardBehavior, BindHintBehavior, BindStubBeha
 from .bases.behaviors import UnboundForwardBehavior, UnboundHintBehavior, UnboundStubBehavior
 from .bases.includers import BindIncluder, UnboundIncluder
 from .base import Image, Behavior, Includer
-from .exceptions import ImageError
+from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class ImageFactory:
             return self.resolved_images[name]
 
         if name in self.resolving_stack:
-            raise ImageError(f"Circular dependency detected involving image '{name}'")
+            raise CircularDependencyError(f"Circular dependency detected involving image '{name}'")
 
         logger.debug(f"Resolving image '{name}'...")
         self.resolving_stack.add(name)
@@ -80,13 +80,13 @@ class ImageFactory:
         """Helper to create a concrete Image instance from a resolved config."""
         software_type = config.get("software")
         if not software_type:
-            raise ImageError(
+            raise ImageDefinitionError(
                 f"Cannot instantiate image '{config['name']}': missing 'software' type for an internal image."
             )
 
         image_class = self.software_map.get(software_type)
         if not image_class:
-            raise ImageError(
+            raise ImageDefinitionError(
                 f"Image '{config['name']}' has an unknown 'software' type: {software_type}"
             )
 
@@ -132,7 +132,7 @@ class BehaviorFactory:
         """
         parts = line.strip().split(maxsplit=2)
         if len(parts) != 3:
-            raise ValueError(
+            raise UnsupportedFeatureError(
                 f"Invalid behavior format: '{line}'. Expected '<zone> <type> <target1>,<target2>...'."
             )
 
@@ -157,7 +157,7 @@ class BehaviorFactory:
         behavior_class = self._behaviors.get(key)
 
         if not behavior_class:
-            raise NotImplementedError(
+            raise UnsupportedFeatureError(
                 f"Behavior '{behavior_type}' is not supported for software '{software_type}'."
             )
 
@@ -187,7 +187,7 @@ class IncluderFactory:
         includer_class = self._includers.get(software_type)
 
         if not includer_class:
-            raise NotImplementedError(
+            raise ImageDefinitionError(
                 f"Includer '{software_type}' is not supported for software '{software_type}'."
             )
 

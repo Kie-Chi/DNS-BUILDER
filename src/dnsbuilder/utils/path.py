@@ -6,8 +6,8 @@ import logging
 from typing import override
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from ..exceptions import VolumeNotFoundError
 from .. import constants
+from ..exceptions import VolumeError
 
 # This temporary directory will persist for the life of the program
 # and be cleaned up automatically on exit.
@@ -73,7 +73,7 @@ class DNSBPath(Path):
                     shutil.copy(p, stable_temp_path)
                 return stable_temp_path
         except (FileNotFoundError, KeyError):
-            raise VolumeNotFoundError(f"Internal resource not found: '{resource_name}'")
+            raise VolumeError(f"Internal resource not found: '{resource_name}'")
     
     @property
     def origin(self):

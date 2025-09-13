@@ -1,6 +1,8 @@
 from functools import total_ordering
 import re
 
+from ..exceptions import ImageDefinitionError
+
 @total_ordering
 class Version:
     """
@@ -26,14 +28,14 @@ class Version:
                 try:
                     Version(core_part) # raise ValueError if core_part invalid
                 except ValueError:
-                    raise ValueError(f"Unrecognized Version '{version_str}'")
+                    raise ImageDefinitionError(f"Unrecognized Version '{version_str}'")
             else:
                 core_part_match = re.match(r"(\d+\.\d+\.\d+)", version_str)
                 if core_part_match:
                     core_part = core_part_match.group(1)
                     prerelease_part = version_str[len(core_part):]
                 else: 
-                     raise ValueError(f"Unrecognized Version '{version_str}'")
+                     raise ImageDefinitionError(f"Unrecognized Version '{version_str}'")
 
             self.core = tuple(map(int, core_part.split('.')))
             self.prerelease = self._parse_prerelease(prerelease_part)
@@ -47,13 +49,15 @@ class Version:
             return None
         parts = []
         for part in re.split(r'(\d+)', prerelease_str):
-            if not part: continue
+            if not part: 
+                continue
             if part.isdigit():
                 parts.append(int(part))
             else:
                 # 'rc.1' or 'p' or just 'a'
                 for sub_part in part.split('.'):
-                    if sub_part: parts.append(sub_part)
+                    if sub_part: 
+                        parts.append(sub_part)
         return tuple(parts)
 
     def __str__(self):

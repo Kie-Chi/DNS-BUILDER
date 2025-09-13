@@ -3,7 +3,7 @@ import logging
 from typing import Dict
 
 from .. import constants
-from ..exceptions import BuildError, ConfigError
+from ..exceptions import NetworkDefinitionError
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +37,15 @@ class NetworkManager:
             if ip_address:
                 logger.debug(f"[Network] Service '{service_name}' requested static IP: {ip_address}.")
                 if ipaddress.ip_address(ip_address) not in self.network:
-                    raise ConfigError(f"Static IP '{ip_address}' for '{service_name}' is not in subnet '{self.network}'.")
+                    raise NetworkDefinitionError(f"Static IP '{ip_address}' for '{service_name}' is not in subnet '{self.network}'.")
                 if ip_address in self.service_ips.values():
-                    raise ConfigError(f"Static IP '{ip_address}' for '{service_name}' is already allocated.")
+                    raise NetworkDefinitionError(f"Static IP '{ip_address}' for '{service_name}' is already allocated.")
             else:
                 try:
                     ip_address = str(next(self.ip_allocator))
                     logger.debug(f"[Network] Allocating next available dynamic IP to '{service_name}': {ip_address}.")
                 except StopIteration:
-                    raise BuildError(f"Subnet {self.network} is out of available IP addresses.")
+                    raise NetworkDefinitionError(f"Subnet {self.network} is out of available IP addresses.")
             
             self.service_ips[service_name] = ip_address
         logger.debug(f"Final allocated IPs: {self.service_ips}")

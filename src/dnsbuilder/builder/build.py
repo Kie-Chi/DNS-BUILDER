@@ -17,7 +17,7 @@ from .service import ServiceHandler
 from .. import constants
 from ..config import Config
 from ..utils.path import DNSBPath
-from ..exceptions import BuildError, DNSBuilderError
+from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ class Builder:
         for name, conf in buildable_services.items():
             logger.debug(f"Handling buildable service: '{name}'")
             if 'image' not in conf:
-                raise BuildError(f"Buildable service '{name}' is missing the required 'image' key.")
+                raise ImageDefinitionError(f"Buildable service '{name}' is missing the required 'image' key.")
 
             handler = ServiceHandler(name, context)
             compose_services[name] = handler.generate_all()
@@ -218,8 +218,7 @@ class Builder:
             logger.debug("Predefined build templates loaded successfully.")
             return templates
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to load or parse template file: {e}")
-            return {}
+            raise BuildError(f"Failed to load or parse template file: {e}")
 
     def _setup_workspace(self):
         if self.output_dir.exists(): 

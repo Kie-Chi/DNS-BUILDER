@@ -4,7 +4,7 @@ import shutil
 import logging
 from ..base import Image
 from ..utils.path import DNSBPath
-from ..exceptions import PathError
+from ..exceptions import ImageDefinitionError
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class LocalImage(ExternalImage):
         """
         path = DNSBPath(self.name)
         if not path.exists():
-            raise PathError(f"Local image path '{self.name}' does not exist")
+            raise ImageDefinitionError(f"Local image path '{self.name}' does not exist")
 
         if path.is_file():
             self.path = path
@@ -99,7 +99,7 @@ class LocalImage(ExternalImage):
                 self.path = dockerfile_path
                 return
 
-        raise PathError(f"Local image path '{self.image_name}' is not a file, and does not contain a Dockerfile")
+        raise ImageDefinitionError(f"Local image path '{self.image_name}' is not a file, and does not contain a Dockerfile")
 
     @override
     def write(self, directory: DNSBPath):

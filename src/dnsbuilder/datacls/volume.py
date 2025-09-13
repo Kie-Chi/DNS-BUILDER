@@ -1,7 +1,7 @@
 from typing import List, Dict
 
-from ..exceptions import BuildError
 from ..utils.path import DNSBPath, is_path_valid
+from ..exceptions import VolumeError
 
 """
     Class Volume to resolve volumes like src:dst:mode
@@ -35,7 +35,7 @@ class Volume:
             self.dst = DNSBPath(last)
             self.mode = None
         else:
-            raise BuildError(f"Invalid volume format: {self.origin_volume}, we expect src:dst[:mode]")
+            raise VolumeError(f"Invalid volume format: {self.origin_volume}, we expect src:dst[:mode]")
 
 
     def _init_list(self):

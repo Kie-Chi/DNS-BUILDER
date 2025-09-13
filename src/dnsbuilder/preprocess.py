@@ -3,8 +3,12 @@ import yaml
 from typing import Dict, Any, List, Union
 from jinja2 import Environment
 
-from .exceptions import ConfigError
 from .utils.path import DNSBPath
+from .exceptions import (
+    ConfigFileMissingError,
+    ConfigParsingError,
+    ConfigValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +92,9 @@ class Preprocessor:
                     merged_from_includes = deep_merge(processed_included_config, merged_from_includes)
 
             except FileNotFoundError:
-                raise ConfigError(f"Included file not found: {abs_path}")
+                raise ConfigFileMissingError(f"Included file not found: {abs_path}")
             except yaml.YAMLError as e:
-                raise ConfigError(f"Error parsing included YAML file {abs_path}: {e}")
+                raise ConfigParsingError(f"Error parsing included YAML file {abs_path}: {e}")
 
         if 'builds' in current_config:
             current_config['builds'] = self._preprocess_builds(current_config['builds'])
@@ -125,9 +129,9 @@ class Preprocessor:
                 if isinstance(range_args, list):
                     return list(range(*range_args))
             except (TypeError, ValueError) as e:
-                raise ConfigError(f"Invalid 'range' arguments in for_each: {range_args}. Must be an int or a list of ints. Error: {e}")
+                raise ConfigValidationError(f"Invalid 'range' arguments in for_each: {range_args}. Must be an int or a list of ints. Error: {e}")
         
-        raise ConfigError(f"Invalid 'for_each' format: {iterator_def}. Must be a list or a dict with a 'range' key.")
+        raise ConfigValidationError(f"Invalid 'for_each' format: {iterator_def}. Must be a list or a dict with a 'range' key.")
 
     def _preprocess_builds(self, builds_config: Union[List, Dict]) -> Dict:
         """
@@ -138,7 +142,7 @@ class Preprocessor:
             return builds_config
 
         if not isinstance(builds_config, list):
-            raise ConfigError(f"'builds' must be a dictionary or a list, but got {type(builds_config).__name__}.")
+            raise ConfigValidationError(f"'builds' must be a dictionary or a list, but got {type(builds_config).__name__}.")
 
         final_builds: Dict[str, Any] = {}
 
@@ -150,7 +154,7 @@ class Preprocessor:
                 template_conf = item.get('template')
 
                 if not all([name_template, iterator_def is not None, template_conf]):
-                    raise ConfigError(f"Invalid build comprehension block: {item}. Must contain 'name', 'for_each', and 'template' keys.")
+                    raise ConfigValidationError(f"Invalid build comprehension block: {item}. Must contain 'name', 'for_each', and 'template' keys.")
 
                 iterator = self._parse_for_each(iterator_def)
                 logger.debug(f"Expanding build comprehension for '{name_template}' over {len(iterator)} items...")
@@ -161,12 +165,12 @@ class Preprocessor:
                     service_name = self.jinja_env.from_string(name_template).render(context)
                     
                     if service_name in final_builds:
-                        raise ConfigError(f"Duplicate service name '{service_name}' generated from a build comprehension.")
+                        raise ConfigValidationError(f"Duplicate service name '{service_name}' generated from a build comprehension.")
                     final_builds[service_name] = self._render_template_recursive(template_conf, context)
             
             elif isinstance(item, dict) and len(item) == 1:
                 final_builds.update(item)
             else:
-                raise ConfigError(f"Invalid item in 'builds' list: {item}. Must be a comprehension block or a single-key dictionary for a service.")
+                raise ConfigValidationError(f"Invalid item in 'builds' list: {item}. Must be a comprehension block or a single-key dictionary for a service.")
         
         return final_builds

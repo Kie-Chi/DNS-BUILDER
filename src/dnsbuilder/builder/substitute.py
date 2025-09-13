@@ -7,7 +7,7 @@ from typing import Dict, Any
 from ..config import Config
 from ..base import Image
 from ..bases.internal import InternalImage
-from ..exceptions import BuildError
+from ..exceptions import BuildError, ReferenceNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +92,9 @@ class VariableSubstitutor:
                         return ip
                     # Check if builable
                     if service_to_find in self.config.builds_config:
-                         raise BuildError(f"Cannot resolve IP for service '{service_to_find}': the service is defined but is not buildable (likely `build: false`).")
+                         raise ReferenceNotFoundError(f"Cannot resolve IP for service '{service_to_find}': the service is defined but is not buildable (likely `build: false`).")
                     else:
-                         raise BuildError(f"Cannot resolve IP for service '{service_to_find}': service not found in builds configuration.")
+                         raise ReferenceNotFoundError(f"Cannot resolve IP for service '{service_to_find}': service not found in builds configuration.")
 
                 # service.other
                 if key in var_map:

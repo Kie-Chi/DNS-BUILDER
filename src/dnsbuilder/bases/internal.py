@@ -8,8 +8,8 @@ import logging
 from ..base import Image
 from ..rules.rule import Rule
 from ..rules.version import Version
-from ..exceptions import ImageError
 from ..utils.path import DNSBPath
+from ..exceptions import ImageDefinitionError
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class InternalImage(Image, ABC):
             )
             ruleset = json.loads(rules_text)
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            raise ImageError(f"Failed to load rules for '{self.software}': {e}")
+            raise ImageDefinitionError(f"Failed to load rules for '{self.software}': {e}")
 
         version_obj = Version(self.version)
         is_valid = False
@@ -127,7 +127,7 @@ class InternalImage(Image, ABC):
                 self.default_deps.add(dep)
 
         if not is_valid:
-            raise ImageError(
+            raise ImageDefinitionError(
                 f"[{self.name}] Version '{self.version}' is not valid according to the ruleset."
             )
 
@@ -138,7 +138,7 @@ class InternalImage(Image, ABC):
                 f"[{self.name}] OS version set to '{os_version_from_rule}' by rule."
             )
         elif ":" in self.name and not self.os_version:
-            raise ImageError(
+            raise ImageDefinitionError(
                 f"[{self.name}] Failed to determine OS version from rules for version '{self.version}'."
             )
 
@@ -154,7 +154,7 @@ class InternalImage(Image, ABC):
                 .read_text(encoding="utf-8")
             )
         except FileNotFoundError:
-            raise ImageError(f"Dockerfile template for '{self.software}' not found.")
+            raise ImageDefinitionError(f"Dockerfile template for '{self.software}' not found.")
 
         template_vars = self._get_template_vars()
         return template.format(**template_vars)

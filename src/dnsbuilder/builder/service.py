@@ -8,8 +8,9 @@ from ..bases.external import LocalImage
 from ..datacls.contexts import BuildContext
 from ..datacls.volume import Volume
 from .. import constants
-from ..exceptions import BuildError, VolumeNotFoundError
 from ..utils.path import DNSBPath
+from ..exceptions import BuildError, VolumeError, BehaviorError
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class ServiceHandler:
             try:
                 volume = Volume(volume_str)
             except BuildError as e:
-                raise BuildError(f"Invalid volume format in service '{self.service_name}': {e}")
+                raise VolumeError(f"Invalid volume format in service '{self.service_name}': {e}")
 
             host_path = volume.src
             container_path = volume.dst.origin
@@ -67,7 +68,7 @@ class ServiceHandler:
             if not host_path.is_resource:
                 if not host_path.exists():
                     if not host_path.is_absolute():
-                        raise VolumeNotFoundError(f"Volume relative source path does not exist: '{host_path.origin}'")
+                        raise VolumeError(f"Volume relative source path does not exist: '{host_path.origin}'")
                     else:
                         logger.warning(f"Volume absolute source path does not exist: '{host_path.origin}', please check if it is in WSL etc.")
 
@@ -107,11 +108,11 @@ class ServiceHandler:
 
         logger.debug(f"Processing behavior for '{self.service_name}'...")
         if not main_conf_path: 
-            raise BuildError(f"Service '{self.service_name}' has 'behavior' but no main .conf file.")
+            raise BehaviorError(f"Service '{self.service_name}' has 'behavior' but no main .conf file.")
         if not self.is_internal_image: 
-            raise BuildError(f"Cannot create 'behavior' for an external image '{self.image_name}'")
+            raise BehaviorError(f"Cannot create 'behavior' for an external image '{self.image_name}'")
         if not self.image_obj.software: 
-            raise BuildError(f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' has no 'software' type.")
+            raise BehaviorError(f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' has no 'software' type.")
 
         all_config_lines: Dict[str, List[str]] = {
             constants.BehaviorSection.SERVER: [], 
@@ -139,7 +140,7 @@ class ServiceHandler:
                 
                 target_ip = self.context.service_ips.get(target)
                 if not target_ip:
-                    raise BuildError(f"Behavior in '{self.service_name}' references an undefined service or invalid IP: '{target}'.")
+                    raise BehaviorError(f"Behavior in '{self.service_name}' references an undefined service or invalid IP: '{target}'.")
                 resolved_ips.append(target_ip)
                 logger.debug(f"Resolved behavior target service '{target}' to IP '{target_ip}'.")
 

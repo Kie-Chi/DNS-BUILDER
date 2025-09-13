@@ -5,7 +5,13 @@ from typing import Dict, Any
 from .. import constants
 from ..config import Config
 from ..base import Image
-from ..exceptions import BuildError, ConfigError, CircularDependencyError
+from ..exceptions import (
+    BuildDefinitionError,
+    ReferenceNotFoundError,
+    CircularDependencyError,
+    ImageDefinitionError,
+    UnsupportedFeatureError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +46,7 @@ class Resolver:
         self.resolving_stack.add(service_name)
         
         if service_name not in self.config.builds_config:
-            raise ConfigError(f"Build configuration for '{service_name}' not found.")
+            raise BuildDefinitionError(f"Build configuration for '{service_name}' not found.")
         
         service_conf = self.config.builds_config[service_name]
         ref = service_conf.get('ref')
@@ -54,20 +60,20 @@ class Resolver:
                 role = ref.split(':', 1)[1]
                 image_name = service_conf.get('image')
                 if not image_name:
-                    raise ConfigError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key in service '{service_name}'.")
+                    raise BuildDefinitionError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key in service '{service_name}'.")
                 image_obj = self.images.get(image_name)
                 if not image_obj:
-                    raise ConfigError(
-                        f"Service '{service_name}' uses an external image '{image_name}'"
+                    raise ReferenceNotFoundError(
+                        f"Service '{service_name}' uses an external image '{image_name}' which is not defined."
                     )
                 software_type = image_obj.software
                 if not software_type:
-                    raise ConfigError(f"Image '{image_name}' (used by service '{service_name}') has no 'software' type, which is required for the ref '{ref}'.")
+                    raise ImageDefinitionError(f"Image '{image_name}' (used by service '{service_name}') has no 'software' type, which is required for the ref '{ref}'.")
                 
                 predefined_ref = f"{software_type}:{role}"
                 logger.debug(f"[Resolver] Interpreted '{ref}' as standard build '{predefined_ref}'.")
                 if software_type not in self.predefined_builds or role not in self.predefined_builds.get(software_type, {}):
-                    raise BuildError(f"Unknown predefined build for '{predefined_ref}'.")
+                    raise ReferenceNotFoundError(f"Unknown predefined build for '{predefined_ref}'.")
                 
                 parent_conf = self.predefined_builds[software_type][role]
                 logger.debug(f"[Resolver] Loaded parent config from predefined build '{predefined_ref}'.")
@@ -75,7 +81,7 @@ class Resolver:
             elif ':' in ref:
                 software_type, role = ref.split(':', 1)
                 if software_type not in self.predefined_builds or role not in self.predefined_builds.get(software_type, {}):
-                    raise BuildError(f"Unknown predefined build: '{ref}'.")
+                    raise ReferenceNotFoundError(f"Unknown predefined build: '{ref}'.")
                 parent_conf = self.predefined_builds[software_type][role]
                 logger.debug(f"[Resolver] Loaded parent config from predefined build '{ref}'.")
             else:
@@ -92,12 +98,12 @@ class Resolver:
                     mixin_name = mixin_ref.split(':', 1)[1]
                     mixin_conf = self.predefined_builds.get('_std', {}).get(mixin_name)
                     if not mixin_conf:
-                        raise BuildError(f"Unknown standard mixin '{mixin_ref}' for service '{service_name}'.")
+                        raise ReferenceNotFoundError(f"Unknown standard mixin '{mixin_ref}' for service '{service_name}'.")
                     
                     logger.debug(f"[Resolver] Merging mixin '{mixin_ref}' into '{service_name}'.")
                     parent_conf = self._merge_configs(parent_conf, mixin_conf)
                 else:
-                    raise BuildError(f"Unsupported mixin format '{mixin_ref}'.")
+                    raise UnsupportedFeatureError(f"Unsupported mixin format '{mixin_ref}'.")
 
         logger.debug(f"[Resolver] Merging parent/mixin config with child config for '{service_name}'.")
         final_conf = self._merge_configs(parent_conf, service_conf)
