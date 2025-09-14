@@ -2,23 +2,28 @@ name: "SLD-example-config"
 images:
   - name: "root"
     ref: "bind:9.18.0"
-  - name: "TLD"
+  - name: "tld"
     ref: "bind:9.18.0"
-  - name: "SLD"
+  - name: "sld"
     ref: "bind:9.18.0"
   - name: "recursor"
     ref: "bind:9.18.0"
 builds:
   - recursor:
-    image: "recursor"
-    ref: "std:recursor"
-    behavior: . hint root
+      image: "recursor"
+      ref: "std:recursor"
+      behavior: . hint root
   - root:
       image: "root"
       ref: "std:auth"
-  - TLD:
-      image: "TLD"
+      behavior: . master com NS tld
+  - tld:
+      image: "tld"
       ref: "std:auth"
-  - SLD:
-      image: "SLD"
+      behavior: com master example NS sld
+  - sld:
+      image: "sld"
       ref: "std:auth"
+      behavior: |
+        example.com master www A 1.2.3.4
+        example.com master mail A 1.2.3.5

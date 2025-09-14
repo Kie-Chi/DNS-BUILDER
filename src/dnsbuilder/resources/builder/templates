@@ -50,10 +50,6 @@
         "influxdb": {
             "build": false,
             "image": "tutum/influxdb",
-            "restart": "always",
-            "environment": [
-                "PRE_CREATE_DB=monitor"
-            ],
             "ports": [
                 "8083:8083",
                 "8086:8086"
@@ -65,15 +61,6 @@
         "cadvisor": {
             "build": false,
             "image": "google/cadvisor",
-            "links": [
-                "influxdb:influxsrv"
-            ],
-            "command": [
-                "-storage_driver=influxdb",
-                "-storage_driver_db=monitor",
-                "-storage_driver_host=influxsrv:8086"
-            ],
-            "restart": "always",
             "ports": [
                 "8080:8080"
             ],
@@ -88,22 +75,12 @@
             "build": false,
             "image": "grafana/grafana",
             "user": "104",
-            "restart": "always",
-            "links": [
-                "influxdb:influxsrv"
-            ],
             "ports": [
                 "3000:3000"
             ],
             "mounts": [
                 "./${name}/contents:/var/lib/grafana"
-            ],
-            "environment": {
-                "HTTP_USER": "root",
-                "HTTP_PASS": "root",
-                "INFLUXDB_HOST": "influxsrv",
-                "INFLUXDB_PORT": "8086"
-            }
+            ]
         },
         "traffic": {
             "cap_add": [

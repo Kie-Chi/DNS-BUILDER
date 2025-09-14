@@ -1,0 +1,5 @@
+name: "CPU-resource-example-Config"
+builds:
+  - cadvisor:
+      ref: monitor:cadvisor
+      container_name: ${project.name}-cadvisor

@@ -2,11 +2,26 @@ name: ""
 include: traffic.yml
 builds:
   - influxdb:
-      ref: monitor:influxdb
-      container_name: ${project.name}-influxdb 
+        ref: monitor:influxdb
+        environment: 
+            - "PRE_CREATE_DB=monitor"
+        container_name: ${project.name}-influxdb 
   - cadvisor:
-      ref: monitor:cadvisor
-      container_name: ${project.name}-cadvisor
+        ref: monitor:cadvisor
+        links: 
+          - "influxdb:influxsrv"
+        command: 
+          - "-storage_driver=influxdb"
+          - "-storage_driver_db=monitor"
+          - "-storage_driver_host=influxsrv:8086"
+        container_name: ${project.name}-cadvisor
   - grafana:
-      ref: monitor:grafana
-      container_name: ${project.name}-grafana
+        ref: monitor:grafana
+        links: 
+            - "influxdb:influxsrv"
+        environment: 
+            - "HTTP_USER=root"
+            - "HTTP_PASS=root"
+            - "INFLUXDB_HOST=influxsrv"
+            - "INFLUXDB_PORT=8086"
+        container_name: ${project.name}-grafana
