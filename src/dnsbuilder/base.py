@@ -1,9 +1,11 @@
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 import logging
 
 from .datacls.artifacts import BehaviorArtifact
+if TYPE_CHECKING:
+    from .datacls.contexts import BuildContext
 from .utils.path import DNSBPath
 
 logger = logging.getLogger(__name__)
@@ -71,7 +73,7 @@ class Behavior(ABC):
         self.targets = targets
 
     @abstractmethod
-    def generate(self, service_name: str, target_ips: List[str]) -> BehaviorArtifact:
+    def generate(self, service_name: str, build_context: "BuildContext") -> BehaviorArtifact:
         """
         Generates the necessary configuration line and any associated files.
         

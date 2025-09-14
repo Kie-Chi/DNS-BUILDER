@@ -1,12 +1,15 @@
 import shutil
-import ipaddress
 import logging
-from typing import Dict, Any,List
+from typing import Dict, Any, List, Tuple
+import collections
 
 from ..bases.internal import InternalImage
 from ..bases.external import LocalImage
 from ..datacls.contexts import BuildContext
+from ..datacls.artifacts import BehaviorArtifact
 from ..datacls.volume import Volume
+from ..bases.behaviors import MasterBehavior
+from .zone import ZoneGenerator
 from .. import constants
 from ..utils.path import DNSBPath
 from ..exceptions import BuildError, VolumeError, BehaviorError
@@ -100,52 +103,104 @@ class ServiceHandler:
                 logger.debug(f"Relative/resource path copied and added as processed volume: {final_volume_str}")
         return main_conf_output_path
 
+    def _generate_artifacts_from_behaviors(
+        self,
+    ) -> Tuple[List[BehaviorArtifact], List[Tuple[BehaviorArtifact, MasterBehavior]]]:
+        """Parses all behavior lines and generates initial artifacts."""
+        standard_artifacts = []
+        master_artifacts_with_obj = []
+        behavior_str = self.build_conf.get("behavior", "")
+
+        for line in behavior_str.strip().split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            logger.debug(f"Parsing behavior line: '{line}'")
+            behavior_obj = self.context.behavior_factory.create(
+                line, self.image_obj.software
+            )
+            artifact = behavior_obj.generate(self.service_name, self.context)
+
+            if isinstance(behavior_obj, MasterBehavior):
+                master_artifacts_with_obj.append((artifact, behavior_obj))
+            else:
+                standard_artifacts.append(artifact)
+
+        return standard_artifacts, master_artifacts_with_obj
+
+    def _process_master_zones(
+        self, master_artifacts_with_obj: List[Tuple[BehaviorArtifact, MasterBehavior]]
+    ) -> Dict[constants.BehaviorSection, List[str]]:
+        """Aggregates master records, generates zone files, and creates config lines."""
+        all_config_lines = collections.defaultdict(list)
+        if not master_artifacts_with_obj:
+            return all_config_lines
+
+        records_by_zone = collections.defaultdict(list)
+        behavior_by_zone = {}
+
+        # 1. Aggregate records by the zone file key specified in the behavior
+        for artifact, behavior_obj in master_artifacts_with_obj:
+            zone_key = behavior_obj.zone_file_key
+            for record in artifact.new_records:
+                records_by_zone[zone_key].append(record)
+
+            if zone_key not in behavior_by_zone:
+                behavior_by_zone[zone_key] = behavior_obj
+
+        gen_vol_dir = self.contents_dir / constants.GENERATED_ZONES_SUBDIR
+        gen_vol_dir.mkdir(exist_ok=True)
+
+        # 2. Generate zone file and config line for each aggregated zone
+        for zone, records in records_by_zone.items():
+            generator = ZoneGenerator(self.context, zone, self.service_name, records)
+            zone_content = generator.generate_zone_file()
+
+            filename = f"db.{zone}" if zone != "." else "db.root"
+            filepath = gen_vol_dir / filename
+            filepath.write_text(zone_content)
+
+            container_path = f"/usr/local/etc/zones/{filename}"
+            volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{filename}:{container_path}"
+            self.processed_volumes.append(volume_str)
+            logger.debug(f"Generated master zone file and volume: {volume_str}")
+
+            behavior_obj = behavior_by_zone[zone]
+            config_line = behavior_obj.generate_config_line(zone, container_path)
+            all_config_lines[constants.BehaviorSection.TOPLEVEL].append(config_line)
+
+        return all_config_lines
+
     def _process_behavior(self, main_conf_path: DNSBPath | None):
-        behavior_str = self.build_conf.get('behavior')
-        if not behavior_str: 
+        """Orchestrates the entire behavior processing workflow."""
+        if not self.build_conf.get("behavior"):
             logger.debug(f"Service '{self.service_name}' has no behavior to process.")
             return
 
         logger.debug(f"Processing behavior for '{self.service_name}'...")
-        if not main_conf_path: 
-            raise BehaviorError(f"Service '{self.service_name}' has 'behavior' but no main .conf file.")
-        if not self.is_internal_image: 
-            raise BehaviorError(f"Cannot create 'behavior' for an external image '{self.image_name}'")
-        if not self.image_obj.software: 
-            raise BehaviorError(f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' has no 'software' type.")
+        if not main_conf_path:
+            raise BehaviorError(
+                f"Service '{self.service_name}' has 'behavior' but no main .conf file."
+            )
+        if not self.is_internal_image or not self.image_obj.software:
+            raise BehaviorError(
+                f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' must be internal and have a 'software' type."
+            )
 
-        all_config_lines: Dict[str, List[str]] = {
-            constants.BehaviorSection.SERVER: [], 
-            constants.BehaviorSection.TOPLEVEL: []
-        }
+        # Step 1: Generate all artifacts from behavior lines
+        standard_artifacts, master_artifacts_with_obj = (
+            self._generate_artifacts_from_behaviors()
+        )
 
-        for line in behavior_str.strip().split('\n'):
-            line = line.strip()
-            if not line or line.startswith('#'): 
-                continue
-            
-            logger.debug(f"Parsing behavior line: '{line}'")
-            behavior_obj = self.context.behavior_factory.create(line, self.image_obj.software)
-            
-            resolved_ips = []
-            for target in behavior_obj.targets:
-                try:
-                    ipaddress.ip_address(target)
-                    resolved_ips.append(target)
-                    logger.debug(f"Behavior target '{target}' is a valid IP address.")
-                    continue
-                except ValueError:
-                    # Not a valid IP, assume it's a service name
-                    pass
-                
-                target_ip = self.context.service_ips.get(target)
-                if not target_ip:
-                    raise BehaviorError(f"Behavior in '{self.service_name}' references an undefined service or invalid IP: '{target}'.")
-                resolved_ips.append(target_ip)
-                logger.debug(f"Resolved behavior target service '{target}' to IP '{target_ip}'.")
+        # Step 2: Process master zone artifacts to generate zone files and their config lines
+        all_config_lines = self._process_master_zones(master_artifacts_with_obj)
 
-            artifact = behavior_obj.generate(self.service_name, resolved_ips)
-            logger.debug(f"Generated behavior artifact: section='{artifact.section}', line='{artifact.config_line.replace(chr(10), ' ')}'")
+        # Step 3: Process standard (non-master) artifacts
+        for artifact in standard_artifacts:
+            logger.debug(
+                f"Generated behavior artifact: section='{artifact.section}', line='{artifact.config_line.replace(chr(10), ' ')}'"
+            )
             all_config_lines[artifact.section].append(artifact.config_line)
 
             if artifact.new_volume:
@@ -156,37 +211,62 @@ class ServiceHandler:
                 filepath.write_text(vol.content)
                 final_volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{vol.filename}:{vol.container_path}"
                 self.processed_volumes.append(final_volume_str)
-                logger.debug(f"Generated and added new volume from behavior: {final_volume_str}")
-        
+                logger.debug(
+                    f"Generated and added new volume from behavior: {final_volume_str}"
+                )
+
+        # Step 4: Write all collected config lines to the generated zones file
         generated_zones_content = self._format_behavior_config(all_config_lines)
-        if not generated_zones_content.strip(): 
+        if not generated_zones_content.strip():
             return
 
         gen_zones_path = self.contents_dir / constants.GENERATED_ZONES_FILENAME
-        gen_zones_path.write_text(f"# Auto-generated by DNS Builder\n\n{generated_zones_content}\n")
+        gen_zones_path.write_text(
+            f"# Auto-generated by DNS Builder\n\n{generated_zones_content}\n"
+        )
         logger.debug(f"Wrote generated behavior config to '{gen_zones_path}'.")
-        
-        container_conf_path = f"/usr/local/etc/zones/{constants.GENERATED_ZONES_FILENAME}"
-        self.processed_volumes.append(f"./{self.service_name}/contents/{constants.GENERATED_ZONES_FILENAME}:{container_conf_path}")
-        
-        includer = self.context.includer_factory.create(container_conf_path, self.image_obj.software)
-        includer.write(str(main_conf_path))
-        logger.debug(f"Appended include directive for '{container_conf_path}' to '{main_conf_path}'.")
 
-    def _format_behavior_config(self, all_config_lines: Dict[str, List[str]]) -> str:
-        content = ""
-        if self.image_obj.software == constants.SOFTWARE_UNBOUND:
-            if all_config_lines[constants.BehaviorSection.SERVER]:
-                content += "server:\n"
-                for line in all_config_lines[constants.BehaviorSection.SERVER]:
-                    indented = "\n".join([f"\t{sub}" for sub in line.split('\n')])
-                    content += f"{indented}\n"
-            if all_config_lines[constants.BehaviorSection.TOPLEVEL]:
-                content += "\n" + "\n\n".join(all_config_lines[constants.BehaviorSection.TOPLEVEL])
-        else:
-            all_lines = [line for section_lines in all_config_lines.values() for line in section_lines]
-            content = "\n".join(all_lines)
-        return content
+        container_conf_path = (
+            f"/usr/local/etc/zones/{constants.GENERATED_ZONES_FILENAME}"
+        )
+        self.processed_volumes.append(
+            f"./{self.service_name}/contents/{constants.GENERATED_ZONES_FILENAME}:{container_conf_path}"
+        )
+
+        includer = self.context.includer_factory.create(
+            container_conf_path, self.image_obj.software
+        )
+        includer.write(str(main_conf_path))
+        logger.debug(
+            f"Appended include directive for '{container_conf_path}' to '{main_conf_path}'."
+        )
+
+    def _format_behavior_config(
+        self, config_lines_by_section: Dict[constants.BehaviorSection, List[str]]
+    ) -> str:
+        """Formats the collected behavior config lines"""
+        output_parts = []
+        software_type = self.image_obj.software
+
+        if software_type == "unbound":
+            server_lines = config_lines_by_section.get(
+                constants.BehaviorSection.SERVER, []
+            )
+            if server_lines:
+                output_parts.append("server:")
+                for line in server_lines:
+                    indented_line = "\n".join(
+                        [f"    {sub_line}" for sub_line in line.split("\n")]
+                    )
+                    output_parts.append(indented_line)
+
+        # For both 'bind' and 'unbound', toplevel lines are added at the root.
+        toplevel_lines = config_lines_by_section.get(
+            constants.BehaviorSection.TOPLEVEL, []
+        )
+        output_parts.extend(toplevel_lines)
+
+        return "\n\n".join(output_parts)
 
     def _assemble_compose_service(self) -> Dict:
         logger.debug(f"Assembling final docker-compose service block for '{self.service_name}'.")

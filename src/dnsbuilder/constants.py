@@ -1,4 +1,5 @@
 from enum import Enum
+from dnslib import A, CNAME, AAAA, TXT, NS
 
 # --- Filenames and Paths ---
 GENERATED_ZONES_FILENAME = "generated_zones.conf"
@@ -18,6 +19,14 @@ SOFTWARE_UNBOUND = "unbound"
 class BehaviorSection(str, Enum):
     SERVER = "server"
     TOPLEVEL = "toplevel"
+
+RECORD_TYPE_MAP = {
+    "A": A,
+    "NS": NS,
+    "AAAA": AAAA,
+    "CNAME": CNAME,
+    "TXT": TXT,
+}
 
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]

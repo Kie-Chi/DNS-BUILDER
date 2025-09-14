@@ -2,8 +2,8 @@ from typing import Dict, Set, Tuple, List, Any, Type
 import logging
 
 from .bases.internal import InternalImage, BindImage, UnboundImage, PythonImage
-from .bases.behaviors import BindForwardBehavior, BindHintBehavior, BindStubBehavior
-from .bases.behaviors import UnboundForwardBehavior, UnboundHintBehavior, UnboundStubBehavior
+from .bases.behaviors import BindForwardBehavior, BindHintBehavior, BindStubBehavior, BindMasterBehavior
+from .bases.behaviors import UnboundForwardBehavior, UnboundHintBehavior, UnboundStubBehavior, UnboundMasterBehavior
 from .bases.includers import BindIncluder, UnboundIncluder
 from .base import Image, Behavior, Includer
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError
@@ -113,10 +113,12 @@ class BehaviorFactory:
             ("bind", "hint"): BindHintBehavior,
             ("bind", "stub"): BindStubBehavior,
             ("bind", "forward"): BindForwardBehavior,
+            ("bind", "master"): BindMasterBehavior,
             # Unbound Implementations
             ("unbound", "hint"): UnboundHintBehavior,
             ("unbound", "stub"): UnboundStubBehavior,
             ("unbound", "forward"): UnboundForwardBehavior,
+            ("unbound", "master"): UnboundMasterBehavior,
             # To add more SoftWare Implementations
         }
 
@@ -131,16 +133,25 @@ class BehaviorFactory:
             behavior_type, args used for init behavior (zone, targets)
         """
         parts = line.strip().split(maxsplit=2)
-        if len(parts) != 3:
+        if len(parts) < 2:  # At least <zone> <type>
+            raise UnsupportedFeatureError(
+                f"Invalid behavior format: '{line}'. Expected at least '<zone> <type> ...'."
+            )
+
+        zone, behavior_type = parts[0], parts[1]
+        args_str = parts[2] if len(parts) > 2 else ""
+
+        if behavior_type == "master":
+            return (behavior_type, [zone, args_str])
+
+        if not args_str:
             raise UnsupportedFeatureError(
                 f"Invalid behavior format: '{line}'. Expected '<zone> <type> <target1>,<target2>...'."
             )
 
-        zone, behavior_type, targets_str = parts
-        targets = [t.strip() for t in targets_str.split(",")]
-
+        targets = [t.strip() for t in args_str.split(",")]
         return (behavior_type, [zone, targets])
-
+ 
     def create(self, line: str, software_type: str) -> Behavior:
         """
         Parses a behavior line and returns the correct Behavior instance

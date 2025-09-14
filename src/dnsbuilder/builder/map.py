@@ -39,14 +39,29 @@ class Mapper:
                 if not line or line.startswith('#'):
                     continue
 
-                # <zone> <type> <target1>,<target2>,...
                 parts = line.split(maxsplit=2)
-                if len(parts) < 3:
-                    logger.warning(f"Could not parse behavior line for topology mapping: '{line}' in service '{service_name}'")
+                if len(parts) < 2 :  # Allow behaviors like 'master' that might not have targets initially
+                    logger.warning(
+                        f"Could not parse behavior line for topology mapping: '{line}' in service '{service_name}'"
+                    )
                     continue
-                
-                targets_str = parts[2]
-                targets = [t.strip() for t in targets_str.split(',')]
+
+                _, behavior_type, args_str = (parts + [""])[:3]
+
+                targets_str = ""
+                if behavior_type == "master":
+                    if args_str:
+                        # For master, format is: <record-name> <type> <target1>,<target2>...
+                        master_args = args_str.split(maxsplit=2)
+                        if len(master_args) == 3:
+                            targets_str = master_args[2] # The third part is the actual target list
+                else:
+                    targets_str = args_str
+
+                if not targets_str:
+                    continue  # No targets to map for this line
+
+                targets = [t.strip() for t in targets_str.split(",")]
 
                 for target in targets:
                     # Check if the target is a defined service or an external IP

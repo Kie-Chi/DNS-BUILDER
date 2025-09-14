@@ -1,5 +1,6 @@
-from typing import Optional
-from pydantic import BaseModel
+from typing import Optional, List
+from dnslib import RR
+from pydantic import BaseModel, ConfigDict
 from .. import constants
 
 class VolumeArtifact(BaseModel):
@@ -14,6 +15,10 @@ class BehaviorArtifact(BaseModel):
     """
         Class represents output of a behavior generation process.
     """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     config_line: str
     new_volume: Optional[VolumeArtifact] = None
     section: constants.BehaviorSection = constants.BehaviorSection.TOPLEVEL
+    new_records: Optional[List[RR]] = None
+
+

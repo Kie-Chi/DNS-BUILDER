@@ -13,7 +13,7 @@ class BindIncluder(Includer):
     """
     def write(self, conf):
         with open(conf, "a", encoding="utf-8") as _conf:
-            _conf.write(f'# Auto-Include by DNS Builder\ninclude "{self.config_line}";\n')
+            _conf.write(f'\n# Auto-Include by DNS Builder\ninclude "{self.config_line}";\n')
 
 # -------------------------
 #
