@@ -1,0 +1,9 @@
+
+images:
+  - name: "judas"
+    ref: "judas:0.0.0"
+
+builds:
+  - diy-auth:
+      image: "judas"
+      command: ["node", "judasdns.js"]

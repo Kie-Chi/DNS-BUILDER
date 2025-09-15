@@ -1,7 +1,7 @@
 from typing import Dict, Set, Tuple, List, Any, Type
 import logging
 
-from .bases.internal import InternalImage, BindImage, UnboundImage, PythonImage
+from .bases.internal import InternalImage, BindImage, UnboundImage, PythonImage, JudasImage
 from .bases.behaviors import BindForwardBehavior, BindHintBehavior, BindStubBehavior, BindMasterBehavior
 from .bases.behaviors import UnboundForwardBehavior, UnboundHintBehavior, UnboundStubBehavior, UnboundMasterBehavior
 from .bases.includers import BindIncluder, UnboundIncluder
@@ -29,6 +29,7 @@ class ImageFactory:
             "bind": BindImage,
             "unbound": UnboundImage,
             "python": PythonImage,
+            "judas": JudasImage,
         }
         logger.debug("ImageFactory initialized.")
 

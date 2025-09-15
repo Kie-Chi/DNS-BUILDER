@@ -50,5 +50,20 @@
             "python3-dnslib",
             "python3-scapy"
         ]
+    },
+    "judas": {
+        "default_deps": [
+            "git"
+        ],
+        "default_utils": [
+            "iproute2",
+            "vim",
+            "dnsutils",
+            "tcpdump",
+            "tmux",
+            "cmake",
+            "libuv1-dev",
+            "libcap-dev"
+        ]
     }
 }

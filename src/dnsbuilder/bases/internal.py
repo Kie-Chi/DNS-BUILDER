@@ -83,6 +83,22 @@ class InternalImage(Image, ABC):
         else:
             # User-defined image with 'from'
             self.base_image = f"{self.os}:{self.os_version}"
+        
+    def __os_version(self, dep: str) -> bool:
+        """
+            Judge a dependency rule for os version or not
+        """
+        if "." in dep:
+            # like ubuntu:12.04, python:3.9-slim etc.
+            return True
+        else:
+            # like debian:12, node:14 etc.
+            try:
+                int(dep)
+                return True
+            except Exception:
+                pass
+        return False
 
     def _generate_deps_from_rules(self):
         """
@@ -115,7 +131,7 @@ class InternalImage(Image, ABC):
             if dep is None:
                 # Version Validation
                 is_valid = True
-            elif "." in dep:
+            elif self.__os_version(dep):
                 # OS Version Fetch
                 if not os_version_from_rule:
                     os_version_from_rule = dep
@@ -290,6 +306,24 @@ class UnboundImage(InternalImage):
         Nothing to do
         """
         pass  # Unbound has nothing to do
+
+# ------------------------
+#
+#   JUDAS IMAGE
+#
+# ------------------------
+
+class JudasImage(InternalImage):
+    """
+    Concrete Image class for JudasDNS
+    """
+
+    @override
+    def _post_init_hook(self):
+        """
+        Handle JudasDNS's specific dependency logic after base setup.
+        """
+        self.os = "node"
 
 # -------------------------
 #
