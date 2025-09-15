@@ -5,7 +5,7 @@ try:
     import graphviz
 except ImportError:
     graphviz = None
-
+from ..bases.behaviors import _get_rname
 from ..utils.path import DNSBPath
 
 logger = logging.getLogger(__name__)
@@ -46,15 +46,23 @@ class Mapper:
                     )
                     continue
 
-                _, behavior_type, args_str = (parts + [""])[:3]
-
+                record, behavior_type, args_str = (parts + [""])[:3]
+                record = record.rstrip(".") + "."
                 targets_str = ""
                 if behavior_type == "master":
                     if args_str:
-                        # For master, format is: <record-name> <type> <target1>,<target2>...
-                        master_args = args_str.split(maxsplit=2)
-                        if len(master_args) == 3:
-                            targets_str = master_args[2] # The third part is the actual target list
+                        # For master, format is: <record-name> <type> [<ttl>] <target1> ,<target2> ...
+                        master_args = args_str.split(maxsplit=3)
+                        if len(master_args) >= 4:
+                            # solve the ttl or unexpected space between targets
+                            try:
+                                int(master_args[2])
+                                targets_str = master_args[3]
+                            except Exception:
+                                targets_str = args_str.split(maxsplit=2)[-1]
+                                pass
+                        elif len(master_args) == 3:
+                            targets_str = master_args[-1] # The third part is the actual target list
                 else:
                     targets_str = args_str
 
@@ -73,6 +81,7 @@ class Mapper:
                         pass # It's not an IP, assume it's a service name
 
                     if not is_ip and target not in defined_services:
+                        target = _get_rname(target, record)
                         logger.warning(
                             f"Service '{service_name}' has a behavior targeting an "
                             f"undefined service or invalid name: '{target}'"

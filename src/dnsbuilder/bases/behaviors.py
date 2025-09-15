@@ -1,6 +1,7 @@
 from typing import List, Tuple, TYPE_CHECKING
 from abc import ABC, abstractmethod
 from ..base import Behavior
+import uuid
 if TYPE_CHECKING:
     from ..datacls.contexts import BuildContext
 from dnslib import RR, NS, CNAME, A, QTYPE
@@ -41,6 +42,18 @@ def _resolve_target_ips(
             )
         resolved_ips.append(target_ip)
     return resolved_ips
+
+def _get_rname(origin: str, zone: str) -> str:
+    if origin == '@':
+        rname = zone
+    elif not origin.endswith('.'):
+        if zone == ".":
+            rname = f"{origin}."
+        else:
+            rname = f"{origin}.{zone}"
+    else:
+        rname = origin
+    return rname
 
 
 # -------------------------
@@ -101,15 +114,7 @@ class MasterBehavior(Behavior, ABC):
                 f"Unsupported record type '{self.record_type}'."
             )
 
-        if self.zone == '@':
-            rname = self.zone_file_key
-        elif not self.zone.endswith('.'):
-            if self.zone_file_key == ".":
-                rname = f"{self.zone}."
-            else:
-                rname = f"{self.zone}.{self.zone_file_key}"
-        else:
-            rname = self.zone
+        rname = _get_rname(self.zone, self.zone_file_key)
 
         if self.record_type in ("A", "AAAA"):
             target_ips = _resolve_target_ips(self.targets, build_context, service_name)
@@ -126,12 +131,13 @@ class MasterBehavior(Behavior, ABC):
             )
 
         elif self.record_type == "NS":
-            _iter = 0
             for target in self.targets:
                 # Check for and generate glue records
                 target_ip = build_context.service_ips.get(target)
                 if target_ip:
-                    ns_name = f"ns{_iter}.{rname}"
+                    subfix = f"ns{uuid.uuid4().hex[:16]}"
+                    ns_name = f"{subfix}.{self.zone_file_key}" if self.zone_file_key != "." else f"{subfix}."
+                    logger.debug(f"Generated Default NS record: {ns_name} -> {target_ip}({target})")
                     records.append(
                         RR(
                             rname=rname,
@@ -148,17 +154,16 @@ class MasterBehavior(Behavior, ABC):
                             ttl=self.ttl
                         )
                     )
-                    _iter += 1
                 else:
                     # External
                     records.append(
-                        RR(rname=rname, rtype=rtype_id, rdata=NS(target), ttl=self.ttl)
+                        RR(rname=rname, rtype=rtype_id, rdata=NS(_get_rname(target, self.zone_file_key)), ttl=self.ttl)
                     )
 
         elif self.record_type == "CNAME":
             for target_domain in self.targets:
                 records.append(
-                    RR(rname=rname, rtype=rtype_id, rdata=CNAME(target_domain), ttl=self.ttl)
+                    RR(rname=rname, rtype=rtype_id, rdata=CNAME(_get_rname(target_domain, self.zone_file_key)), ttl=self.ttl)
                 )
 
         else:
@@ -169,7 +174,7 @@ class MasterBehavior(Behavior, ABC):
                     f"Unsupported record type '{self.record_type}' in master behavior for zone '{rname}'."
                 )
             # TXT rdata needs to be a list of strings/bytes
-            rdata_val = [t.encode("utf-8") for t in self.targets]
+            rdata_val = [_get_rname(t, self.zone_file_key).encode("utf-8") for t in self.targets]
             records.append(
                 RR(
                     rname=rname,
