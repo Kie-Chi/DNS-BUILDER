@@ -36,7 +36,7 @@ class InternalImage(Image, ABC):
         self.dependency: List[str] = config.get("dependency", [])
         self.os, self.os_version = str(config.get("from", ":")).split(":")
 
-        self.base_image: str = ""
+        self.base_image = f"{self.os}:{self.os_version}"
         self.default_deps = set()
         self.default_utils = set()
 
