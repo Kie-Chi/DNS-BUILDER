@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Union
 from jinja2 import Environment
 
 from .utils.path import DNSBPath
+from .utils.merge import deep_merge
 from .exceptions import (
     ConfigFileMissingError,
     ConfigParsingError,
@@ -11,23 +12,6 @@ from .exceptions import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def deep_merge(source, destination):
-    """
-    Recursively merges source dict into destination dict.
-    - Lists are merged by extending.
-    - Dicts are recursively merged.
-    - Other types from source overwrite destination.
-    """
-    for key, value in source.items():
-        if isinstance(value, dict) and key in destination and isinstance(destination[key], dict):
-            destination[key] = deep_merge(value, destination[key].copy()) # Create a copy to avoid side effects
-        elif isinstance(value, list) and key in destination and isinstance(destination[key], list):
-            destination[key].extend(value)
-        else:
-            destination[key] = value
-    return destination
 
 
 class Preprocessor:
@@ -100,7 +84,7 @@ class Preprocessor:
             current_config['builds'] = self._preprocess_builds(current_config['builds'])
 
         # Finally, merge the current config on top of the included configs.
-        final_config = deep_merge(current_config, merged_from_includes)
+        final_config = deep_merge(merged_from_includes, current_config)
         return final_config
 
     def _render_template_recursive(self, item: Any, context: Dict) -> Any:

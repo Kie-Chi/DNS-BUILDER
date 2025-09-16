@@ -1,10 +1,11 @@
-import copy
 import logging
 from typing import Dict, Any
+
 
 from .. import constants
 from ..config import Config
 from ..base import Image
+from ..utils.merge import deep_merge
 from ..exceptions import (
     BuildDefinitionError,
     ReferenceNotFoundError,
@@ -52,7 +53,6 @@ class Resolver:
         ref = service_conf.get('ref')
         parent_conf = {}
         
-        parent_conf = {}
         # Merge Ref
         if ref:
             logger.debug(f"[Resolver] Service '{service_name}' has ref: '{ref}'.")
@@ -61,12 +61,12 @@ class Resolver:
                 image_name = service_conf.get('image')
                 if not image_name:
                     raise BuildDefinitionError(f"A build using a '{constants.STD_BUILD_PREFIX}' reference requires the 'image' key in service '{service_name}'.")
+                
                 image_obj = self.images.get(image_name)
                 if not image_obj:
-                    raise ReferenceNotFoundError(
-                        f"Service '{service_name}' uses an external image '{image_name}' which is not defined."
-                    )
-                software_type = image_obj.software
+                    raise ReferenceNotFoundError(f"Image '{image_name}' referenced by service '{service_name}' not found.")
+
+                software_type = getattr(image_obj, 'software', None)
                 if not software_type:
                     raise ImageDefinitionError(f"Image '{image_name}' (used by service '{service_name}') has no 'software' type, which is required for the ref '{ref}'.")
                 
@@ -101,12 +101,13 @@ class Resolver:
                         raise ReferenceNotFoundError(f"Unknown standard mixin '{mixin_ref}' for service '{service_name}'.")
                     
                     logger.debug(f"[Resolver] Merging mixin '{mixin_ref}' into '{service_name}'.")
-                    parent_conf = self._merge_configs(parent_conf, mixin_conf)
+                    parent_conf = deep_merge(parent_conf, mixin_conf)
                 else:
                     raise UnsupportedFeatureError(f"Unsupported mixin format '{mixin_ref}'.")
 
         logger.debug(f"[Resolver] Merging parent/mixin config with child config for '{service_name}'.")
-        final_conf = self._merge_configs(parent_conf, service_conf)
+        final_conf = deep_merge(parent_conf, service_conf)
+        
         if 'ref' in final_conf: 
             del final_conf['ref']
         if 'mixins' in final_conf: 
@@ -116,24 +117,4 @@ class Resolver:
         self.resolved_builds[service_name] = final_conf
         logger.debug(f"[Resolver] Successfully resolved service '{service_name}'. Final config: {final_conf}")
         return final_conf
-
-    def _merge_configs(self, parent: Dict, child: Dict) -> Dict:
-        merged = copy.deepcopy(parent)
-        for key, value in child.items():
-            if key in merged and isinstance(merged[key], list) and isinstance(value, list):
-                merged_set = set(merged[key])
-                original_len = len(merged[key])
-                merged[key].extend([item for item in value if item not in merged_set])
-                logger.debug(f"[Merge] Merged list for key '{key}': {original_len} parent items, {len(value)} child items -> {len(merged[key])} total unique items.")
-            elif key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-                 logger.debug(f"[Merge] Recursively merging dictionary for key '{key}'.")
-                 merged[key] = self._merge_configs(merged[key], value)
-            else:
-                if key in merged:
-                    logger.debug(f"[Merge] Overriding key '{key}': from '{merged[key]}' to '{value}'.")
-                else:
-                    logger.debug(f"[Merge] Adding new key '{key}': '{value}'.")
-                merged[key] = value
-        return merged
-
 
