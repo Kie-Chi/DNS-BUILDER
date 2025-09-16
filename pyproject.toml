@@ -1,6 +1,6 @@
 [project]
 name = "dnsbuilder"
-version = "0.5.3"
+version = "0.6.0"
 description = "A tool to generate complex DNS test environments using Docker."
 dependencies = [
     "pyyaml",

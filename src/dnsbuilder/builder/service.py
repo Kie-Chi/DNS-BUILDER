@@ -12,7 +12,7 @@ from ..bases.behaviors import MasterBehavior
 from .zone import ZoneGenerator
 from .. import constants
 from ..utils.path import DNSBPath
-from ..exceptions import BuildError, VolumeError, BehaviorError
+from ..exceptions import BuildError, VolumeError, BehaviorError, BuildDefinitionError
 
 
 logger = logging.getLogger(__name__)
@@ -49,36 +49,84 @@ class ServiceHandler:
         self._process_behavior(main_conf_path)
         
         compose_service_block = self._assemble_compose_service()
+        self._validate_required_fields()
         logger.debug(f"Generated docker-compose block for '{self.service_name}': {compose_service_block}")
         return compose_service_block
+    
+    def _validate_required_fields(self):
+        """
+        Recursively checks the service configuration for any unfulfilled '${required}' placeholders.
+        """
+        logger.debug(f"[{self.service_name}] Validating required fields...")
+        errors = []
+
+        def check_item(item, path_prefix=""):
+            if isinstance(item, dict):
+                for key, value in item.items():
+                    new_path = f"{path_prefix}.{key}" if path_prefix else key
+                    check_item(value, new_path)
+            elif isinstance(item, str) and item == constants.PLACEHOLDER['REQUIRED']:
+                errors.append(path_prefix)
+
+        check_item(self.build_conf)
+
+        if errors:
+            error_messages = ", ".join([f"'{e}'" for e in errors])
+            raise BuildDefinitionError(
+                f"Service '{self.service_name}' is missing required configuration values for the following keys: {error_messages}. "
+                "Please provide a value for these keys in your config file."
+            )
+        logger.debug(f"[{self.service_name}] All required fields are present.")
 
     def _setup_service_directory(self):
         self.contents_dir.mkdir(parents=True, exist_ok=True)
         logger.debug(f"Created service directory for '{self.service_name}' at '{self.service_dir}'")
 
-    def _process_volumes(self) -> DNSBPath | None:
-        main_conf_output_path: DNSBPath | None = None
-        for volume_str in self.build_conf.get('volumes', []):
-            logger.debug(f"Processing volume string for '{self.service_name}': '{volume_str}'")
+    def __filter_volumes(self) -> List[Volume]:
+        origin_volumes = self.build_conf.get('volumes', [])
+        filtered_volumes = []
+        required_volumes = []
+        for volume_str in origin_volumes:
             try:
                 volume = Volume(volume_str)
-            except BuildError as e:
+            except (BuildError, VolumeError) as e:
                 raise VolumeError(f"Invalid volume format in service '{self.service_name}': {e}")
+            if volume.is_required:
+                required_volumes.append(volume)
+            else:
+                filtered_volumes.append(volume)
 
+        def is_implemented(volume: Volume) -> bool:
+            for filterd in filtered_volumes:
+                if volume.dst == filterd.dst:
+                    return True
+            return False
+        
+        not_satisfied = [required for required in required_volumes if not is_implemented(required)]
+        if not_satisfied:
+            raise VolumeError(f"Required volumes mount to {[v.dst.origin for v in not_satisfied]}, but not implemented.")
+                    
+        return filtered_volumes
+
+    def _process_volumes(self) -> DNSBPath | None:
+        main_conf_output_path: DNSBPath | None = None
+        filtered_volumes = self.__filter_volumes()
+        for volume in filtered_volumes:
+            logger.debug(f"Processing volume for '{self.service_name}': '{volume}'")
             host_path = volume.src
             container_path = volume.dst.origin
 
-            if not host_path.is_resource:
+            if host_path.need_check:
                 if not host_path.exists():
                     if not host_path.is_absolute():
                         raise VolumeError(f"Volume relative source path does not exist: '{host_path.origin}'")
                     else:
                         logger.warning(f"Volume absolute source path does not exist: '{host_path.origin}', please check if it is in WSL etc.")
 
-            if not host_path.is_resource and host_path.is_absolute():
-                # absolute path (except resource) we mount, but not copy
-                final_volume_str = volume_str
-                logger.debug(f"Absolute path '{host_path.origin}' detected. It will be mounted directly.")
+            if not host_path.need_copy:
+                # we mount, but not copy
+                final_volume_str = str(volume)
+                logger.debug(f"Path '{host_path.origin}' detected. It will be mounted directly.")
                 self.processed_volumes.append(final_volume_str)
             else:
                 # relative path or resource path, copy to contents directory
@@ -100,7 +148,7 @@ class ServiceHandler:
                 if volume.mode:
                     final_volume_str += f":{volume.mode}"
                 self.processed_volumes.append(final_volume_str)
-                logger.debug(f"Relative/resource path copied and added as processed volume: {final_volume_str}")
+                logger.debug(f"Path copied and added as processed volume: {final_volume_str}")
         return main_conf_output_path
 
     def _generate_artifacts_from_behaviors(

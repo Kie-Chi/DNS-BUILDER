@@ -54,8 +54,8 @@
                 "8083:8083",
                 "8086:8086"
             ],
-            "mounts": [
-                "./${name}/contents:/data"
+            "volumes": [
+                "${origin}./${name}/contents:/data"
             ]
         },
         "cadvisor": {
@@ -78,8 +78,8 @@
             "ports": [
                 "3000:3000"
             ],
-            "mounts": [
-                "./${name}/contents:/var/lib/grafana"
+            "volumes": [
+                "${origin}./${name}/contents:/var/lib/grafana"
             ]
         },
         "traffic": {
@@ -95,10 +95,8 @@
             },
             "volumes": [
                 "resource:/scripts/sh/pcap.sh:/usr/local/etc/pcap.sh",
-                "resource:/scripts/configs/supervisord.conf:/usr/local/etc/supervisord.conf"
-            ],
-            "mounts": [
-                "./${name}/contents:/usr/local/etc"
+                "resource:/scripts/configs/supervisord.conf:/usr/local/etc/supervisord.conf",
+                "${origin}./${name}/contents:/usr/local/etc"
             ],
             "command": [
                 "bash",

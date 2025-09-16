@@ -25,6 +25,7 @@ class DNSBPath(Path):
     # the correct platform-specific Path class (PosixPath/WindowsPath) is used.
     def __new__(cls, *args, **kwargs):
         # Let the parent Path class handle the platform-specific instantiation
+        kwargs.pop('is_origin', None)
         return super().__new__(cls, *args, **kwargs)
 
     def __init__(self, *args, **kwargs):
@@ -33,7 +34,9 @@ class DNSBPath(Path):
             super().__init__(*args, **kwargs)
             self.is_resource = False
             self.original_path_str = ""
+            self.is_origin = False
             return
+        self.is_origin = kwargs.pop('is_origin', False)
 
         original_path_str = str(args[0])
         self.original_path_str = original_path_str
@@ -51,6 +54,16 @@ class DNSBPath(Path):
             self.is_resource = False
             logger.debug(f"DNSBPath created for path: {original_path_str}")
             super().__init__(*args, **kwargs)
+
+        self.__post__init__()
+
+    def __post__init__(self):
+        """
+            Check something after init behavior
+        """
+        if self.is_origin and self.is_resource:
+            raise VolumeError("Origin path should not be a resource file")
+
 
     @staticmethod
     def _resolve_resource_to_temp_path(resource_str: str) -> Path:
@@ -74,7 +87,34 @@ class DNSBPath(Path):
                 return stable_temp_path
         except (FileNotFoundError, KeyError):
             raise VolumeError(f"Internal resource not found: '{resource_name}'")
-    
+
+    @property
+    def need_copy(self):
+        """
+            If a path from volume need copy to Docker-Compose Environ
+        """
+        if self.is_origin:
+            return False
+        
+        if self.is_resource:
+            return True
+        
+        return not self.is_absolute
+
+    @property
+    def need_check(self):
+        """
+            If a path should be check exists in host or not
+        """
+        if self.is_origin:
+            return False
+        
+        if self.is_resource:
+            return False
+        
+        return True
+
+
     @property
     def origin(self):
         return self.original_path_str
@@ -114,6 +154,17 @@ class DNSBPath(Path):
     # __reduce__ relies on a simple parts-based constructor.
     def __reduce__(self):
         return (self.__class__, self.original_path_str)
+
+    @override
+    def __eq__(self, other):
+        if not isinstance(other, DNSBPath):
+            return NotImplemented
+        if self.is_resource != other.is_resource:
+            return False
+        if self.is_resource:
+            if self.original_path_str == other.original_path_str:
+                return True
+        return super().__eq__(other)
 
 def rm_resource(path: str):
     if path.startswith(constants.RESOURCE_PREFIX):

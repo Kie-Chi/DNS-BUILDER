@@ -28,6 +28,13 @@ RECORD_TYPE_MAP = {
     "TXT": TXT,
 }
 
+# --- Place Holder ---
+PLACEHOLDER = {
+    "REQUIRED": "${required}",
+    "ORIGIN": "${origin}",
+    # add more place holders, avoiding replaced by VariableSubstituter
+}
+
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]
 DEFAULT_NETWORK_NAME = "app_net"

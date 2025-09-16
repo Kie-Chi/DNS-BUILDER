@@ -5,6 +5,7 @@ import os
 from typing import Dict, Any
 
 from ..config import Config
+from .. import constants
 from ..base import Image
 from ..bases.internal import InternalImage
 from ..exceptions import BuildError, ReferenceNotFoundError
@@ -72,6 +73,9 @@ class VariableSubstitutor:
 
             def replacer(match):
                 key = match.group(1)
+                
+                if match.group(0) in constants.PLACEHOLDER.values():
+                    return match.group(0)
 
                 # env
                 if key.startswith("env."):

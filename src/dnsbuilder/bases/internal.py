@@ -40,8 +40,9 @@ class InternalImage(Image, ABC):
         self.default_deps = set()
         self.default_utils = set()
 
-        self._load_defaults()
-        self._generate_deps_from_rules()
+        if ":" in self.name:
+            self._load_defaults()
+            self._generate_deps_from_rules()
         self._post_init_hook()
 
         # Final merge of default, rule-based, and user-defined dependencies
