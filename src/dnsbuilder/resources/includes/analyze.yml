@@ -1,0 +1,12 @@
+name: "analyze-config"
+images:
+  - name: "analyze"
+    ref: "python:3.9.0"
+
+builds:
+  - analyze:
+      image: "analyze"
+      volumes:
+        - "${required}:/usr/local/etc/analyze.py"
+      address: ""
+      network_mode: host

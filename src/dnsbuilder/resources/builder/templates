@@ -91,7 +91,9 @@
             "address": "",
             "environment": {
                 "ENABLE_PROMETHEUS_EXPORTER": "true",
-                "INET": "${project.inet}"
+                "INET": "${project.inet}",
+                "ATTACKER": "${required}",
+                "RECURSOR": "${required}"
             },
             "volumes": [
                 "resource:/scripts/sh/pcap.sh:/usr/local/etc/pcap.sh",
