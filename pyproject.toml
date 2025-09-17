@@ -1,6 +1,6 @@
 [project]
 name = "dnsbuilder"
-version = "0.6.0"
+version = "0.7.0"
 description = "A tool to generate complex DNS test environments using Docker."
 dependencies = [
     "pyyaml",
@@ -9,7 +9,8 @@ dependencies = [
     "pytest",
     "graphviz",
     "jinja2",
-    "dnslib"
+    "dnslib",
+    "fsspec"
 ]
 
 [project.scripts]
