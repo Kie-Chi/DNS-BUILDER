@@ -6,7 +6,8 @@ import logging
 from .datacls.artifacts import BehaviorArtifact
 if TYPE_CHECKING:
     from .datacls.contexts import BuildContext
-from .utils.path import DNSBPath
+from .io.path import DNSBPath
+from .io.fs import FileSystem, AppFileSystem
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,10 @@ class Image(ABC):
     Abstract class describing a Docker Image
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
         self.name: str = config.get("name")
         self.ref: Optional[str] = config.get("ref")
+        self.fs = fs
 
     def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -96,16 +98,17 @@ class Includer(ABC):
     Abstract Class describe the `include config` line used in software config-file
     """
 
-    def __init__(self, config_line: str):
+    def __init__(self, config_line: str, fs: FileSystem = AppFileSystem()):
         self.config_line = config_line
+        self.fs = fs
 
     @abstractmethod
-    def write(self, conf: str):
+    def write(self, conf: DNSBPath):
         """
         write `include config_line` line into conf
 
         Args:
-            conf (str): main configuration file path
+            conf (DNSBPath): main configuration file path
 
         Returns:
             None

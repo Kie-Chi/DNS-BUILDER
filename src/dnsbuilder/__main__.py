@@ -3,6 +3,7 @@ import logging
 from .config import Config
 from .builder.build import Builder
 from .utils.logger import setup_logger
+from .io.fs import AppFileSystem, DiskFileSystem, MemoryFileSystem, ResourceFileSystem
 from .exceptions import (
     DNSBuilderError,
     ConfigurationError,
@@ -15,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description="DNS Builder CLI")
     parser.add_argument("config_file", help="Path to the config.yml file.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
+    parser.add_argument("--vfs", action="store_true", help="Enable virtual file system.")
     parser.add_argument(
         "-g",
         "--graph",
@@ -25,8 +27,14 @@ def main():
     setup_logger(debug=args.debug)
 
     try:
-        config = Config(args.config_file)
-        builder = Builder(config, graph_output=args.graph)
+        app_fs = AppFileSystem()
+        if args.vfs:
+            app_fs.register_handler("file", MemoryFileSystem())
+        else:
+            app_fs.register_handler("file", DiskFileSystem())
+        app_fs.register_handler("resource", ResourceFileSystem())
+        config = Config(args.config_file, app_fs)
+        builder = Builder(config, graph_output=args.graph, fs=app_fs)
         builder.run()
     except ConfigurationError as e:
         logging.error(f"Configuration error: {e}")

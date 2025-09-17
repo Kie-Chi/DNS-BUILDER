@@ -1,5 +1,5 @@
 from ..base import Includer
-
+from ..io.path import DNSBPath
 
 # -------------------------
 #
@@ -11,9 +11,9 @@ class BindIncluder(Includer):
     """
         Class describe the `include "config-file";` line for BIND
     """
-    def write(self, conf):
-        with open(conf, "a", encoding="utf-8") as _conf:
-            _conf.write(f'\n# Auto-Include by DNS Builder\ninclude "{self.config_line}";\n')
+    def write(self, conf: DNSBPath):
+        content = f'\n# Auto-Include by DNS Builder\ninclude "{self.config_line}";\n'
+        self.fs.append_text(conf, content)
 
 # -------------------------
 #
@@ -25,7 +25,7 @@ class UnboundIncluder(Includer):
     """
         Class describe the `include: config-file` line for Unbound 
     """
-    def write(self, conf: str):
-        with open(conf, "a", encoding="utf-8") as _conf:
-            _conf.write(f'\n# Auto-Include by DNS Builder\ninclude: "{self.config_line}"\n')
+    def write(self, conf: DNSBPath):
+        content = f'\n# Auto-Include by DNS Builder\ninclude: "{self.config_line}"\n'
+        self.fs.append_text(conf, content)
 

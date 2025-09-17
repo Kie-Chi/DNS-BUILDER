@@ -1,9 +1,7 @@
-import shutil
 import yaml
 import logging
 import json
 from typing import Dict, Optional
-from importlib import resources
 
 from ..factories import ImageFactory
 from ..base import Image
@@ -16,16 +14,18 @@ from .net import NetworkManager
 from .service import ServiceHandler
 from .. import constants
 from ..config import Config
-from ..utils.path import DNSBPath
+from ..io.path import DNSBPath
+from ..io.fs import FileSystem, AppFileSystem
 from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError
 
 logger = logging.getLogger(__name__)
 
 class Builder:
 
-    def __init__(self, config: Config, graph_output: Optional[str] = None):
+    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = AppFileSystem()):
         self.config = config
         self.graph_output = graph_output
+        self.fs = fs
         self.output_dir = DNSBPath("output") / self.config.name
         self.predefined_builds = self._load_predefined_builds()
         self.image_cache: Dict[str, Image] = {}
@@ -68,14 +68,15 @@ class Builder:
     def _initialize_context(self) -> BuildContext:
         """Creates the initial build context and resolves images defined in the config."""
         logger.debug("[Builder] Step 1: Initializing context...")
-        image_factory = ImageFactory(self.config.images_config)
+        image_factory = ImageFactory(self.config.images_config, self.fs)
         resolved_images = image_factory.create_all()
         self.image_cache.update(resolved_images) # Cache the explicitly defined images
         
         context = BuildContext(
             config=self.config,
             images=resolved_images,
-            output_dir=self.output_dir
+            output_dir=self.output_dir,
+            fs=self.fs
         )
         logger.debug("[Builder] Initial build context created.")
         return context
@@ -151,7 +152,7 @@ class Builder:
         try:
             logger.debug(f"Image '{image_name}' resolved as a local build context path.")
             config = {"name": image_name, "ref": image_name}
-            image_obj = LocalImage(config)
+            image_obj = LocalImage(config, fs=self.fs)
             self.image_cache[image_name] = image_obj
             return image_obj
         except (TypeError, ValueError, OSError, DNSBuilderError):
@@ -164,7 +165,7 @@ class Builder:
         # Default to RemoteImage.
         logger.debug(f"Image '{image_name}' resolved as a remote image.")
         config = {"name": image_name, "ref": image_name}
-        image_obj = RemoteImage(config)
+        image_obj = RemoteImage(config, fs=self.fs)
         self.image_cache[image_name] = image_obj
         return image_obj
 
@@ -213,7 +214,8 @@ class Builder:
     def _load_predefined_builds(self) -> Dict[str, Dict]:
         logger.debug("Loading predefined build templates...")
         try:
-            templates_text = resources.files('dnsbuilder.resources.builder').joinpath('templates').read_text(encoding='utf-8')
+            templates_path = DNSBPath("resource:/builder/templates")
+            templates_text = self.fs.read_text(templates_path)
             templates = json.loads(templates_text)
             logger.debug("Predefined build templates loaded successfully.")
             return templates
@@ -221,15 +223,15 @@ class Builder:
             raise BuildError(f"Failed to load or parse template file: {e}")
 
     def _setup_workspace(self):
-        if self.output_dir.exists(): 
+        if self.fs.exists(self.output_dir): 
             logger.debug(f"Output directory '{self.output_dir}' exists. Cleaning it up.")
-            shutil.rmtree(self.output_dir)
-        self.output_dir.mkdir(parents=True)
+            self.fs.rmtree(self.output_dir)
+        self.fs.mkdir(self.output_dir, parents=True)
         logger.debug(f"Workspace initialized at '{self.output_dir}'.")
     
     def _write_compose_file(self, compose_config: Dict):
         file_path = self.output_dir / constants.DOCKER_COMPOSE_FILENAME
         logger.debug(f"Writing final docker-compose configuration to '{file_path}'...")
-        with file_path.open('w') as f:
-            yaml.dump(compose_config, f, default_flow_style=False, sort_keys=False)
+        content = yaml.dump(compose_config, default_flow_style=False, sort_keys=False)
+        self.fs.write_text(file_path, content)
         logger.info(f"{constants.DOCKER_COMPOSE_FILENAME} successfully generated at {file_path}")

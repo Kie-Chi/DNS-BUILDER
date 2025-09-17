@@ -1,4 +1,3 @@
-import shutil
 import logging
 from typing import Dict, Any, List, Tuple
 import collections
@@ -11,9 +10,8 @@ from ..datacls.volume import Volume
 from ..bases.behaviors import MasterBehavior
 from .zone import ZoneGenerator
 from .. import constants
-from ..utils.path import DNSBPath
+from ..io.path import DNSBPath
 from ..exceptions import BuildError, VolumeError, BehaviorError, BuildDefinitionError
-
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +77,7 @@ class ServiceHandler:
         logger.debug(f"[{self.service_name}] All required fields are present.")
 
     def _setup_service_directory(self):
-        self.contents_dir.mkdir(parents=True, exist_ok=True)
+        self.context.fs.mkdir(self.contents_dir, parents=True, exist_ok=True)
         logger.debug(f"Created service directory for '{self.service_name}' at '{self.service_dir}'")
 
     def __filter_volumes(self) -> List[Volume]:
@@ -104,7 +102,7 @@ class ServiceHandler:
         
         not_satisfied = [required for required in required_volumes if not is_implemented(required)]
         if not_satisfied:
-            raise VolumeError(f"Required volumes mount to {[v.dst.origin for v in not_satisfied]}, but not implemented.")
+            raise VolumeError(f"Required volumes mount to {[v.dst for v in not_satisfied]}, but not implemented.")
                     
         return filtered_volumes
 
@@ -114,35 +112,34 @@ class ServiceHandler:
         for volume in filtered_volumes:
             logger.debug(f"Processing volume for '{self.service_name}': '{volume}'")
             host_path = volume.src
-            container_path = volume.dst.origin
-
+            container_path = volume.dst
             if host_path.need_check:
-                if not host_path.exists():
+                if not self.context.fs.exists(host_path):
                     if not host_path.is_absolute():
-                        raise VolumeError(f"Volume relative source path does not exist: '{host_path.origin}'")
+                        raise VolumeError(f"Volume relative source path does not exist: '{host_path}'")
                     else:
-                        logger.warning(f"Volume absolute source path does not exist: '{host_path.origin}', please check if it is in WSL etc.")
+                        logger.warning(f"Volume absolute source path does not exist: '{host_path}', please check if it is in WSL etc.")
 
             if not host_path.need_copy:
                 # we mount, but not copy
                 final_volume_str = str(volume)
-                logger.debug(f"Path '{host_path.origin}' detected. It will be mounted directly.")
+                logger.debug(f"Path '{host_path}' detected. It will be mounted directly.")
                 self.processed_volumes.append(final_volume_str)
             else:
                 # relative path or resource path, copy to contents directory
                 filename = host_path.name
                 target_path = self.contents_dir / filename
-                shutil.copy(host_path, target_path)
-                if container_path.endswith('.conf'):
+                self.context.fs.copy(host_path, target_path)
+                if str(container_path).endswith('.conf'):
                     if not main_conf_output_path:
                         main_conf_output_path = target_path
                         logger.debug(f"Identified '{filename}' as the main configuration file.")
                     else:
                         logger.debug(f"Found additional config file '{filename}', will attempt to include it in the main config.")
-                        if main_conf_output_path.read_text().find(container_path) != -1:
+                        if self.context.fs.read_text(main_conf_output_path).find(container_path) != -1:
                             logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
                         else:
-                            self.context.includer_factory.create(container_path, self.image_obj.software).write(str(main_conf_output_path))
+                            self.context.includer_factory.create(container_path, self.image_obj.software).write(main_conf_output_path)
                 
                 final_volume_str = f"./{self.service_name}/contents/{filename}:{container_path}"
                 if volume.mode:
@@ -198,7 +195,7 @@ class ServiceHandler:
                 behavior_by_zone[zone_key] = behavior_obj
 
         gen_vol_dir = self.contents_dir / constants.GENERATED_ZONES_SUBDIR
-        gen_vol_dir.mkdir(exist_ok=True)
+        self.context.fs.mkdir(gen_vol_dir, exist_ok=True)
 
         # 2. Generate zone file and config line for each aggregated zone
         for zone, records in records_by_zone.items():
@@ -207,7 +204,7 @@ class ServiceHandler:
 
             filename = f"db.{zone}" if zone != "." else "db.root"
             filepath = gen_vol_dir / filename
-            filepath.write_text(zone_content)
+            self.context.fs.write_text(filepath, zone_content)
 
             container_path = f"/usr/local/etc/zones/{filename}"
             volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{filename}:{container_path}"
@@ -254,9 +251,9 @@ class ServiceHandler:
             if artifact.new_volume:
                 vol = artifact.new_volume
                 gen_vol_dir = self.contents_dir / constants.GENERATED_ZONES_SUBDIR
-                gen_vol_dir.mkdir(exist_ok=True)
+                self.context.fs.mkdir(gen_vol_dir, exist_ok=True)
                 filepath = gen_vol_dir / vol.filename
-                filepath.write_text(vol.content)
+                self.context.fs.write_text(filepath, vol.content)
                 final_volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{vol.filename}:{vol.container_path}"
                 self.processed_volumes.append(final_volume_str)
                 logger.debug(
@@ -269,8 +266,8 @@ class ServiceHandler:
             return
 
         gen_zones_path = self.contents_dir / constants.GENERATED_ZONES_FILENAME
-        gen_zones_path.write_text(
-            f"# Auto-generated by DNS Builder\n\n{generated_zones_content}\n"
+        self.context.fs.write_text(
+            gen_zones_path, f"# Auto-generated by DNS Builder\n\n{generated_zones_content}\n"
         )
         logger.debug(f"Wrote generated behavior config to '{gen_zones_path}'.")
 
@@ -284,7 +281,7 @@ class ServiceHandler:
         includer = self.context.includer_factory.create(
             container_conf_path, self.image_obj.software
         )
-        includer.write(str(main_conf_path))
+        includer.write(main_conf_path)
         logger.debug(
             f"Appended include directive for '{container_conf_path}' to '{main_conf_path}'."
         )
@@ -342,7 +339,7 @@ class ServiceHandler:
         if 'mounts' in self.build_conf: 
             del self.build_conf['mounts']
         
-        if 'cap_add' in self.build_conf:
+        if 'cap_add' in self.build_conf and self.build_conf['cap_add']:
             service_config['cap_add'] = self.build_conf['cap_add']
         else:
             service_config['cap_add'] = constants.DEFAULT_CAP_ADD

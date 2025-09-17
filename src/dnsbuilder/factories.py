@@ -6,6 +6,7 @@ from .bases.behaviors import BindForwardBehavior, BindHintBehavior, BindStubBeha
 from .bases.behaviors import UnboundForwardBehavior, UnboundHintBehavior, UnboundStubBehavior, UnboundMasterBehavior
 from .bases.includers import BindIncluder, UnboundIncluder
 from .base import Image, Behavior, Includer
+from .io.fs import FileSystem, AppFileSystem
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ class ImageFactory:
     Factory Resolves internal image inheritance and creates final, materialized Image objects.
     """
 
-    def __init__(self, images_config: List[Dict[str, Any]]):
+    def __init__(self, images_config: List[Dict[str, Any]], fs: FileSystem = AppFileSystem()):
         self.configs = {conf["name"]: conf for conf in images_config}
         self.resolved_images: Dict[str, InternalImage] = {}
         self.resolving_stack: Set[str] = set()
@@ -31,6 +32,7 @@ class ImageFactory:
             "python": PythonImage,
             "judas": JudasImage,
         }
+        self.fs = fs
         logger.debug("ImageFactory initialized.")
 
     def create_all(self) -> Dict[str, Image]:
@@ -94,7 +96,7 @@ class ImageFactory:
         logger.debug(
             f"Instantiating '{config['name']}' using class {image_class.__name__}."
         )
-        return image_class(config)
+        return image_class(config, fs=self.fs)
 
 
 # -------------------------
@@ -188,12 +190,13 @@ class IncluderFactory:
     Factory Creates the appropriate Includer object based on software type
     """
 
-    def __init__(self):
+    def __init__(self, fs: FileSystem = AppFileSystem()):
         self._includers = {
             "bind": BindIncluder,
             "unbound": UnboundIncluder,
             # other like PowerDNS etc...
         }
+        self.fs = fs
 
     def create(self, path: str, software_type: str) -> Includer:
         includer_class = self._includers.get(software_type)
@@ -203,4 +206,4 @@ class IncluderFactory:
                 f"Includer '{software_type}' is not supported for software '{software_type}'."
             )
 
-        return includer_class(path)
+        return includer_class(path, fs=self.fs)

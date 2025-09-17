@@ -8,7 +8,7 @@
                 "/usr/local/etc/named.conf"
             ],
             "volumes": [
-                "resource:bind_recursor_base.conf:/usr/local/etc/named.conf"
+                "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf"
             ]
         },
         "auth": {
@@ -19,7 +19,7 @@
                 "/usr/local/etc/named.conf"
             ],
             "volumes": [
-                "resource:bind_auth_base.conf:/usr/local/etc/named.conf"
+                "resource:/configs/bind_auth_base.conf:/usr/local/etc/named.conf"
             ]
         },
         "forwarder": {
@@ -30,19 +30,19 @@
                 "/usr/local/etc/named.conf"
             ],
             "volumes": [
-                "resource:bind_forwarder_base.conf:/usr/local/etc/named.conf"
+                "resource:/configs/bind_forwarder_base.conf:/usr/local/etc/named.conf"
             ]
         }
     },
     "unbound": {
         "recursor": {
             "volumes": [
-                "resource:unbound_recursor_base.conf:/usr/local/etc/unbound/unbound.conf"
+                "resource:/configs/unbound_recursor_base.conf:/usr/local/etc/unbound/unbound.conf"
             ]
         },
         "forwarder": {
-            "volumes": [
-                "resource:unbound_forwarder_base.conf:/usr/local/etc/unbound/unbound.conf"
+            "volumes": [    
+                "resource:/configs/unbound_forwarder_base.conf:/usr/local/etc/unbound/unbound.conf"
             ]
         }
     },

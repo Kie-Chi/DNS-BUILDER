@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, override
-import shutil
 import logging
 from ..base import Image
-from ..utils.path import DNSBPath
+from ..io.path import DNSBPath, Path
+from ..io.fs import FileSystem, AppFileSystem
 from ..exceptions import ImageDefinitionError
 
 logger = logging.getLogger(__name__)
@@ -19,8 +19,9 @@ class ExternalImage(Image, ABC):
     Class describing a Docker Image from build-conf
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
         super().__init__(config)
+        self.fs = fs
         self._post_init_hook(config)
 
     @abstractmethod
@@ -78,28 +79,28 @@ class LocalImage(ExternalImage):
         A hook for subclasses to run specific logic after the main __init__ setup.
         """
         path = DNSBPath(self.name)
-        if not path.exists():
+        if not self.fs.exists(path):
             raise ImageDefinitionError(f"Local image path '{self.name}' does not exist")
 
-        if path.is_file():
+        if self.fs.is_file(path):
             self.path = path
             return
 
-        if path.is_dir():
+        if self.fs.is_dir(path):
             # Look for Dockerfile first
-            dockerfiles = list(path.rglob('Dockerfile'))
+            dockerfiles = list(Path(path).rglob('Dockerfile'))
             if dockerfiles:
-                self.path = dockerfiles[0]
+                self.path = DNSBPath(dockerfiles[0])
                 return
 
             # Then look for first file containing 'dockerfile'
-            all_files = sorted(path.rglob('*'))
+            all_files = sorted(Path(path).rglob('*'))
             dockerfile_path = next((p for p in all_files if 'dockerfile' in p.name.lower() and p.is_file()), None)
             if dockerfile_path:
-                self.path = dockerfile_path
+                self.path = DNSBPath(dockerfile_path)
                 return
 
-        raise ImageDefinitionError(f"Local image path '{self.image_name}' is not a file, and does not contain a Dockerfile")
+        raise ImageDefinitionError(f"Local image path '{self.name}' is not a file, and does not contain a Dockerfile")
 
     @override
     def write(self, directory: DNSBPath):
@@ -108,5 +109,5 @@ class LocalImage(ExternalImage):
         """
         logger.debug(f"[{self.name}] [LocalImage] content from {self.path} to {directory}")
         dockerfile = directory / "Dockerfile"
-        shutil.copy(self.path, dockerfile)
+        self.fs.copy(self.path, dockerfile)
         pass

@@ -1,7 +1,7 @@
 from typing import List, Dict
 
 from .. import constants
-from ..utils.path import DNSBPath, is_path_valid
+from ..io.path import DNSBPath, is_path_valid
 from ..exceptions import VolumeError
 
 """

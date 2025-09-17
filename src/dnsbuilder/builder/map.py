@@ -6,7 +6,7 @@ try:
 except ImportError:
     graphviz = None
 from ..bases.behaviors import _get_rname
-from ..utils.path import DNSBPath
+from ..io.path import DNSBPath
 
 logger = logging.getLogger(__name__)
 

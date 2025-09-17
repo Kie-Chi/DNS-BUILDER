@@ -1,25 +1,20 @@
 from abc import ABC, abstractmethod
 import copy
 import json
-from importlib import resources
 from typing import Any, Dict, List, Optional, override
 import logging
 
 from ..base import Image
 from ..rules.rule import Rule
 from ..rules.version import Version
-from ..utils.path import DNSBPath
+from ..io.path import DNSBPath
+from ..io.fs import FileSystem, AppFileSystem
 from ..exceptions import ImageDefinitionError
 
 logger = logging.getLogger(__name__)
 
-# Load all image defaults
-IMAGE_DEFAULTS_TEXT = (
-    resources.files("dnsbuilder.resources.images")
-    .joinpath("defaults")
-    .read_text(encoding="utf-8")
-)
-IMAGE_DEFAULTS = json.loads(IMAGE_DEFAULTS_TEXT)
+# Global variable to cache image defaults
+IMAGE_DEFAULTS = None
 
 # -------------------------
 #
@@ -28,8 +23,8 @@ IMAGE_DEFAULTS = json.loads(IMAGE_DEFAULTS_TEXT)
 # -------------------------
 
 class InternalImage(Image, ABC):
-    def __init__(self, config: Dict[str, Any]):
-        super().__init__(config)
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
+        super().__init__(config, fs)
         self.software: Optional[str] = config.get("software")
         self.version: Optional[str] = config.get("version")
         self.util: List[str] = config.get("util", [])
@@ -61,6 +56,12 @@ class InternalImage(Image, ABC):
 
     def _load_defaults(self):
         """Loads default settings from the 'defaults' resource."""
+        global IMAGE_DEFAULTS
+        if IMAGE_DEFAULTS is None:
+            IMAGE_DEFAULTS_TEXT = self.fs.read_text(
+                DNSBPath("resource:/images/defaults")
+            )
+            IMAGE_DEFAULTS = json.loads(IMAGE_DEFAULTS_TEXT)
         if not self.software:
             logger.critical(f"[{self.name}] No SoftWare defined in Image")
             return  # Likely an abstract/alias image without software type
@@ -111,10 +112,8 @@ class InternalImage(Image, ABC):
             return  # Not a buildable image
 
         try:
-            rules_text = (
-                resources.files("dnsbuilder.resources.images.rules")
-                .joinpath(f"{self.software}")
-                .read_text(encoding="utf-8")
+            rules_text = self.fs.read_text(
+                DNSBPath(f"resource:/images/rules/{self.software}")
             )
             ruleset = json.loads(rules_text)
         except (FileNotFoundError, json.JSONDecodeError) as e:
@@ -165,10 +164,8 @@ class InternalImage(Image, ABC):
         Subclasses can override this to provide additional template variables.
         """
         try:
-            template = (
-                resources.files("dnsbuilder.resources.images.templates")
-                .joinpath(f"{self.software}")
-                .read_text(encoding="utf-8")
+            template = self.fs.read_text(
+                DNSBPath(f"resource:/images/templates/{self.software}")
             )
         except FileNotFoundError:
             raise ImageDefinitionError(f"Dockerfile template for '{self.software}' not found.")
@@ -198,7 +195,7 @@ class InternalImage(Image, ABC):
 
         content = self._generate_dockerfile_content()
         dockerfile_path = directory / "Dockerfile"
-        dockerfile_path.write_text(content, encoding="utf-8")
+        self.fs.write_text(dockerfile_path, content)
         logger.info(f"Dockerfile for '{self.name}' written to {dockerfile_path}")
 
     def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -241,9 +238,9 @@ class BindImage(InternalImage):
     Concrete Image class for BIND
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
         self.py3_deps = []  # will init in hook
-        super().__init__(config)
+        super().__init__(config, fs=fs)
 
     @override
     def _post_init_hook(self):
@@ -337,9 +334,9 @@ class PythonImage(InternalImage):
     Concrete Image class for Python
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
         self.pip_deps = []
-        super().__init__(config)
+        super().__init__(config, fs=fs)
 
     @override
     def _load_defaults(self):

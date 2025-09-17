@@ -35,6 +35,9 @@ PLACEHOLDER = {
     # add more place holders, avoiding replaced by VariableSubstituter
 }
 
+# --- supported protocol ---
+KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource"}
+
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]
 DEFAULT_NETWORK_NAME = "app_net"

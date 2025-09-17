@@ -6,7 +6,8 @@ from pydantic.networks import IPv4Network
 
 from .preprocess import Preprocessor
 from . import constants
-from .utils.path import DNSBPath
+from .io.path import DNSBPath
+from .io.fs import FileSystem, AppFileSystem
 from .exceptions import (
     CircularDependencyError,
     ImageDefinitionError,
@@ -170,13 +171,14 @@ class Config:
     Loads and validates the config.yml file using Pydantic models.
     It is the sole gatekeeper for configuration.
     """
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, fs: FileSystem = AppFileSystem()):
         self.path = config_path
+        self.fs = fs
         logger.info(f"Loading configuration from '{self.path}'...")
         raw_data = self._load_raw_config()
 
         # preprocess Python-like builds
-        preprocessor = Preprocessor(raw_data, self.path)
+        preprocessor = Preprocessor(raw_data, self.path, self.fs)
         processed_data = preprocessor.run()
         
         logger.info("Validating configuration structure with Pydantic...")
@@ -191,12 +193,12 @@ class Config:
 
     def _load_raw_config(self) -> Dict[str, Any]:
         try:
-            with DNSBPath(self.path).open('r') as f:
-                config_data = yaml.safe_load(f)
-                if not isinstance(config_data, dict):
-                    raise ConfigParsingError("Configuration file must be a YAML document containing a dictionary.")
-                logger.debug(f"Successfully parsed YAML from '{self.path}'.")
-                return config_data
+            content = self.fs.read_text(DNSBPath(self.path))
+            config_data = yaml.safe_load(content)
+            if not isinstance(config_data, dict):
+                raise ConfigParsingError("Configuration file must be a YAML document containing a dictionary.")
+            logger.debug(f"Successfully parsed YAML from '{self.path}'.")
+            return config_data
         except FileNotFoundError:
             raise ConfigFileMissingError(f"Configuration file not found at: {self.path}")
         except yaml.YAMLError as e:

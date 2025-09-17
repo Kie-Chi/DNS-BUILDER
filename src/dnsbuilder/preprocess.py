@@ -3,7 +3,8 @@ import yaml
 from typing import Dict, Any, List, Union
 from jinja2 import Environment
 
-from .utils.path import DNSBPath
+from .io.path import DNSBPath
+from .io.fs import FileSystem
 from .utils.merge import deep_merge
 from .exceptions import (
     ConfigFileMissingError,
@@ -18,10 +19,11 @@ class Preprocessor:
     """
     Recursively processes configurations, handling 'include' directives and expanding build comprehensions.
     """
-    def __init__(self, raw_config: Dict, config_path: str):
+    def __init__(self, raw_config: Dict, config_path: str, fs: FileSystem):
         self.raw_config = raw_config
         self.config_path = config_path
         self.jinja_env = Environment()
+        self.fs = fs
 
     def run(self) -> Dict:
         """
@@ -63,17 +65,17 @@ class Preprocessor:
             if not path.is_absolute() and not path.is_resource:
                 path = base_dir / path
 
-            abs_path = str(path) if not path.is_resource else path.origin
+            abs_path = str(path)
 
             logger.debug(f"Including and preprocessing config file from '{abs_path}'")
             try:
-                with path.open('r') as f:
-                    included_config_raw = yaml.safe_load(f) or {}
-                    
-                    include_preprocessor = Preprocessor(included_config_raw, abs_path)
-                    processed_included_config = include_preprocessor.run()
-                    
-                    merged_from_includes = deep_merge(processed_included_config, merged_from_includes)
+                content = self.fs.read_text(path)
+                included_config_raw = yaml.safe_load(content) or {}
+                
+                include_preprocessor = Preprocessor(included_config_raw, abs_path, self.fs)
+                processed_included_config = include_preprocessor.run()
+                
+                merged_from_includes = deep_merge(processed_included_config, merged_from_includes)
 
             except FileNotFoundError:
                 raise ConfigFileMissingError(f"Included file not found: {abs_path}")
