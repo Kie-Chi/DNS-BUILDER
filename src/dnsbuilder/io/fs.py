@@ -177,7 +177,7 @@ class AppFileSystem(FileSystem):
             src_handler.copy(src, dst)
             return
 
-        logger.info(
+        logger.debug(
             f"Performing cross-filesystem copy from '{src.protocol}' to '{dst.protocol}'"
         )
         content = src_handler.read_bytes(src)
@@ -435,6 +435,7 @@ class MemoryFileSystem(FileSystem):
     def __init__(self):
         # The root directory always exists.
         self.files: Dict[str, Union[bytes, None]] = {"/": None}
+        self.name = "MemoryFS"
 
     def _get_path_str(self, path: DNSBPath) -> str:
         """Normalizes a path object to a consistent string representation for use as a dictionary key."""
@@ -477,6 +478,7 @@ class MemoryFileSystem(FileSystem):
 
     @override
     def write_text(self, path: DNSBPath, content: str):
+        logger.debug(f"[{self.name}] Writing to memory: {path}")
         path_str = self._get_path_str(path)
         if self.is_dir(path):
             raise IsADirectoryError(f"Cannot write to a directory: '{path_str}'")
@@ -487,6 +489,7 @@ class MemoryFileSystem(FileSystem):
     
     @override
     def write_bytes(self, path: DNSBPath, content: bytes):
+        logger.debug(f"[{self.name}] Writing bytes to memory: {path}")
         path_str = self._get_path_str(path)
         if self.is_dir(path):
             raise IsADirectoryError(f"Cannot write to a directory: '{path_str}'")
@@ -497,6 +500,7 @@ class MemoryFileSystem(FileSystem):
 
     @override
     def read_text(self, path: DNSBPath) -> str:
+        logger.debug(f"[{self.name}] Reading from memory: {path}")
         path_str = self._get_path_str(path)
         if not self.exists(path):
             raise FileNotFoundError(f"No such file or directory: '{path_str}'")
@@ -507,6 +511,7 @@ class MemoryFileSystem(FileSystem):
 
     @override
     def read_bytes(self, path: DNSBPath) -> bytes:
+        logger.debug(f"[{self.name}] Reading bytes from memory: {path}")
         path_str = self._get_path_str(path)
         if not self.exists(path):
             raise FileNotFoundError(f"No such file or directory: '{path_str}'")
@@ -517,6 +522,7 @@ class MemoryFileSystem(FileSystem):
 
     @override
     def append_text(self, path: DNSBPath, content: str):
+        logger.debug(f"[{self.name}] Appending to memory: {path}")
         path_str = self._get_path_str(path)
         if not self.exists(path):
             self.write_text(path, content)
@@ -528,6 +534,7 @@ class MemoryFileSystem(FileSystem):
 
     @override
     def append_bytes(self, path: DNSBPath, content: bytes):
+        logger.debug(f"[{self.name}] Appending bytes to memory: {path}")
         path_str = self._get_path_str(path)
         if not self.exists(path):
             self.write_bytes(path, content)
@@ -565,6 +572,7 @@ class MemoryFileSystem(FileSystem):
             - If dst is a directory, src is copied into it.
             - If dst is a file, it is overwritten.
         """
+        logger.debug(f"[{self.name}] Copying memory path '{src}' to '{dst}'")
         src_str = self._get_path_str(src)
         if not self.exists(src):
             raise FileNotFoundError(f"Source path does not exist: '{src_str}'")
@@ -580,11 +588,12 @@ class MemoryFileSystem(FileSystem):
             # Destination is a directory, copy the file inside it.
             final_dst = dst / src.name
 
-        self.write_text(final_dst, content)
+        self.write_bytes(final_dst, content)
 
     @override
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         """Recursively copies a directory tree. Mimics `shutil.copytree`."""
+        logger.debug(f"[{self.name}] Copying memory tree '{src}' to '{dst}'")
         src_str = self._get_path_str(src)
         if not self.is_dir(src):
             raise NotADirectoryError(f"Source path is not a directory: '{src_str}'")
