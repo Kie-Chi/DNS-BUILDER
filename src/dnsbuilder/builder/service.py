@@ -102,7 +102,7 @@ class ServiceHandler:
         
         not_satisfied = [required for required in required_volumes if not is_implemented(required)]
         if not_satisfied:
-            raise VolumeError(f"Required volumes mount to {[v.dst for v in not_satisfied]}, but not implemented.")
+            raise VolumeError(f"Required volumes mount to {[str(v.dst) for v in not_satisfied]}, but not implemented.")
                     
         return filtered_volumes
 

@@ -104,7 +104,8 @@ class Builder:
         substitutor = VariableSubstitutor(
             config=context.config, 
             images=context.images, 
-            service_ips=context.service_ips
+            service_ips=context.service_ips,
+            resolved_builds=context.resolved_builds
         )
         substituted_builds = substitutor.run(context.resolved_builds)
         logger.debug("[Builder] Variable substitution complete.")
