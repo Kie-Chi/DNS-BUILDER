@@ -4,6 +4,8 @@ images:
     ref: "python:3.9.0"
     util:
       - supervisor
+      - bind9-utils
+      - python3-dnspython
 builds:
   traffic:
     image: traffic

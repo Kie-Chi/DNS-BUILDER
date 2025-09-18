@@ -30,13 +30,14 @@ RUN groupadd -r named && useradd -r -g named named
 RUN mkdir -p /usr/local/var/named && \
     mkdir -p /var/cache/named && \
     mkdir -p /usr/local/var/run/named && \
+    touch /usr/local/etc/named.conf && \
+    /usr/local/sbin/rndc-confgen -a
+
+RUN chown named:named /usr/local/etc/named.conf && \
     chown -R named:named /usr/local/var/run/named && \
     chown -R named:named /var/cache/named && \
     chown -R named:named /usr/local/var/named && \
     chown -R named:named /usr/local/etc
-
-RUN touch /usr/local/etc/named.conf && \
-    chown named:named /usr/local/etc/named.conf
 
 # --- STAGE 4: Install Runtime Utilities ---
 # Install utils for user
@@ -46,9 +47,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends {util_packages}
 # Expose standard DNS ports
 EXPOSE 53/tcp
 EXPOSE 53/udp
+# Expose rndc port
+EXPOSE 953/tcp
+EXPOSE 953/udp
+
+# Change the Work Dir
+WORKDIR /usr/local/var/named
 
 # Set default user
 USER named
 
 # Define default command
-CMD ["/usr/local/sbin/named", "-g", "-c", "/usr/local/etc/named.conf"]
+# CMD ["/usr/local/sbin/named", "-g", "-c", "/usr/local/etc/named.conf"]

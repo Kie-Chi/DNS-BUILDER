@@ -8,7 +8,8 @@
                 "/usr/local/etc/named.conf"
             ],
             "volumes": [
-                "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf"
+                "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf",
+                "resource:/images/keys/rndc.key:/usr/local/etc/rndc.key"
             ]
         },
         "auth": {
@@ -93,12 +94,14 @@
                 "ENABLE_PROMETHEUS_EXPORTER": "true",
                 "INET": "${project.inet}",
                 "ATTACKER": "${required}",
-                "RECURSOR": "${required}"
+                "RECURSOR": "${required}",
+                "SOFTWARE": "${required}"
             },
             "volumes": [
                 "resource:/scripts/sh/pcap.sh:/usr/local/etc/pcap.sh",
                 "resource:/scripts/configs/supervisord.conf:/usr/local/etc/supervisord.conf",
-                "${origin}./${name}/contents:/usr/local/etc"
+                "${origin}./${name}/contents:/usr/local/etc",
+                "${required}:/usr/local/etc/rndc.key"
             ],
             "command": [
                 "bash",
