@@ -2,7 +2,7 @@
 
 import logging
 from typing import override
-from pathlib import PureWindowsPath, PurePosixPath, Path
+from pathlib import PurePosixPath, PureWindowsPath, Path, PurePath
 from urllib.parse import urlparse
 from .. import constants
 
@@ -63,7 +63,7 @@ class DNSBPath(PurePosixPath):
                 obj_protocol = "file"
                 obj_host = ""
                 # help to convert windows path to posix path
-                path_part = PureWindowsPath(path_str).as_posix()
+                path_part = PurePath(path_str).as_posix()
 
             obj = super().__new__(cls, path_part, *(args[1:]), **kwargs)
             obj.protocol = obj_protocol

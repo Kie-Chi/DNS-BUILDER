@@ -439,7 +439,7 @@ class MemoryFileSystem(FileSystem):
 
     def _get_path_str(self, path: DNSBPath) -> str:
         """Normalizes a path object to a consistent string representation for use as a dictionary key."""
-        return path.as_posix()
+        return path.__path__()
 
     @override
     def exists(self, path: DNSBPath) -> bool:
