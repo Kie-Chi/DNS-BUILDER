@@ -120,7 +120,7 @@ class Builder:
             if GraphGenerator is None:
                 logger.warning("Graphviz library not found, skipping graph generation.")
             else:
-                graph_gen = GraphGenerator(topology, context.service_ips, self.config.name)
+                graph_gen = GraphGenerator(topology, context.service_ips, self.config.name, self.fs)
                 graph_gen.generate_dot_file(self.graph_output)
         logger.debug("[Builder] Topology mapping complete.")
 

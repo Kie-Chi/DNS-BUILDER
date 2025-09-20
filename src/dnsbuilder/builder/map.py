@@ -7,6 +7,7 @@ except ImportError:
     graphviz = None
 from ..bases.behaviors import _get_rname
 from ..io.path import DNSBPath
+from ..io.fs import FileSystem, AppFileSystem
 
 logger = logging.getLogger(__name__)
 
@@ -117,13 +118,14 @@ class GraphGenerator:
     """
     Generates a Graphviz DOT file from network topology data.
     """
-    def __init__(self, topology_data: Dict[str, List[str]], service_ips: Dict[str, str], project_name: str):
+    def __init__(self, topology_data: Dict[str, List[str]], service_ips: Dict[str, str], project_name: str, fs: FileSystem = AppFileSystem()):
         if graphviz is None:
             raise ImportError("The 'graphviz' library is required to generate graphs. Please install it (`pip install graphviz`).")
         
         self.topology = topology_data
         self.service_ips = service_ips
         self.project_name = project_name
+        self.fs = fs
 
     def generate_dot_file(self, output_path: str):
         """
@@ -149,6 +151,6 @@ class GraphGenerator:
             for target in targets:
                 dot.edge(source, target)
         output_file = DNSBPath(output_path)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(dot.source)
+        self.fs.mkdir(output_file.parent, parents=True, exist_ok=True)
+        self.fs.write_text(output_file, dot.source)
         logger.info(f"Network topology graph written to '{output_file}'")
