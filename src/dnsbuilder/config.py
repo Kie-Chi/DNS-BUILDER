@@ -63,6 +63,7 @@ class BuildModel(BaseModel):
     behavior: Optional[str] = None
     mixins: List[str] = Field(default_factory=list)
     build: bool = True
+    files: Dict[str, str] = Field(default_factory=dict)
     volumes: List[str] = Field(default_factory=list)
     mounts: List[str] = Field(default_factory=list)
     cap_add: List[str] = Field(default_factory=list)

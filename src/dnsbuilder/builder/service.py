@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Any, List, Tuple
 import collections
+import uuid
 
 from ..bases.internal import InternalImage
 from ..bases.external import LocalImage
@@ -43,6 +44,7 @@ class ServiceHandler:
         self._setup_service_directory()
         self.image_obj.write(directory=self.service_dir)
         
+        self._process_files()
         main_conf_path = self._process_volumes()
         self._process_behavior(main_conf_path)
         
@@ -105,6 +107,23 @@ class ServiceHandler:
             raise VolumeError(f"Required volumes mount to {[str(v.dst) for v in not_satisfied]}, but not implemented.")
                     
         return filtered_volumes
+
+    def _process_files(self):
+        files = self.build_conf.get('files', {})
+        if not files:
+            return
+        
+        logger.debug(f"Generating temporary volumes for '{self.service_name}'...")
+        for container_path, content in files.items():            
+            extension = DNSBPath(container_path).suffix
+            temp_uri = DNSBPath(f"temp:/{uuid.uuid4().hex[:24]}{extension}")
+            while self.context.fs.exists(temp_uri):
+                temp_uri = DNSBPath(f"temp:/{uuid.uuid4().hex[:24]}{extension}")
+
+            self.context.fs.write_text(temp_uri, content)
+            volume_str = f"{str(temp_uri)}:{container_path}"
+            self.build_conf.setdefault('volumes', []).append(volume_str)
+            logger.debug(f"Generated temporary volume: {volume_str}")
 
     def _process_volumes(self) -> DNSBPath | None:
         main_conf_output_path: DNSBPath | None = None

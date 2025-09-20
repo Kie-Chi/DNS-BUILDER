@@ -36,7 +36,7 @@ PLACEHOLDER = {
 }
 
 # --- supported protocol ---
-KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource"}
+KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp"}
 
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]
@@ -44,6 +44,6 @@ DEFAULT_NETWORK_NAME = "app_net"
 DEFAULT_DEVICE_NAME = "bridge"
 
 # --- Reserved Keys in Build Configs ---
-RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', "mixins", "mounts"}
+RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', "mixins", "mounts", "files"}
 
 RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include'}
