@@ -4,8 +4,37 @@ import logging
 import fsspec
 from importlib import resources
 from .path import DNSBPath
+from ..exceptions import (
+    ProtocolError,
+    UnsupportedFeatureError,
+    ReadOnlyError,
+    DNSBPathExistsError,
+    DNSBPathNotFoundError,
+    DNSBNotAFileError,
+    DNSBNotADirectoryError,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def wrap_io_error(func):
+    """Decorator to wrap IO errors into DNS-Builder exceptions."""
+
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except FileExistsError as e:
+            raise DNSBPathExistsError(e) from e
+        except FileNotFoundError as e:
+            raise DNSBPathNotFoundError(e) from e
+        except IsADirectoryError as e:
+            raise DNSBNotAFileError(e) from e
+        except NotADirectoryError as e:
+            raise DNSBNotADirectoryError(e) from e
+        except Exception as e:
+            raise e
+
+    return wrapper
 
 # --------------------------------------------------------
 #
@@ -131,20 +160,23 @@ class AppFileSystem(FileSystem):
         """Get the file system handler for a specific location."""
         handler = self._handlers.get(location.protocol)
         if not handler:
-            raise ValueError(
+            raise ProtocolError(
                 f"No filesystem handler registered for protocol: '{location.protocol}'"
             )
         return handler
 
     @override
+    @wrap_io_error
     def read_text(self, location: DNSBPath) -> str:
         return self._get_handler(location).read_text(location)
 
     @override
+    @wrap_io_error
     def write_text(self, location: DNSBPath, content: str):
         return self._get_handler(location).write_text(location, content)
     
     @override
+    @wrap_io_error
     def append_text(self, location: DNSBPath, content: str):
         return self._get_handler(location).append_text(location, content)
 
@@ -161,14 +193,17 @@ class AppFileSystem(FileSystem):
         return self._get_handler(location).is_file(location)
 
     @override
+    @wrap_io_error
     def mkdir(self, location: DNSBPath, parents: bool = False, exist_ok: bool = False):
         return self._get_handler(location).mkdir(location, parents=parents, exist_ok=exist_ok)
 
     @override
+    @wrap_io_error
     def rmtree(self, location: DNSBPath):
         return self._get_handler(location).rmtree(location)
 
     @override
+    @wrap_io_error
     def copy(self, src: DNSBPath, dst: DNSBPath):
         src_handler = self._get_handler(src)
         dst_handler = self._get_handler(dst)
@@ -184,25 +219,29 @@ class AppFileSystem(FileSystem):
         dst_handler.write_bytes(dst, content)
 
     @override
+    @wrap_io_error
     def append_bytes(self, location: DNSBPath, content: bytes):
         return self._get_handler(location).append_bytes(location, content)
 
     @override
+    @wrap_io_error
     def read_bytes(self, location: DNSBPath) -> bytes:
         return self._get_handler(location).read_bytes(location)
 
     @override
+    @wrap_io_error
     def write_bytes(self, location: DNSBPath, content: bytes):
         return self._get_handler(location).write_bytes(location, content)
 
     @override
+    @wrap_io_error
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         src_handler = self._get_handler(src)
         dst_handler = self._get_handler(dst)
         if src_handler is dst_handler and isinstance(src_handler, DiskFileSystem):
             src_handler.copytree(src, dst)
         else:
-            raise NotImplementedError(
+            raise UnsupportedFeatureError(
                 "Cross-filesystem copytree is not yet implemented."
             )
 
@@ -344,7 +383,7 @@ class ResourceFileSystem(FileSystem):
     def _get_resource_traversable(self, path: DNSBPath) -> resources.abc.Traversable:
         """ get Traversable object for resource"""
         if path.protocol != "resource":
-            raise TypeError(f"Only resource protocol path is supported, got {path.protocol}")
+            raise ProtocolError(f"Only resource protocol path is supported, got {path.protocol}")
 
         package = resources.files("dnsbuilder.resources")
         traversable = package
@@ -385,7 +424,7 @@ class ResourceFileSystem(FileSystem):
             return False
 
     def _raise_read_only(self, path: DNSBPath):
-        raise IOError(f"Can not write to resource: {path}")
+        raise ReadOnlyError(f"Can not write to resource: {path}")
 
     @override
     def write_text(self, path: DNSBPath, content: str, encoding: str = "utf-8"):

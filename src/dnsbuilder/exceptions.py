@@ -88,3 +88,58 @@ class UnsupportedFeatureError(BuildError):
     """Raised when a requested feature is not implemented."""
 
     pass
+
+
+# --- 4. Errors related to IO operations ---
+class DNSBIOError(DNSBuilderError):
+    """Base class for IO-related errors."""
+
+    pass
+
+
+class InvalidPathError(DNSBIOError):
+    """Raised when a path is invalid."""
+
+    pass
+
+
+class ProtocolError(DNSBIOError, UnsupportedFeatureError):
+    """Raised when an unsupported protocol is used."""
+
+    pass
+
+ 
+class ReadOnlyError(DNSBIOError):
+    """Raised when a write operation is attempted on a read-only filesystem."""
+
+    pass
+
+
+class DNSBPathExistsError(DNSBIOError):
+    """Raised when a file or directory already exists."""
+
+    pass
+
+
+class DNSBPathNotFoundError(DNSBIOError):
+    """Raised when a file or directory is not found."""
+
+    pass
+
+
+class DNSBNotAFileError(DNSBIOError):
+    """Raised when a file is expected, but a directory is found."""
+
+    pass
+
+
+class DNSBNotADirectoryError(DNSBIOError):
+    """Raised when a directory is expected, but a file is found."""
+
+    pass
+
+# --- 5. Errors related to the UNKOWN ---
+class UnknownError(DNSBuilderError, UnsupportedFeatureError):
+    """Raised when an unknown error occurs."""
+
+    pass

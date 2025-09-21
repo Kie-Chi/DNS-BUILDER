@@ -5,6 +5,7 @@ from typing import override
 from pathlib import PurePosixPath, PureWindowsPath, Path, PurePath
 from urllib.parse import urlparse
 from .. import constants
+from ..exceptions import InvalidPathError
 
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ class DNSBPath(PurePosixPath):
     @override
     def __rtruediv__(self, other):
         if self.is_absolute():
-            raise ValueError(
+            raise InvalidPathError(
                 "Can not join absolute path with relative path, like path + /path"
             )
         return self._reconstruct(super().__rtruediv__(other))
@@ -175,14 +176,14 @@ def is_path_valid(path: str) -> bool:
     except (ValueError, TypeError, OSError):
         pass
     except Exception:
-        raise
+        raise InvalidPathError(f"Path is invalid: {path}")
     try:
         PurePosixPath(path)
         is_posix = True
     except (ValueError, TypeError, OSError):
         pass
     except Exception:
-        raise
+        raise InvalidPathError(f"Path is invalid: {path}")
     return is_windows or is_posix
 
 
@@ -196,7 +197,7 @@ def is_path_absolute(path: str) -> bool:
     except (ValueError, TypeError, OSError):
         pass
     except Exception:
-        raise
+        raise InvalidPathError(f"Path is invalid: {path}")
     if is_absolute:
         return True
     try:
@@ -204,4 +205,4 @@ def is_path_absolute(path: str) -> bool:
     except (ValueError, TypeError, OSError):
         pass
     except Exception:
-        raise
+        raise InvalidPathError(f"Path is invalid: {path}")
