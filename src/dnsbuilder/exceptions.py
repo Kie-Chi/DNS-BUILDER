@@ -139,7 +139,7 @@ class DNSBNotADirectoryError(DNSBIOError):
     pass
 
 # --- 5. Errors related to the UNKOWN ---
-class UnknownError(DNSBuilderError, UnsupportedFeatureError):
+class UnknownError(UnsupportedFeatureError):
     """Raised when an unknown error occurs."""
 
     pass
