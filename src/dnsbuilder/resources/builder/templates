@@ -101,7 +101,10 @@
                 "resource:/scripts/sh/pcap.sh:/usr/local/etc/pcap.sh",
                 "resource:/scripts/configs/supervisord.conf:/usr/local/etc/supervisord.conf",
                 "${origin}./${name}/contents:/usr/local/etc",
-                "${required}:/usr/local/etc/rndc.key"
+                "${required}:/usr/local/etc/trace.py",
+                "${required}:/usr/local/etc/${environment.SOFTWARE}.py",
+                "${required}:/usr/local/etc/rndc.key",
+                "${required}:/usr/local/var/named:rw"
             ],
             "command": [
                 "bash",
