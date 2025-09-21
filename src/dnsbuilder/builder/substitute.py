@@ -124,6 +124,48 @@ class VariableSubstitutor:
         except AttributeError:
             raise ReferenceNotFoundError(f"Cannot resolve image.{image_property} for service '{service_to_find}': property does not exist.")
 
+    def _resolve_build_conf_property(self, key: str, var_map: Dict[str, str]) -> str:
+        """
+        Resolves a value from a build configuration using a dot-separated path.
+        Can resolve from the current service's build_conf or another service's.
+        """
+        parts = key.split('.')
+        
+        current_service_name = var_map['name']
+
+        if parts[0] == 'services':
+            # Accessing another service's build_conf
+            if len(parts) < 3:
+                raise ReferenceNotFoundError(f"Invalid service property format: '{key}'")
+            service_name = parts[1]
+            path_parts = parts[2:]
+            
+            if service_name not in self.resolved_builds:
+                raise ReferenceNotFoundError(f"Service '{service_name}' not found in resolved builds.")
+                
+            target_conf = self.resolved_builds[service_name]
+        else:
+            # Accessing the current service's build_conf
+            service_name = current_service_name
+            path_parts = parts
+            if service_name not in self.resolved_builds:
+                raise BuildError(f"Could not find current service '{service_name}' in resolved builds.")
+            target_conf = self.resolved_builds[service_name]
+
+        value = target_conf
+        for i, part in enumerate(path_parts):
+            if isinstance(value, dict):
+                if part not in value:
+                    raise ReferenceNotFoundError(f"Property path '{'.'.join(path_parts)}' not found in build config for service '{service_name}'. Part '{part}' does not exist.")
+                value = value.get(part)
+            else:
+                raise ReferenceNotFoundError(f"Cannot access property '{part}' on a non-dictionary value (at '{'.'.join(path_parts[:i])}') in build config for service '{service_name}'.")
+        
+        if isinstance(value, (dict, list)):
+             raise BuildError(f"Variable '{key}' resolved to a complex type ({type(value).__name__}), which cannot be substituted into a string.")
+
+        return str(value)
+
     def _resolve_variable(self, key: str, var_map: Dict[str, str]) -> str:
         """Main variable resolution dispatcher."""
         # Skip placeholders
@@ -145,6 +187,12 @@ class VariableSubstitutor:
         # Local variables from var_map
         if key in var_map:
             return var_map[key]
+
+        # Try to resolve from build_conf as a path
+        try:
+            return self._resolve_build_conf_property(key, var_map)
+        except (ReferenceNotFoundError, BuildError):
+            pass
 
         # Variable not found
         logger.warning(f"Could not resolve variable '${{{key}}}' for service '{var_map.get('name', 'unknown')}'. Leaving it unchanged.")
