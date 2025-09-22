@@ -246,15 +246,19 @@ class AppFileSystem(FileSystem):
         dst_handler = self._get_handler(dst)
         if src_handler is dst_handler and isinstance(src_handler, DiskFileSystem):
             src_handler.copytree(src, dst)
-        elif isinstance(src_handler, GitFileSystem):
-            if isinstance(dst_handler, DiskFileSystem):
+            return
+
+        if isinstance(dst_handler, DiskFileSystem):
+            if isinstance(src_handler, GitFileSystem):
                 src_handler.copy2disk(src, dst)
-            else:
-                pass
-        else:
-            raise UnsupportedFeatureError(
-                f"Cross {src.protocol} to {dst.protocol} is not yet implemented."
-            )
+                return
+            if isinstance(src_handler, ResourceFileSystem):
+                src_handler.copy2disk(src, dst, dst_handler)
+                return
+
+        raise UnsupportedFeatureError(
+            f"Cross-filesystem copytree from '{src.protocol}' to '{dst.protocol}' is not yet implemented."
+        )
 
 # --------------------
 #
@@ -468,6 +472,28 @@ class ResourceFileSystem(FileSystem):
     @override
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         self._raise_read_only(dst)
+
+    def copy2disk(self, src: DNSBPath, dst: DNSBPath, disk_fs: FileSystem):
+        src_trav = self._get_resource_traversable(src)
+        self._copy_to_disk_recursive(src_trav, dst, disk_fs)
+
+    def _copy_to_disk_recursive(
+        self,
+        src_trav: resources.abc.Traversable,
+        dst_path: DNSBPath,
+        disk_fs: FileSystem,
+    ):
+        if src_trav.is_file():
+            content = src_trav.read_bytes()
+            disk_fs.write_bytes(dst_path, content)
+        elif src_trav.is_dir():
+            if not disk_fs.exists(dst_path):
+                disk_fs.mkdir(dst_path, parents=True, exist_ok=True)
+
+            for item in src_trav.iterdir():
+                item_dst_path = dst_path / item.name
+                self._copy_to_disk_recursive(item, item_dst_path, disk_fs)
+
 
 
 # --------------------
