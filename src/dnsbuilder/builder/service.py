@@ -146,9 +146,16 @@ class ServiceHandler:
                 self.processed_volumes.append(final_volume_str)
             else:
                 # relative path or resource path, copy to contents directory
-                filename = host_path.name
-                target_path = self.contents_dir / filename
-                self.context.fs.copy(host_path, target_path)
+                filename = None
+                target_path = None
+                if self.context.fs.is_dir(host_path):
+                    filename = host_path.name.split(".")[0]
+                    target_path = self.contents_dir / filename
+                    self.context.fs.copytree(host_path, target_path)
+                else:
+                    filename = host_path.name
+                    target_path = self.contents_dir / filename
+                    self.context.fs.copy(host_path, target_path)
                 if str(container_path).endswith('.conf'):
                     if not main_conf_output_path:
                         main_conf_output_path = target_path
