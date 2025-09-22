@@ -44,7 +44,7 @@
             "pkg-config",
             "python3-dnslib",
             "python3-scapy",
-            "build-essentail"
+            "build-essential"
         ]
     },
     "judas": {
