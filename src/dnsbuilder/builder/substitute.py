@@ -3,7 +3,7 @@ import re
 import logging
 import os
 from typing import Dict, Any
-
+from functools import wraps
 from ..config import Config
 from .. import constants
 from ..base import Image
@@ -11,6 +11,16 @@ from ..bases.internal import InternalImage
 from ..exceptions import BuildError, ReferenceNotFoundError
 
 logger = logging.getLogger(__name__)
+
+def no_required(func):
+    @wraps(func)
+    def wrapper(self, key, *args, **kwargs):
+        resolved_value = func(self, key, *args, **kwargs)
+        if resolved_value == constants.PLACEHOLDER["REQUIRED"]:
+            return f"${{{key}}}"
+        return resolved_value
+
+    return wrapper
 
 class VariableSubstitutor:
     """
@@ -64,6 +74,7 @@ class VariableSubstitutor:
             
         return var_map
 
+    @no_required
     def _resolve_env_variable(self, key: str) -> str:
         """Resolve environment variables with optional default values."""
         parts = key[4:].split(':', 1)  # Remove 'env.' prefix
@@ -77,6 +88,7 @@ class VariableSubstitutor:
         
         raise BuildError(f"Environment variable '{env_var_name}' is not set and no default value was provided.")
 
+    @no_required
     def _resolve_service_ip(self, key: str) -> str:
         """Resolve service IP addresses."""
         service_to_find = key[9:-3]  # Remove 'services.' prefix and '.ip' suffix
@@ -91,6 +103,7 @@ class VariableSubstitutor:
         else:
             raise ReferenceNotFoundError(f"Cannot resolve IP for service '{service_to_find}': service not found in builds configuration.")
 
+    @no_required
     def _resolve_service_image_property(self, key: str) -> str:
         """Resolve service image properties using getattr."""
         parts = key.split(".")
@@ -124,6 +137,7 @@ class VariableSubstitutor:
         except AttributeError:
             raise ReferenceNotFoundError(f"Cannot resolve image.{image_property} for service '{service_to_find}': property does not exist.")
 
+    @no_required
     def _resolve_build_conf_property(self, key: str, var_map: Dict[str, str]) -> str:
         """
         Resolves a value from a build configuration using a dot-separated path.
