@@ -27,7 +27,8 @@ RUN ./configure --prefix=/usr/local --sysconfdir=/usr/local/etc --localstatedir=
 ENV LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
 
 RUN groupadd -r named && useradd -r -g named named
-RUN mkdir -p /usr/local/var/named && \
+RUN mkdir -p /usr/local/var/bind && \
+    mkdir -p /usr/local/var/named && \
     mkdir -p /var/cache/named && \
     mkdir -p /usr/local/var/run/named && \
     touch /usr/local/etc/named.conf && \
@@ -37,6 +38,7 @@ RUN chown named:named /usr/local/etc/named.conf && \
     chown -R named:named /usr/local/var/run/named && \
     chown -R named:named /var/cache/named && \
     chown -R named:named /usr/local/var/named && \
+    chown -R named:named /usr/local/var/bind && \
     chown -R named:named /usr/local/etc
 
 # --- STAGE 4: Install Runtime Utilities ---
@@ -52,7 +54,7 @@ EXPOSE 953/tcp
 EXPOSE 953/udp
 
 # Change the Work Dir
-WORKDIR /usr/local/var/named
+WORKDIR /usr/local/var/bind
 
 # Set default user
 USER named

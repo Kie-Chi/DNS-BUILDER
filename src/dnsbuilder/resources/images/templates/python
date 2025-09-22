@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends {util_packages}
     rm -rf /var/lib/apt/lists/*
 
 # Set up the working directory
-WORKDIR /app
+WORKDIR /usr/local/etc
 
 # Expose standard DNS ports
 EXPOSE 53/tcp

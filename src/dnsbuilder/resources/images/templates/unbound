@@ -45,6 +45,7 @@ EXPOSE 53/udp
 
 # Set default user (can't be used right now)
 # USER unbound
+WORKDIR /usr/local/etc
 
 # Define default command
 CMD ["unbound", "-d"]

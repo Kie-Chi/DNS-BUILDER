@@ -9,7 +9,7 @@
             ],
             "volumes": [
                 "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf",
-                "resource:/images/keys/rndc.key:/usr/local/etc/rndc.key"
+                "resource:/images/controls/bind:/usr/local/var/bind:rw"
             ]
         },
         "auth": {
@@ -101,10 +101,9 @@
                 "resource:/scripts/sh/pcap.sh:/usr/local/etc/pcap.sh",
                 "resource:/scripts/configs/supervisord.conf:/usr/local/etc/supervisord.conf",
                 "${origin}./${name}/contents:/usr/local/etc",
-                "${required}:/usr/local/etc/trace.py",
-                "${required}:/usr/local/etc/${environment.SOFTWARE}.py",
-                "${required}:/usr/local/etc/rndc.key",
-                "${required}:/usr/local/var/named:rw"
+                "resource:/scripts/py/trace.py:/usr/local/etc/trace.py",
+                "resource:/scripts/py/${environment.SOFTWARE}.py:/usr/local/etc/${environment.SOFTWARE}.py",
+                "${required}:/usr/local/var/${environment.SOFTWARE}:rw"
             ],
             "command": [
                 "bash",

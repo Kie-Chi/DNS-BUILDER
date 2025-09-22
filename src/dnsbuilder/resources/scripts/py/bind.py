@@ -15,8 +15,8 @@ except ImportError:
 
 # --- Configuration ---
 HOST, PORT = "0.0.0.0", 12345
-RNDC_KEY_FILE = "/usr/local/etc/rndc.key"
-DUMP_FILE = "/usr/local/var/named/named_dump.db"
+RNDC_KEY_FILE = "/usr/local/var/bind/rndc.key"
+DUMP_FILE = "/usr/local/var/bind/named_dump.db"
 
 # --- Logging Setup ---
 logging.basicConfig(
