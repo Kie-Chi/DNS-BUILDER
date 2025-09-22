@@ -3,7 +3,7 @@ import logging
 from .config import Config
 from .builder.build import Builder
 from .utils.logger import setup_logger
-from .io.fs import AppFileSystem, DiskFileSystem, MemoryFileSystem, ResourceFileSystem
+from .io.fs import AppFileSystem, MemoryFileSystem, DiskFileSystem
 from .exceptions import (
     DNSBuilderError,
     ConfigurationError,
@@ -32,8 +32,6 @@ def main():
             app_fs.register_handler("file", MemoryFileSystem())
         else:
             app_fs.register_handler("file", DiskFileSystem())
-        app_fs.register_handler("temp", MemoryFileSystem())
-        app_fs.register_handler("resource", ResourceFileSystem())
         config = Config(args.config_file, app_fs)
         builder = Builder(config, graph_output=args.graph, fs=app_fs)
         builder.run()

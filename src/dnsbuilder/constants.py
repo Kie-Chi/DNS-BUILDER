@@ -36,7 +36,7 @@ PLACEHOLDER = {
 }
 
 # --- supported protocol ---
-KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp"}
+KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp", "git"}
 
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]

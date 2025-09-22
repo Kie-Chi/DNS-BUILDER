@@ -3,9 +3,12 @@ from typing import override, Union, Dict
 import logging
 import fsspec
 from importlib import resources
+import git
+import hashlib
 from .path import DNSBPath
 from ..exceptions import (
     ProtocolError,
+    InvalidPathError,
     UnsupportedFeatureError,
     ReadOnlyError,
     DNSBPathExistsError,
@@ -145,6 +148,9 @@ class AppFileSystem(FileSystem):
         self._handlers: Dict[str, FileSystem] = {}
         # register default file system handlers
         self.register_handler("file", DiskFileSystem())
+        self.register_handler("temp", MemoryFileSystem())
+        self.register_handler("resource", ResourceFileSystem())
+        self.register_handler("git", GitFileSystem(self))
 
         
     def register_handler(self, protocol: str, handler: FileSystem):
@@ -240,9 +246,14 @@ class AppFileSystem(FileSystem):
         dst_handler = self._get_handler(dst)
         if src_handler is dst_handler and isinstance(src_handler, DiskFileSystem):
             src_handler.copytree(src, dst)
+        elif isinstance(src_handler, GitFileSystem):
+            if isinstance(dst_handler, DiskFileSystem):
+                src_handler.copy2disk(src, dst)
+            else:
+                pass
         else:
             raise UnsupportedFeatureError(
-                "Cross-filesystem copytree is not yet implemented."
+                f"Cross {src.protocol} to {dst.protocol} is not yet implemented."
             )
 
 # --------------------
@@ -655,3 +666,196 @@ class MemoryFileSystem(FileSystem):
                     self.mkdir(new_dst_path, parents=True, exist_ok=True)
                 else:  # It's a file
                     self.write_bytes(new_dst_path, content)
+
+
+class GitFileSystem(FileSystem):
+    """
+    A read-only filesystem for accessing files from Git repositories.
+    Handles 'git://' URIs, clones repositories into a local cache,
+    and allows reading files from specific branches, tags, or commits.
+    """
+
+    def __init__(self, cache_fs: FileSystem, cache_root: str = ".dnsb_cache"):
+        self.cache_fs = cache_fs
+        self.cache_root = DNSBPath(cache_root)
+        self.name = "GitFS"
+        self._synced_repos = set()
+        self._init_cache()
+
+    def _init_cache(self):
+        """Ensures the cache root directory exists."""
+        if not self.cache_fs.exists(self.cache_root):
+            logger.debug(
+                f"[{self.name}] Creating cache directory at '{self.cache_root}'"
+            )
+            self.cache_fs.mkdir(self.cache_root, parents=True, exist_ok=True)
+
+    def _parse_path(self, path: DNSBPath) -> tuple[str, str, str, DNSBPath]:
+        """Parses a git URI into its components."""
+        if path.protocol != "git":
+            raise UnsupportedFeatureError(f"Unsupported protocol: {path.protocol}")
+
+        repo_url = f"https://{path.host}{path.__path__()}"
+
+        ref = "HEAD"
+        query = path.query
+        if "ref" in query and query["ref"]:
+            ref = query["ref"][0]
+
+        path_in_repo = path.fragment
+        if not path_in_repo:
+            raise InvalidPathError(
+                "Path in repository must be specified in the URI fragment (e.g., #path/to/file)"
+            )
+
+        repo_hash = hashlib.sha256(repo_url.encode()).hexdigest()
+        local_repo_path = self.cache_root / repo_hash
+
+        return repo_url, ref, path_in_repo, local_repo_path
+
+    def _get_synced_repo_path(self, path: DNSBPath) -> DNSBPath:
+        """
+        Ensures the repository is cloned/updated and at the correct ref.
+        Returns the absolute path to the requested file within the cache.
+        """
+        repo_url, ref, path_in_repo, local_repo_path = self._parse_path(path)
+
+        # Create a unique key for this repo and ref for this run
+        cache_key = f"{repo_url}@{ref}"
+        
+        if cache_key in self._synced_repos:
+            logger.debug(f"[{self.name}] '{cache_key}' already synced in this run. Using local cache.")
+        else:
+            logger.debug(f"[{self.name}] Syncing repository for '{cache_key}'...")
+            local_repo_str = str(local_repo_path)
+    
+            if not self.cache_fs.exists(local_repo_path):
+                logger.debug(f"[{self.name}] Cloning '{repo_url}' to '{local_repo_path}'...")
+                git.Repo.clone_from(repo_url, local_repo_str)
+                repo = git.Repo(local_repo_str)
+            else:
+                logger.debug(
+                    f"[{self.name}] Repository '{repo_url}' found in cache. Fetching updates..."
+                )
+                repo = git.Repo(local_repo_str)
+                try:
+                    repo.remotes.origin.fetch()
+                except git.exc.GitCommandError as e:
+                    logger.warning(
+                        f"[{self.name}] Failed to fetch updates for '{repo_url}': {e}. Using cached version."
+                    )
+    
+            logger.debug(f"[{self.name}] Checking out ref '{ref}' for '{repo_url}'...")
+            try:
+                repo.git.checkout(ref)
+                # If the ref is a branch (not a tag or commit hash), pull the latest changes.
+                if ref in repo.heads:
+                    logger.debug(f"[{self.name}] Pulling latest changes for branch '{ref}'...")
+                    repo.remotes.origin.pull()
+    
+            except git.exc.GitCommandError as e:
+                raise DNSBPathNotFoundError(
+                    f"Ref '{ref}' not found in repository '{repo_url}': {e}"
+                ) from e
+            
+            # Mark this repo+ref as synced for this run
+            self._synced_repos.add(cache_key)
+            logger.debug(f"[{self.name}] Sync complete for '{cache_key}'.")
+
+
+        final_path = local_repo_path / path_in_repo
+        if not self.cache_fs.exists(final_path):
+            raise DNSBPathNotFoundError(f"Path '{path_in_repo}' not found in repository '{repo_url}' at ref '{ref}'.")
+            
+        return final_path
+
+    @override
+    def exists(self, path: DNSBPath) -> bool:
+        try:
+            full_path = self._get_synced_repo_path(path)
+            return self.cache_fs.exists(full_path)
+        except (DNSBPathNotFoundError, InvalidPathError, ValueError):
+            return False
+        except Exception as e:
+            logger.error(f"[{self.name}] Error checking existence for '{path}': {e}")
+            return False
+
+    @override
+    def is_dir(self, path: DNSBPath) -> bool:
+        try:
+            full_path = self._get_synced_repo_path(path)
+            return self.cache_fs.is_dir(full_path)
+        except (DNSBPathNotFoundError, InvalidPathError, ValueError):
+            return False
+        except Exception as e:
+            logger.error(f"[{self.name}] Error in is_dir for '{path}': {e}")
+            return False
+
+    @override
+    def is_file(self, path: DNSBPath) -> bool:
+        try:
+            full_path = self._get_synced_repo_path(path)
+            return self.cache_fs.is_file(full_path)
+        except (DNSBPathNotFoundError, InvalidPathError, ValueError):
+            return False
+        except Exception as e:
+            logger.error(f"[{self.name}] Error in is_file for '{path}': {e}")
+            return False
+
+    @override
+    def read_text(self, path: DNSBPath) -> str:
+        full_path = self._get_synced_repo_path(path)
+        logger.debug(f"[{self.name}] Reading text from cached git path: {full_path}")
+        return self.cache_fs.read_text(full_path)
+
+    @override
+    def read_bytes(self, path: DNSBPath) -> bytes:
+        full_path = self._get_synced_repo_path(path)
+        logger.debug(f"[{self.name}] Reading bytes from cached git path: {full_path}")
+        return self.cache_fs.read_bytes(full_path)
+
+    def _raise_read_only(self, path: DNSBPath):
+        raise ReadOnlyError(f"Git filesystem is read-only. Cannot write to '{path}'.")
+
+    @override
+    def write_text(self, path: DNSBPath, content: str):
+        self._raise_read_only(path)
+
+    @override
+    def write_bytes(self, path: DNSBPath, content: bytes):
+        self._raise_read_only(path)
+
+    @override
+    def append_text(self, path: DNSBPath, content: str):
+        self._raise_read_only(path)
+
+    @override
+    def append_bytes(self, path: DNSBPath, content: bytes):
+        self._raise_read_only(path)
+
+    @override
+    def copy(self, src: DNSBPath, dst: DNSBPath):
+        self._raise_read_only(dst)
+
+    @override
+    def copytree(self, src: DNSBPath, dst: DNSBPath):
+        self._raise_read_only(dst)
+
+    @override
+    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
+        self._raise_read_only(path)
+
+    @override
+    def rmtree(self, path: DNSBPath):
+        self._raise_read_only(path)
+
+    def copy2disk(self, src: DNSBPath, dst: DNSBPath):
+        try:
+            full_path = self._get_synced_repo_path(src)
+            if self.cache_fs.is_dir(full_path):
+                self.cache_fs.copytree(full_path, dst)
+            elif self.cache_fs.is_file(full_path):
+                self.cache_fs.copy(full_path, dst)
+        except Exception as e:
+            logger.error(f"[{self.name}] Error in copy2disk for '{src}' to '{dst}': {e}")
+            raise

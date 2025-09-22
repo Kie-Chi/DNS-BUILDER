@@ -45,6 +45,8 @@ class DNSBPath(PurePosixPath):
         is_origin = kwargs.pop("is_origin", False)
         protocol_kw = kwargs.pop("protocol", None)
         host_kw = kwargs.pop("host", None)
+        query_kw = kwargs.pop("query", None)
+        fragment_kw = kwargs.pop("fragment", None)
 
         # Protocol and host are passed explicitly, so we skip parsing.
         __first_part = args[0]
@@ -52,6 +54,8 @@ class DNSBPath(PurePosixPath):
             obj = super().__new__(cls, *args, **kwargs)
             obj.protocol = protocol_kw
             obj.host = host_kw if host_kw is not None else ""
+            obj.query_str = query_kw if query_kw is not None else ""
+            obj.fragment = fragment_kw if fragment_kw is not None else ""
         else:
             path_str = str(args[0])
             parsed = urlparse(path_str)
@@ -60,15 +64,21 @@ class DNSBPath(PurePosixPath):
                 obj_protocol = parsed.scheme
                 obj_host = parsed.netloc
                 path_part = parsed.path
+                obj_query = parsed.query
+                obj_fragment = parsed.fragment
             else:
                 obj_protocol = "file"
                 obj_host = ""
                 # help to convert windows path to posix path
                 path_part = PurePath(path_str).as_posix()
+                obj_query = ""
+                obj_fragment = ""
 
             obj = super().__new__(cls, path_part, *(args[1:]), **kwargs)
             obj.protocol = obj_protocol
             obj.host = obj_host
+            obj.query_str = obj_query
+            obj.fragment = obj_fragment
             __first_part = path_part
 
         obj.is_origin = is_origin
@@ -89,12 +99,16 @@ class DNSBPath(PurePosixPath):
             is_origin=self.is_origin,
             protocol=self.protocol,
             host=self.host,
+            query=self.query_str,
+            fragment=self.fragment,
         )
     
     def __init__(self, *args, **kwargs):
         kwargs.pop("is_origin", None)
         kwargs.pop("protocol", None)
         kwargs.pop("host", None)
+        kwargs.pop("query", None)
+        kwargs.pop("fragment", None)
         super().__init__(self.__first_part, *(args[1:]), **kwargs)
 
     @property
@@ -147,10 +161,19 @@ class DNSBPath(PurePosixPath):
 
         # For other URL-like protocols
         host_part = f"//{self.host}" if self.host else ""
-        return f"{self.protocol}:{host_part}{path_part}"
+        query_part = f"?{self.query_str}" if self.query_str else ""
+        fragment_part = f"#{self.fragment}" if self.fragment else ""
+        return f"{self.protocol}:{host_part}{path_part}{query_part}{fragment_part}"
     
     def __path__(self) -> str:
         return super().__str__()
+
+    @property
+    def query(self) -> dict:
+        if not hasattr(self, "_query_dict"):
+            from urllib.parse import parse_qs
+            self._query_dict = parse_qs(self.query_str)
+        return self._query_dict
 
     @override
     def __repr__(self) -> str:
