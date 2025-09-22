@@ -42,6 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends {util_packages}
 # Expose standard DNS ports
 EXPOSE 53/tcp
 EXPOSE 53/udp
+EXPOSE 8953/tcp
+EXPOSE 8953/udp
 
 # Set default user (can't be used right now)
 # USER unbound

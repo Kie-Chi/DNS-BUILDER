@@ -5,6 +5,7 @@ images:
     util:
       - supervisor
       - bind9-utils
+      - unbound
       - python3-dnspython
 builds:
   traffic:

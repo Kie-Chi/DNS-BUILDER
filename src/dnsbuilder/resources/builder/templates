@@ -38,7 +38,8 @@
     "unbound": {
         "recursor": {
             "volumes": [
-                "resource:/configs/unbound_recursor_base.conf:/usr/local/etc/unbound/unbound.conf"
+                "resource:/configs/unbound_recursor_base.conf:/usr/local/etc/unbound/unbound.conf",
+                "resource:/images/controls/unbound:/usr/local/var/unbound:rw"
             ]
         },
         "forwarder": {
