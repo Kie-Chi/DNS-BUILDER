@@ -4,6 +4,7 @@ images:
     ref: "python:3.9.0"
     util:
       - supervisor
+      - tshark
       - bind9-utils
       - unbound
       - python3-dnspython

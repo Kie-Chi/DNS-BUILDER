@@ -105,6 +105,7 @@
                 "${origin}./${name}/contents:/usr/local/etc",
                 "resource:/scripts/py/trace.py:/usr/local/etc/trace.py",
                 "resource:/scripts/py/${environment.SOFTWARE}.py:/usr/local/etc/${environment.SOFTWARE}.py",
+                "resource:/scripts/sh/stat.sh:/usr/local/etc/stat.sh",
                 "${required}:/usr/local/var/${environment.SOFTWARE}:rw"
             ],
             "command": [
