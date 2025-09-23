@@ -94,6 +94,7 @@
             "environment": {
                 "ENABLE_PROMETHEUS_EXPORTER": "true",
                 "INET": "${project.inet}",
+                "FILTER": "udp and port 53",
                 "ATTACKER": "${required}",
                 "RECURSOR": "${required}",
                 "SOFTWARE": "${required}"

@@ -4,7 +4,7 @@ set -e
 # --- 1. env ---
 if [ -z "$INET" ]; then
   echo "error: environment variable INET is not set." >&2
-  echo "please provide it by -e INET=10.89.0.0/24." >&2
+  echo "please provide it by -e INET=x.x.x.x/xx." >&2
   exit 1
 fi
 
@@ -37,6 +37,12 @@ if [ -z "$IFACE" ]; then
   /sbin/ip addr >&2
   echo "--------------------------------" >&2
   exit 1
+fi
+
+# --- 4. check filter ---
+if [ -z "$FILTER" ]; then
+  echo "warn: no filter set, we will use default 'udp and port 53'." >&2
+  export FILTER="udp and port 53"
 fi
 
 export USED_IFACE=${IFACE}
