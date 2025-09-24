@@ -1,1 +1,1 @@
-# Just a placeholder file avoid dns_analyzer to fail
+# Just a placeholder file avoid `traffic` failing to generate
