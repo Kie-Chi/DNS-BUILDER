@@ -169,6 +169,15 @@ class DNSBPath(PurePosixPath):
         return super().__str__()
 
     @property
+    def __rname__(self) -> str:
+        """
+        Return the name of the true path.
+        """
+        if self.fragment and self.fragment != ".":
+            return PurePosixPath(self.fragment).name
+        return self.name
+
+    @property
     def query(self) -> dict:
         if not hasattr(self, "_query_dict"):
             from urllib.parse import parse_qs

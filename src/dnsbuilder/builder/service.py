@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Any, List, Tuple
 import collections
 import uuid
+import hashlib
 
 from ..bases.internal import InternalImage
 from ..bases.external import LocalImage
@@ -148,13 +149,19 @@ class ServiceHandler:
                 # relative path or resource path, copy to contents directory
                 filename = None
                 target_path = None
-                if self.context.fs.is_dir(host_path):
-                    filename = host_path.name.split(".")[0]
+                def gen_target_path(filename: DNSBPath) -> DNSBPath:
                     target_path = self.contents_dir / filename
+                    if self.context.fs.exists(target_path):
+                        target_path = self.contents_dir / f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
+                    return target_path
+
+                if self.context.fs.is_dir(host_path):
+                    filename = host_path.__rname__.split(".")[0]
+                    target_path = gen_target_path(filename)
                     self.context.fs.copytree(host_path, target_path)
                 else:
-                    filename = host_path.name
-                    target_path = self.contents_dir / filename
+                    filename = host_path.__rname__
+                    target_path = gen_target_path(filename)
                     self.context.fs.copy(host_path, target_path)
                 if str(container_path).endswith('.conf'):
                     if not main_conf_output_path:
