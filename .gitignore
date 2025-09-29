@@ -11,6 +11,8 @@
 !src/**
 !test
 !test/**
+!doc
+!doc/**
 *.egg-info/
 !requirements.txt
 !README.md

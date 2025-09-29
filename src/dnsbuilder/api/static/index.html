@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DNSBuilder UI</title>
+</head>
+<body>
+    <h1>DNSBuilder UI</h1>
+    <div id="messages"></div>
+    <script>
+        const messages = document.getElementById('messages');
+        const ws = new WebSocket("ws://localhost:8000/api/ws");
+
+        ws.onmessage = function(event) {
+            const message = document.createElement('div');
+            message.textContent = event.data;
+            messages.appendChild(message);
+        };
+    </script>
+</body>
+</html>
