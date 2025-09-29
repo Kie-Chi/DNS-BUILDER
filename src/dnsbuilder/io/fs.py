@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import override, Union, Dict
+from typing import override, Union, Dict, List
 import logging
 import fsspec
 from importlib import resources
 import git
 import hashlib
-from .path import DNSBPath
+from .path import DNSBPath, Path
 from ..exceptions import (
     ProtocolError,
     InvalidPathError,
@@ -123,6 +123,29 @@ class FileSystem(ABC):
         """Remove a directory recursively"""
         pass
 
+    # NotImplemented methods
+    # !!! Child-FileSystem Override these methods if needed
+    def listdir(self, path: DNSBPath) -> List[DNSBPath]:
+        """List directory contents"""
+        return NotImplemented
+
+    def remove(self, path: DNSBPath):
+        """Remove a file or directory"""
+        return NotImplemented
+
+    def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        """Glob a path pattern"""
+        return NotImplemented
+
+    def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        """Glob a path pattern recursively"""
+        return NotImplemented
+    
+    def absolute(self, path: DNSBPath) -> DNSBPath:
+        """Get the absolute path"""
+        return NotImplemented
+    
+
 # --------------------------------------------------------
 #
 # User FileSystem
@@ -144,8 +167,9 @@ class AppFileSystem(FileSystem):
         support a lot kind of file system, 
         like file, resource, http, s3, etc.
     """
+    _handlers: Dict[str, FileSystem] = {}
+
     def __init__(self):
-        self._handlers: Dict[str, FileSystem] = {}
         # register default file system handlers
         self.register_handler("file", DiskFileSystem())
         self.register_handler("temp", MemoryFileSystem())
@@ -162,51 +186,89 @@ class AppFileSystem(FileSystem):
         if protocol in self._handlers:
             del self._handlers[protocol]
 
-    def _get_handler(self, location: DNSBPath) -> FileSystem:
-        """Get the file system handler for a specific location."""
-        handler = self._handlers.get(location.protocol)
+    @classmethod
+    def _delegator(cls, method_name: str):
+        def decorator(self, path: DNSBPath, *args, **kwargs):
+            handler = self._get_handler(path)
+            method = getattr(handler, method_name, None)
+            if method is None:
+                raise NotImplementedError(f"FileSystem handler for protocol '{path.protocol}' does not support '{method_name}'")
+            return method(path, *args, **kwargs)
+        return decorator
+
+    def _get_handler(self, path: DNSBPath) -> 'FileSystem':
+        """Get the file system handler for a specific path."""
+        protocol = path.protocol
+        handler = self._handlers.get(protocol)
         if not handler:
             raise ProtocolError(
-                f"No filesystem handler registered for protocol: '{location.protocol}'"
+                f"No filesystem handler registered for protocol: '{protocol}'"
             )
         return handler
 
     @override
     @wrap_io_error
-    def read_text(self, location: DNSBPath) -> str:
-        return self._get_handler(location).read_text(location)
+    def listdir(self, path: DNSBPath) -> List[DNSBPath]:
+        return AppFileSystem._delegator("listdir")(self, path)
+
+    # Not-Std Methods
+    @override
+    @wrap_io_error
+    def remove(self, path: DNSBPath):
+        return AppFileSystem._delegator("remove")(self, path)
 
     @override
     @wrap_io_error
-    def write_text(self, location: DNSBPath, content: str):
-        return self._get_handler(location).write_text(location, content)
+    def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        return AppFileSystem._delegator("glob")(self, path, pattern)
+
+    @override
+    @wrap_io_error
+    def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        return AppFileSystem._delegator("rglob")(self, path, pattern)
+
+    @override
+    @wrap_io_error
+    def absolute(self, path: DNSBPath) -> DNSBPath:
+        return AppFileSystem._delegator("absolute")(self, path)
+
+    # Std Methods
+    @override
+    @wrap_io_error
+    def read_text(self, path: DNSBPath) -> str:
+        return AppFileSystem._delegator("read_text")(self, path)
+
+    @override
+    @wrap_io_error
+    def write_text(self, path: DNSBPath, content: str):
+        return AppFileSystem._delegator("write_text")(self, path, content)
     
     @override
     @wrap_io_error
-    def append_text(self, location: DNSBPath, content: str):
-        return self._get_handler(location).append_text(location, content)
+    def append_text(self, path: DNSBPath, content: str):
+        return AppFileSystem._delegator("append_text")(self, path, content)
 
     @override
-    def exists(self, location: DNSBPath) -> bool:
-        return self._get_handler(location).exists(location)
+    def exists(self, path: DNSBPath) -> bool:
+        return AppFileSystem._delegator("exists")(self, path)
 
     @override
-    def is_dir(self, location: DNSBPath) -> bool:
-        return self._get_handler(location).is_dir(location)
+    def is_dir(self, path: DNSBPath) -> bool:
+        return AppFileSystem._delegator("is_dir")(self, path)
 
     @override
-    def is_file(self, location: DNSBPath) -> bool:
-        return self._get_handler(location).is_file(location)
-
-    @override
-    @wrap_io_error
-    def mkdir(self, location: DNSBPath, parents: bool = False, exist_ok: bool = False):
-        return self._get_handler(location).mkdir(location, parents=parents, exist_ok=exist_ok)
+    def is_file(self, path: DNSBPath) -> bool:
+        return AppFileSystem._delegator("is_file")(self, path)      
 
     @override
     @wrap_io_error
-    def rmtree(self, location: DNSBPath):
-        return self._get_handler(location).rmtree(location)
+    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
+        return AppFileSystem._delegator("mkdir")(self, path, parents=parents, exist_ok=exist_ok)
+
+    @override
+    @wrap_io_error
+    def rmtree(self, path: DNSBPath):
+        return AppFileSystem._delegator("rmtree")(self, path)
 
     @override
     @wrap_io_error
@@ -226,18 +288,18 @@ class AppFileSystem(FileSystem):
 
     @override
     @wrap_io_error
-    def append_bytes(self, location: DNSBPath, content: bytes):
-        return self._get_handler(location).append_bytes(location, content)
+    def append_bytes(self, path: DNSBPath, content: bytes):
+        return AppFileSystem._delegator("append_bytes")(self, path, content)
+    
+    @override
+    @wrap_io_error
+    def read_bytes(self, path: DNSBPath) -> bytes:
+        return AppFileSystem._delegator("read_bytes")(self, path)
 
     @override
     @wrap_io_error
-    def read_bytes(self, location: DNSBPath) -> bytes:
-        return self._get_handler(location).read_bytes(location)
-
-    @override
-    @wrap_io_error
-    def write_bytes(self, location: DNSBPath, content: bytes):
-        return self._get_handler(location).write_bytes(location, content)
+    def write_bytes(self, path: DNSBPath, content: bytes):
+        return AppFileSystem._delegator("write_bytes")(self, path, content)
 
     @override
     @wrap_io_error
@@ -348,6 +410,22 @@ class GenericFileSystem(FileSystem):
         else:
             logger.debug(f"Path {path} does not exist, skipping rmtree.")
 
+    @override
+    def listdir(self, path: DNSBPath) -> List[DNSBPath]:
+        return [DNSBPath(p) for p in self.fs.ls(str(path))]
+
+    @override
+    def remove(self, path: DNSBPath):
+        self.fs.rm(str(path))
+
+    @override
+    def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        return [DNSBPath(p) for p in self.fs.glob(str(path / pattern))]
+
+    @override
+    def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        return [DNSBPath(p) for p in self.fs.glob(str(path / pattern))]
+
 # --------------------
 #
 # Generic Disk FileSystem
@@ -360,6 +438,10 @@ class DiskFileSystem(GenericFileSystem):
     def __init__(self):
         super().__init__(protocol="file")
         self.name = "DiskFS"
+
+    @override
+    def absolute(self, path: DNSBPath) -> DNSBPath:
+        return DNSBPath(Path(path).absolute())
 
 # --------------------
 #
@@ -405,6 +487,10 @@ class ResourceFileSystem(FileSystem):
         for part in path.parts[1:]:
             traversable = traversable.joinpath(part)
         return traversable
+
+    @override
+    def listdir(self, path: DNSBPath) -> List[DNSBPath]:
+        return [path / DNSBPath(p).name for p in self._get_resource_traversable(path).iterdir()]
 
     @override
     def read_text(self, path: DNSBPath, encoding: str = "utf-8") -> str:
@@ -693,6 +779,11 @@ class MemoryFileSystem(FileSystem):
                 else:  # It's a file
                     self.write_bytes(new_dst_path, content)
 
+# --------------------
+#
+# Git FileSystem
+#
+# --------------------
 
 class GitFileSystem(FileSystem):
     """
@@ -885,3 +976,21 @@ class GitFileSystem(FileSystem):
         except Exception as e:
             logger.error(f"[{self.name}] Error in copy2disk for '{src}' to '{dst}': {e}")
             raise
+
+
+# --------------------
+#
+# Helper Functions
+#
+# --------------------
+
+def create_app_fs(use_vfs: bool = False) -> "FileSystem" :
+    """
+    Create the appropriate FileSystem for the application.
+    """
+    app_fs = AppFileSystem()
+    if use_vfs:
+        app_fs.register_handler("file", DiskFileSystem())
+    else:
+        app_fs.register_handler("file", MemoryFileSystem())
+    return app_fs
