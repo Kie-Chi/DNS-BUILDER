@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 import copy
 import json
-from typing import Any, Dict, List, Optional, override
+from typing import Any, Dict, List, Optional
 import logging
 
+from ..utils.typing_compat import override
 from ..base import Image
 from ..rules.rule import Rule
 from ..rules.version import Version

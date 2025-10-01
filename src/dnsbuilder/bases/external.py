@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, override
+from typing import Any, Dict
 import logging
+
+from ..utils.typing_compat import override
 from ..base import Image
 from ..io.path import DNSBPath, Path
 from ..io.fs import FileSystem, AppFileSystem

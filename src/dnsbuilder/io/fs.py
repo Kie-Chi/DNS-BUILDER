@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import override, Union, Dict, List
+from typing import Union, Dict, List
 import logging
 import fsspec
 from importlib import resources
 import git
 import hashlib
+from ..utils.typing_compat import override
 from .path import DNSBPath, Path
 from ..exceptions import (
     ProtocolError,

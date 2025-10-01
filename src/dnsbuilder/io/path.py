@@ -1,12 +1,16 @@
 # DNSBuilder\src\dnsbuilder\io\path.py
 
 import logging
-from typing import override
-from pathlib import PurePosixPath, PureWindowsPath, Path, PurePath
+from pathlib import PurePosixPath, PureWindowsPath, PurePath, PosixPath, WindowsPath, Path
 from urllib.parse import urlparse
 from .. import constants
 from ..exceptions import InvalidPathError
+from ..utils.typing_compat import override
 
+# just ignore these lines
+os_type = 'nt' if type(Path()) is WindowsPath else 'posix'
+os_type = 'posix' if type(Path()) is PosixPath else os_type
+# end
 
 logger = logging.getLogger(__name__)
 
