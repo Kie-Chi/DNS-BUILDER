@@ -13,8 +13,13 @@
 !test/**
 !doc
 !doc/**
+!.github
+!.github/**
+!scripts
+!scripts/**
 *.egg-info/
 !requirements.txt
 !README.md
 !template.yml
+!mkdocs.yml
 **/__pycache__

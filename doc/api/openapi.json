@@ -1,0 +1,2718 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DNSBuilder API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/projects": {
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get All Projects",
+        "description": "Get all projects",
+        "operationId": "get_all_projects_api_projects_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response Get All Projects Api Projects Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Create Project",
+        "description": "Create a new project",
+        "operationId": "create_project_api_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCreationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}": {
+      "delete": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Delete Project",
+        "description": "Delete a project and all its files",
+        "operationId": "delete_project_api_projects__project_name__delete",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/config": {
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get Project Config",
+        "description": "Get the config of a project",
+        "operationId": "get_project_config_api_projects__project_name__config_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Update Project Config",
+        "description": "Update the config of a project",
+        "operationId": "update_project_config_api_projects__project_name__config_put",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigModel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/validate/config": {
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Validate Project Config",
+        "description": "Validate the configuration of a project.",
+        "operationId": "validate_project_config_api_projects__project_name__validate_config_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/images": {
+      "post": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Add Image",
+        "description": "Add a new image to the project.",
+        "operationId": "add_image_api_projects__project_name__images_post",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get All Images",
+        "description": "Get all images from the project.",
+        "operationId": "get_all_images_api_projects__project_name__images_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Get All Images Api Projects  Project Name  Images Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/images/{image_name}": {
+      "put": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Update Image",
+        "description": "Update a specified image in the project.",
+        "operationId": "update_image_api_projects__project_name__images__image_name__put",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "image_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Image Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Delete Image",
+        "description": "Delete a specified image from the project.",
+        "operationId": "delete_image_api_projects__project_name__images__image_name__delete",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "image_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Image Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get Image",
+        "description": "Get a specified image from the project.",
+        "operationId": "get_image_api_projects__project_name__images__image_name__get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "image_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Image Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/builds": {
+      "post": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Add Build Service",
+        "description": "Add a new build service to the project.",
+        "operationId": "add_build_service_api_projects__project_name__builds_post",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildServiceCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get All Builds",
+        "description": "Get all build services from the project.",
+        "operationId": "get_all_builds_api_projects__project_name__builds_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get All Builds Api Projects  Project Name  Builds Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/builds/{service_name}": {
+      "put": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Update Build Service",
+        "description": "Update a specified build service in the project.",
+        "operationId": "update_build_service_api_projects__project_name__builds__service_name__put",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "service_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildServiceUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Delete Build Service",
+        "description": "Delete a specified build service from the project.",
+        "operationId": "delete_build_service_api_projects__project_name__builds__service_name__delete",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "service_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get Build Service",
+        "description": "Get a specified build service from the project.",
+        "operationId": "get_build_service_api_projects__project_name__builds__service_name__get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "service_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildServiceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/validate/config": {
+      "post": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Validate Config",
+        "description": "Validate the configuration",
+        "operationId": "validate_config_api_projects_validate_config_post",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/exists/images": {
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Check Image Exists",
+        "description": "Check if an image name already exists in the project.",
+        "operationId": "check_image_exists_api_projects__project_name__exists_images_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The image name to check",
+              "title": "Name"
+            },
+            "description": "The image name to check"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/exists/builds": {
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Check Build Service Exists",
+        "description": "Check if a build service name already exists in the project.",
+        "operationId": "check_build_service_exists_api_projects__project_name__exists_builds_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The build service name to check",
+              "title": "Name"
+            },
+            "description": "The build service name to check"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/refs/images": {
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get Image References",
+        "description": "Get a list of all image names that can be referenced in the project.",
+        "operationId": "get_image_references_api_projects__project_name__refs_images_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferencesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/refs/builds": {
+      "get": {
+        "tags": [
+          "Projects & Config"
+        ],
+        "summary": "Get Build Service References",
+        "description": "Get a list of all build service names that can be referenced in the project.",
+        "operationId": "get_build_service_references_api_projects__project_name__refs_builds_get",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferencesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_name}/build": {
+      "post": {
+        "tags": [
+          "Builds"
+        ],
+        "summary": "Start Build",
+        "operationId": "start_build_api_projects__project_name__build_post",
+        "parameters": [
+          {
+            "name": "project_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildStartRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildStartResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/builds/{build_id}/status": {
+      "get": {
+        "tags": [
+          "Builds"
+        ],
+        "summary": "Get Build Status",
+        "operationId": "get_build_status_api_builds__build_id__status_get",
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Build Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/builds/{build_id}/logs": {
+      "get": {
+        "tags": [
+          "Builds"
+        ],
+        "summary": "Get Build Logs",
+        "operationId": "get_build_logs_api_builds__build_id__logs_get",
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Build Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildLogsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/builds/{build_id}/artifacts": {
+      "get": {
+        "tags": [
+          "Builds"
+        ],
+        "summary": "Get Build Artifacts",
+        "operationId": "get_build_artifacts_api_builds__build_id__artifacts_get",
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Build Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/builds/{build_id}/artifacts/content": {
+      "get": {
+        "tags": [
+          "Builds"
+        ],
+        "summary": "Get Build Artifact Content",
+        "description": "获取指定构建产物的文件内容\n\nArgs:\n    build_id: 构建ID\n    path: 相对于输出目录的文件路径\n    \nReturns:\n    文件内容的纯文本",
+        "operationId": "get_build_artifact_content_api_builds__build_id__artifacts_content_get",
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Build Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "recursor/Dockerfile",
+              "title": "Path"
+            },
+            "description": "recursor/Dockerfile"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resources/includes": {
+      "get": {
+        "tags": [
+          "Resources"
+        ],
+        "summary": "Get Includes",
+        "operationId": "get_includes_api_resources_includes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IncludeTemplate"
+                  },
+                  "type": "array",
+                  "title": "Response Get Includes Api Resources Includes Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resources/software": {
+      "get": {
+        "tags": [
+          "Resources"
+        ],
+        "summary": "Get Software",
+        "operationId": "get_software_api_resources_software_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response Get Software Api Resources Software Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resources/software/{software_name}/rules": {
+      "get": {
+        "tags": [
+          "Resources"
+        ],
+        "summary": "Get Software Rules",
+        "operationId": "get_software_rules_api_resources_software__software_name__rules_get",
+        "parameters": [
+          {
+            "name": "software_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Software Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SoftwareRule"
+                  },
+                  "title": "Response Get Software Rules Api Resources Software  Software Name  Rules Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/templates/image": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Get Image Template",
+        "description": "Get a default JSON template for a new image.",
+        "operationId": "get_image_template_api_templates_image_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageTemplateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/templates/build": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Get Build Service Template",
+        "operationId": "get_build_service_template_api_templates_build_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildServiceTemplateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resources/predefined_builds": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Get Predefined Build Templates",
+        "operationId": "get_predefined_build_templates_api_resources_predefined_builds_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response Get Predefined Build Templates Api Resources Predefined Builds Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resources/predefined_builds/{template_name}": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Get Predefined Build Template",
+        "operationId": "get_predefined_build_template_api_resources_predefined_builds__template_name__get",
+        "parameters": [
+          {
+            "name": "template_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Template Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredefinedBuildTemplate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ArtifactsResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "ArtifactsResponse"
+      },
+      "BuildLogsResponse": {
+        "properties": {
+          "logs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Logs"
+          },
+          "last_index": {
+            "type": "integer",
+            "title": "Last Index"
+          }
+        },
+        "type": "object",
+        "required": [
+          "logs",
+          "last_index"
+        ],
+        "title": "BuildLogsResponse"
+      },
+      "BuildModel": {
+        "properties": {
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behavior"
+          },
+          "mixins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mixins"
+          },
+          "build": {
+            "type": "boolean",
+            "title": "Build",
+            "default": true
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Files"
+          },
+          "volumes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volumes"
+          },
+          "mounts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mounts"
+          },
+          "cap_add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cap Add"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "BuildModel",
+        "description": "Class Config-Validation Model describe `builds`"
+      },
+      "BuildServiceCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behavior"
+          },
+          "mixins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mixins"
+          },
+          "build": {
+            "type": "boolean",
+            "title": "Build",
+            "default": true
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Files"
+          },
+          "volumes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volumes"
+          },
+          "mounts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mounts"
+          },
+          "cap_add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cap Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "BuildServiceCreateRequest",
+        "description": "Create a new build service."
+      },
+      "BuildServiceResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behavior"
+          },
+          "mixins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mixins"
+          },
+          "build": {
+            "type": "boolean",
+            "title": "Build",
+            "default": true
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Files"
+          },
+          "volumes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volumes"
+          },
+          "mounts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mounts"
+          },
+          "cap_add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cap Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "BuildServiceResponse",
+        "description": "Response model for build service operations."
+      },
+      "BuildServiceTemplateResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behavior"
+          },
+          "mixins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mixins"
+          },
+          "build": {
+            "type": "boolean",
+            "title": "Build",
+            "default": true
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Files"
+          },
+          "volumes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volumes"
+          },
+          "mounts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mounts"
+          },
+          "cap_add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cap Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "BuildServiceTemplateResponse",
+        "description": "Response model for build service template operations."
+      },
+      "BuildServiceUpdateRequest": {
+        "properties": {
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behavior"
+          },
+          "mixins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mixins"
+          },
+          "build": {
+            "type": "boolean",
+            "title": "Build",
+            "default": true
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Files"
+          },
+          "volumes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volumes"
+          },
+          "mounts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mounts"
+          },
+          "cap_add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cap Add"
+          }
+        },
+        "type": "object",
+        "title": "BuildServiceUpdateRequest",
+        "description": "Update an existing build service."
+      },
+      "BuildStartRequest": {
+        "properties": {
+          "debug": {
+            "type": "boolean",
+            "title": "Debug",
+            "default": false
+          },
+          "generate_graph": {
+            "type": "boolean",
+            "title": "Generate Graph",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "BuildStartRequest"
+      },
+      "BuildStartResponse": {
+        "properties": {
+          "build_id": {
+            "type": "string",
+            "title": "Build Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "started"
+          }
+        },
+        "type": "object",
+        "required": [
+          "build_id"
+        ],
+        "title": "BuildStartResponse"
+      },
+      "BuildStatusResponse": {
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "title": "Project Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "start_time": {
+            "type": "number",
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_name",
+          "status",
+          "start_time"
+        ],
+        "title": "BuildStatusResponse"
+      },
+      "ConfigModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "inet": {
+            "type": "string",
+            "format": "ipv4network",
+            "title": "Inet"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ImageModel"
+            },
+            "type": "array",
+            "title": "Images"
+          },
+          "builds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BuildModel"
+            },
+            "type": "object",
+            "title": "Builds"
+          },
+          "include": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "inet",
+          "images",
+          "builds"
+        ],
+        "title": "ConfigModel",
+        "description": "Class Config-Validation Model desribe top-level of config"
+      },
+      "ConfigUpdateResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Configuration saved."
+          }
+        },
+        "type": "object",
+        "title": "ConfigUpdateResponse"
+      },
+      "ExistsResponse": {
+        "properties": {
+          "exists": {
+            "type": "boolean",
+            "title": "Exists"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exists",
+          "name"
+        ],
+        "title": "ExistsResponse",
+        "description": "Response model for existence check."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ImageCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "software": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Software"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "util": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Util"
+          },
+          "dependency": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ImageCreateRequest",
+        "description": "Create a new image."
+      },
+      "ImageModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "software": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Software"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "util": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Util"
+          },
+          "dependency": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ImageModel",
+        "description": "Class Config-Validation Model describe `images`"
+      },
+      "ImageResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "software": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Software"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "util": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Util"
+          },
+          "dependency": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ImageResponse",
+        "description": "Response model for image operations."
+      },
+      "ImageTemplateResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "software": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Software"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "util": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Util"
+          },
+          "dependency": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ImageTemplateResponse",
+        "description": "Response model for image template operations."
+      },
+      "ImageUpdateRequest": {
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "software": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Software"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "util": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Util"
+          },
+          "dependency": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependency"
+          }
+        },
+        "type": "object",
+        "title": "ImageUpdateRequest",
+        "description": "Update an existing image."
+      },
+      "IncludeTemplate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "IncludeTemplate"
+      },
+      "OperationResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "OperationResponse",
+        "description": "Response model for operation status."
+      },
+      "PredefinedBuildTemplate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "template": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Template"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "template"
+        ],
+        "title": "PredefinedBuildTemplate",
+        "description": "Predefined build template."
+      },
+      "ProjectCreationResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "project_name": {
+            "type": "string",
+            "title": "Project Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_name"
+        ],
+        "title": "ProjectCreationResponse"
+      },
+      "ProjectName": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProjectName"
+      },
+      "ReferencesResponse": {
+        "properties": {
+          "references": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "References"
+          }
+        },
+        "type": "object",
+        "required": [
+          "references"
+        ],
+        "title": "ReferencesResponse"
+      },
+      "SoftwareRule": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "dependency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "dependency"
+        ],
+        "title": "SoftwareRule"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ValidationRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "title": "ValidationRequest",
+        "description": "Request model for validation."
+      },
+      "ValidationResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "ValidationResponse",
+        "description": "Response model for validation."
+      }
+    }
+  }
+}

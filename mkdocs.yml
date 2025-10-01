@@ -1,0 +1,40 @@
+site_name: DNSBuilder (DNSB)
+site_description: DNSBuilder 文档与使用指南
+docs_dir: doc
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.top
+    - navigation.tabs
+    - content.code.copy
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+  - git-revision-date-localized:
+      enable_creation_date: true
+  - swagger-ui-tag:
+      docExpansion: list
+      tryItOutEnabled: false
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.details
+nav:
+  - 首页: index.md
+  - 快速开始: getting-started.md
+  - 安装与运行: install.md
+  - CLI 手册: cli.md
+  - 配置参考: config.md
+  - 构建流程: build-pipeline.md
+  - API:
+      - 概览: api/index.md
+      - OpenAPI: api/openapi.md
+  - 架构与设计: architecture.md
+  - 资源与模板: resources.md
+  - UI 路线图: ui-roadmap.md
+  - 开发者指南: developer-guide.md
+  - FAQ: faq.md
