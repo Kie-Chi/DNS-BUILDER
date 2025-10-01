@@ -990,7 +990,7 @@ def create_app_fs(use_vfs: bool = False) -> "FileSystem" :
     Create the appropriate FileSystem for the application.
     """
     app_fs = AppFileSystem()
-    if use_vfs:
+    if not use_vfs:
         app_fs.register_handler("file", DiskFileSystem())
     else:
         app_fs.register_handler("file", MemoryFileSystem())
