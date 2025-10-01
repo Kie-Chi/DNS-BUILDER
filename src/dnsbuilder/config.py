@@ -1,7 +1,7 @@
 import yaml
 import logging
 from typing import Dict, Any, List, Set, Optional, Union
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator, ConfigDict
+from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict
 from pydantic.networks import IPv4Network
 
 from .preprocess import Preprocessor
@@ -23,21 +23,14 @@ class ImageModel(BaseModel):
     """
         Class Config-Validation Model describe `images`
     """
-    name: str
     ref: Optional[str] = None
     software: Optional[str] = None
     version: Optional[str] = None
     from_os: Optional[str] = Field(None, alias='from') # 'from'
     util: List[str] = Field(default_factory=list)
     dependency: List[str] = Field(default_factory=list)
-
-    @field_validator('name')
-    @classmethod
-    def name_cannot_contain_colon(cls, v: str) -> str:
-        """ Validate image-name"""
-        if ":" in v:
-            raise ImageDefinitionError(f"Can't name an image with ':', found in '{v}'.")
-        return v
+    # Allow extra fields in values for forward-compatibility
+    model_config = ConfigDict(extra="allow")
 
     @model_validator(mode='after')
     def check_ref_or_base_image_fields(self) -> 'ImageModel':
@@ -86,26 +79,25 @@ class ConfigModel(BaseModel):
     """
     name: str
     inet: IPv4Network
-    images: List[ImageModel]
+    images: Dict[str, ImageModel] = Field(default_factory=dict)
     builds: Dict[str, BuildModel]
     include: Optional[Union[str, List[str]]] = None
     model_config = ConfigDict(extra="allow")
 
-    @field_validator('images')
-    @classmethod
-    def image_names_must_be_unique(cls, v: List[ImageModel]) -> List[ImageModel]:
-        """Check duplicate image name"""
-        names = [img.name for img in v]
-        if len(names) != len(set(names)):
-            seen = set()
-            duplicates = {x for x in names if x in seen or seen.add(x)}
-            raise ImageDefinitionError(f"Duplicate image names found: {', '.join(duplicates)}")
-        return v
+    @model_validator(mode='after')
+    def validate_image_keys_constraints(self) -> 'ConfigModel':
+        """Ensure image dict keys are valid (no colon)."""
+        for key in self.images.keys():
+            if ":" in key:
+                raise ImageDefinitionError(
+                    f"Image name cannot contain ':', found in '{key}'."
+                )
+        return self
 
     @model_validator(mode='after')
     def validate_cross_references_and_cycles(self) -> 'ConfigModel':
         """Check if ref-chains a circle"""
-        images_by_name = {image.name: image for image in self.images}
+        images_by_name = self.images
         defined_image_names = set(images_by_name.keys())
         
         visiting: Set[str] = set()
@@ -214,8 +206,8 @@ class Config:
         return str(self.model.inet)
 
     @property
-    def images_config(self) -> List[Dict[str, Any]]: 
-        return [img.model_dump(by_alias=True, exclude_none=True) for img in self.model.images]
+    def images_config(self) -> Dict[str, Dict[str, Any]]: 
+        return {name: img.model_dump(by_alias=True, exclude_none=True) for name, img in self.model.images.items()}
 
     @property
     def builds_config(self) -> Dict[str, Any]: 

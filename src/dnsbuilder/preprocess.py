@@ -37,6 +37,9 @@ class Preprocessor:
         # Step 2: Process other directives like 'for_each' on the merged config.
         if 'builds' in processed_config:
             processed_config['builds'] = self._preprocess_builds(processed_config['builds'])
+        # Step 3: Normalize images definition variants and output as dict.
+        if 'images' in processed_config:
+            processed_config['images'] = self._preprocess_images(processed_config['images'])
         
         logger.info(f"Finished preprocessing for: {self.config_path}")
         return processed_config
@@ -50,6 +53,8 @@ class Preprocessor:
         if 'include' not in current_config:
             if 'builds' in current_config:
                 current_config['builds'] = self._preprocess_builds(current_config['builds'])
+            if 'images' in current_config:
+                current_config['images'] = self._preprocess_images(current_config['images'])
             return current_config
 
         include_files = current_config.pop('include')
@@ -84,6 +89,8 @@ class Preprocessor:
 
         if 'builds' in current_config:
             current_config['builds'] = self._preprocess_builds(current_config['builds'])
+        if 'images' in current_config:
+            current_config['images'] = self._preprocess_images(current_config['images'])
 
         # Finally, merge the current config on top of the included configs.
         final_config = deep_merge(merged_from_includes, current_config)
@@ -121,42 +128,91 @@ class Preprocessor:
 
     def _preprocess_builds(self, builds_config: Union[List, Dict]) -> Dict:
         """
-        Expands any list-comprehension style builds into standard build definitions.
+        Expands builds from list/dict into a canonical dict using shared logic.
         """
         if isinstance(builds_config, dict):
-            # Already in the final format, nothing to do.
+            # Already in the final format
             return builds_config
 
         if not isinstance(builds_config, list):
             raise ConfigValidationError(f"'builds' must be a dictionary or a list, but got {type(builds_config).__name__}.")
 
-        final_builds: Dict[str, Any] = {}
+        expanded = self._expand_named_items(builds_config, target='builds')
+        return expanded  # type: ignore[return-value]
 
-        for item in builds_config:
+    def _preprocess_images(self, images_config: Union[List, Dict]) -> Dict[str, Any]:
+        """
+        Normalizes images to a canonical dict mapping name -> config.
+        Values include explicit 'name' field for downstream compatibility.
+        """
+        # If it's already a dict, ensure values are dicts and inject name.
+        if isinstance(images_config, dict):
+            final: Dict[str, Any] = {}
+            for name, conf in images_config.items():
+                if not isinstance(conf, dict):
+                    raise ConfigValidationError(f"Image '{name}' definition must be a dictionary, got {type(conf).__name__}.")
+                final[name] = {"name": name, **conf}
+            return final
+
+        if not isinstance(images_config, list):
+            raise ConfigValidationError(f"'images' must be a dictionary or a list, but got {type(images_config).__name__}.")
+
+        # Expand list forms into a dict
+        expanded = self._expand_named_items(images_config, target='images')
+        return expanded  # type: ignore[return-value]
+
+    def _expand_named_items(self, items: List[Dict[str, Any]], *, target: str) -> Dict[str, Any]:
+        """
+        Shared expansion logic for named collections supporting:
+        - Comprehension blocks: {'name': <template>, 'for_each': <iterable>, 'template': <conf>}
+        - Explicit named dicts: {'name': <name>, ...}
+        - Single-key dict shorthand: {<name>: <conf>}
+
+        target determines output shape:
+        - 'builds' -> Dict[name, conf]
+        - 'images' -> Dict[name, conf]
+        """
+        if target not in {"builds", "images"}:
+            raise ConfigValidationError(f"Invalid target for expansion: {target}")
+
+        final: Dict[str, Any] = {}
+
+        for item in items:
             if isinstance(item, dict) and 'for_each' in item:
-                # This is a comprehension block
                 name_template = item.get('name')
                 iterator_def = item.get('for_each')
                 template_conf = item.get('template')
 
                 if not all([name_template, iterator_def is not None, template_conf]):
-                    raise ConfigValidationError(f"Invalid build comprehension block: {item}. Must contain 'name', 'for_each', and 'template' keys.")
+                    raise ConfigValidationError(f"Invalid {target[:-1]} comprehension block: {item}. Must contain 'name', 'for_each', and 'template' keys.")
 
                 iterator = self._parse_for_each(iterator_def)
-                logger.debug(f"Expanding build comprehension for '{name_template}' over {len(iterator)} items...")
-                
+                logger.debug(f"Expanding {target} comprehension for '{name_template}' over {len(iterator)} items...")
+
                 for i, value in enumerate(iterator):
                     context = {'i': i, 'value': value}
-                    # Render the name for the new service
-                    service_name = self.jinja_env.from_string(name_template).render(context)
-                    
-                    if service_name in final_builds:
-                        raise ConfigValidationError(f"Duplicate service name '{service_name}' generated from a build comprehension.")
-                    final_builds[service_name] = self._render_template_recursive(template_conf, context)
-            
+                    name_rendered = self.jinja_env.from_string(name_template).render(context)
+                    rendered_conf = self._render_template_recursive(template_conf, context)
+                    if name_rendered in final:
+                        raise ConfigValidationError(f"Duplicate name '{name_rendered}' generated from a {target} comprehension.")
+                    final[name_rendered] = rendered_conf
+
+            elif isinstance(item, dict) and 'name' in item:
+                name_value = item.get('name')
+                conf = {k: v for k, v in item.items() if k != 'name'}
+                if name_value in final:
+                    raise ConfigValidationError(f"Duplicate name '{name_value}' in {target} definition.")
+                final[name_value] = conf
+
             elif isinstance(item, dict) and len(item) == 1:
-                final_builds.update(item)
+                name, conf = next(iter(item.items()))
+                if not isinstance(conf, dict):
+                    raise ConfigValidationError(f"{target[:-1].capitalize()} '{name}' definition must be a dictionary, got {type(conf).__name__}.")
+                if name in final:
+                    raise ConfigValidationError(f"Duplicate name '{name}' in {target} definition.")
+                    
+                final[name] = conf
             else:
-                raise ConfigValidationError(f"Invalid item in 'builds' list: {item}. Must be a comprehension block or a single-key dictionary for a service.")
-        
-        return final_builds
+                raise ConfigValidationError(f"Invalid item in '{target}' list: {item}. Must be a comprehension block, explicit dict with 'name', or a single-key dict shorthand.")
+
+        return final

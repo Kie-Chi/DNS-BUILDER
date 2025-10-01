@@ -22,8 +22,8 @@ class ImageFactory:
     Factory Resolves internal image inheritance and creates final, materialized Image objects.
     """
 
-    def __init__(self, images_config: List[Dict[str, Any]], fs: FileSystem = AppFileSystem()):
-        self.configs = {conf["name"]: conf for conf in images_config}
+    def __init__(self, images_config: Dict[str, Dict[str, Any]], fs: FileSystem = AppFileSystem()):
+        self.configs = {name: ({"name": name} | conf) for name, conf in images_config.items()}
         self.resolved_images: Dict[str, InternalImage] = {}
         self.resolving_stack: Set[str] = set()
         self.software_map: Dict[str, Type[InternalImage]] = {
