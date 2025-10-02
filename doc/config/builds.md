@@ -20,7 +20,7 @@
 
 - 含义：服务模板或引用规则。
 - 类型与格式：`string`；支持以下形式：
-  - `std:<role>`：标准模板，需结合 `image` 的软件类型解析为 `<software>:<role>`。详见[标准服务模板](rule/build-templates.md)
+  - `std:<role>`：标准模板，需结合 `image` 的软件类型解析为 `<software>:<role>`。详见[标准服务模板](../rule/build-templates.md)
   - `<software>:<role>`：显式指定软件与角色，例如 `bind:auth`、`unbound:recursor`
   - `<service_name>`：引用同级服务（无冒号）
 - 约束：当使用 `std:` 前缀时必须提供 `image`；循环引用或未知引用会报错
@@ -38,7 +38,7 @@
 
 - 含义：服务行为脚本/DSL，由模板与行为类解析生成具体配置（如 BIND 的 zone 定义）
 - 类型与格式：`string`，支持多行文本
-- 延伸阅读：详见[Behavior DSL](behavior-dsl.md)
+- 延伸阅读：详见[Behavior DSL](../rule/behavior-dsl.md)
 
 ## mixins
 
@@ -62,7 +62,7 @@
 - 含义：卷挂载，用于映射资源、配置与数据目录
 - 类型与格式：`string[]`；
 - 磁盘绝对路径不会复制，否则目录或者文件将复制到 `service_name/contents`目录下再进行挂载
-- 推荐阅读: [DNSB中的路径支持与文件系统](rule/paths-and-fs.md)
+- 推荐阅读: [DNSB中的路径支持与文件系统](../rule/paths-and-fs.md)
 
 ## cap_add
 
@@ -151,13 +151,13 @@ builds:
     ref: "std:auth"
 ```
 
-更多关于批量生成与模板展开的写法，详见[推导式语法](rule/comprehension.md)
+更多关于批量生成与模板展开的写法，详见[推导式语法](../rule/comprehension.md)
 
 ## 延伸阅读
 
 - [顶层配置](top-level.md)
 - [内部镜像配置](images.md)
 - [外部镜像配置](external-images.md)
-- [标准服务模板](rule/build-templates.md)
-- [行为 DSL](rule/behavior-dsl.md)
-- [文件路径与FS](rule/paths-and-fs.md)
+- [标准服务模板](../rule/build-templates.md)
+- [行为 DSL](../rule/behavior-dsl.md)
+- [文件路径与FS](../rule/paths-and-fs.md)

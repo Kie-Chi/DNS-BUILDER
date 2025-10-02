@@ -89,6 +89,6 @@ builds:
 
 ## 延伸阅读
 
-- [服务配置](config/builds.md)
+- [服务配置](../config/builds.md)
 - [标准服务模板](build-templates.md)
 - [内置变量与占位符](builtins-and-placeholders.md)

@@ -134,7 +134,7 @@
 
 ## 延伸阅读
 
-- [顶层配置](config/top-level.md)（`include` 的解析与合并）
-- [服务配置](config/builds.md)（`files`、`volumes` 的路径用法）
+- [顶层配置](../config/top-level.md)（`include` 的解析与合并）
+- [服务配置](../config/builds.md)（`files`、`volumes` 的路径用法）
 - [行为 DSL](behavior-dsl.md)（与资源路径及占位符的关系）
 - [内置变量与占位符](builtins-and-placeholders.md)（`${origin}` 等变量说明）

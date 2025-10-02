@@ -55,7 +55,7 @@ images:
 
 ## 延伸阅读
 
-- [服务配置](config/builds.md)
-- [内部镜像配置](config/images.md)
+- [服务配置](../config/builds.md)
+- [内部镜像配置](../config/images.md)
 - [合并与覆盖规则](merge-and-override.md)
 - [文件路径与FS](paths-and-fs.md)

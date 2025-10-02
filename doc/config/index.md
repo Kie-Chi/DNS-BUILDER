@@ -29,4 +29,4 @@ builds: {}
 - [顶层配置](top-level.md)
 - [镜像配置](images.md)
 - [服务配置](builds.md)
-- [语法与规则总览](rule/index.md)
+- [语法与规则总览](../rule/index.md)

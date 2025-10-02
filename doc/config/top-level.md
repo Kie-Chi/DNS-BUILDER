@@ -30,7 +30,7 @@
 
 - 延伸阅读：
   - 结构与格式（三种写法与示例）：[内部镜像配置](images.md)
-  - 推导式语法（批量生成 `images`）：[推导式语法](rule/comprehension.md)
+  - 推导式语法（批量生成 `images`）：[推导式语法](../rule/comprehension.md)
 
 ## builds
 
@@ -46,7 +46,7 @@
 - 延伸阅读：
 
   - 结构与格式（三种写法与示例）：[服务配置](builds.md)
-  - 推导式语法（批量生成 `builds`）：[推导式语法](rule/comprehension.md)
+  - 推导式语法（批量生成 `builds`）：[推导式语法](../rule/comprehension.md)
 
 ## include
 
@@ -93,5 +93,5 @@ include:
 
 - [内部镜像配置](images.md)
 - [服务配置](builds.md)
-- [文件路径与FS](rule/paths-and-fs.md)
-- [合并与覆盖规则](rule/merge-and-override.md)
+- [文件路径与FS](../rule/paths-and-fs.md)
+- [合并与覆盖规则](../rule/merge-and-override.md)

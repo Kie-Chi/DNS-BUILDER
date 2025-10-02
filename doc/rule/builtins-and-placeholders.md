@@ -69,7 +69,7 @@ builds:
 
 ## 延伸阅读
 
-- [服务配置](config/builds.md)
+- [服务配置](../config/builds.md)
 - [标准服务模板](build-templates.md)
 - [文件路径与FS](paths-and-fs.md)
 - [行为DSL](behavior-dsl.md)

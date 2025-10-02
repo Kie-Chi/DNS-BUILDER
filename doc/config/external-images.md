@@ -60,4 +60,4 @@ builds:
 
 - [内部镜像配置](images.md)
 - [服务配置](builds.md)
-- [文件路径与FS](rule/paths-and-fs.md)
+- [文件路径与FS](../rule/paths-and-fs.md)

@@ -115,11 +115,11 @@ images:
     from: "debian:12"
 ```
 
-更多关于批量生成的写法与模板展开，详见[推导式语法](rule/comprehension.md)
+更多关于批量生成的写法与模板展开，详见[推导式语法](../rule/comprehension.md)
 
 ## 延伸阅读
 
 - [顶层配置](top-level.md)
 - [服务配置](builds.md)
-- [推导式语法](rule/comprehension.md)
-- [合并与覆盖规则](rule/merge-and-override.md)
+- [推导式语法](../rule/comprehension.md)
+- [合并与覆盖规则](../rule/merge-and-override.md)
