@@ -39,5 +39,3 @@ app.include_router(builds.router, prefix="/api", tags=["Builds"])
 app.include_router(resources.router, prefix="/api", tags=["Resources"])
 app.include_router(templates.router, prefix="/api", tags=["Templates"])
 app.include_router(ws.router, prefix="/api", tags=["WebSocket"])
-
-app.mount("/", StaticFiles(directory="src/dnsbuilder/api/static", html=True), name="static")

@@ -6,7 +6,6 @@ from pydantic import ValidationError
 from ...config import Config, ConfigModel, ImageModel, BuildModel
 from ...io.path import DNSBPath
 from ...io.fs import FileSystem
-from ...utils.merge import deep_merge
 from ..wsm import manager
 
 class ProjectService:
@@ -30,7 +29,7 @@ class ProjectService:
             initial_config = {
                 'name': name,
                 'inet': '10.88.0.0/16',
-                'images': [],
+                'images': {},
                 'builds': {}
             }
             self.fs.write_text(project_path / 'dnsbuilder.yml', yaml.dump(initial_config))
@@ -87,18 +86,24 @@ class ProjectService:
     def add_image(self, project_name: str, image_data: Dict[str, Any]) -> bool:
         """Add a new image to the project configuration."""
         try:
-            ImageModel.model_validate(image_data)
+            # Validate value config without name
+            value_conf = {k: v for k, v in image_data.items() if k != 'name'}
+            ImageModel.model_validate(value_conf)
 
             config_dict = self._load_config_dict(project_name)
             if not config_dict:
                 return False
-            existing_images = config_dict.get('images', [])            
+            images_map = config_dict.get('images', {})
+            if not isinstance(images_map, dict):
+                return False
             image_name = image_data.get('name')
-            if any(img.get('name') == image_name for img in existing_images):
+            if not image_name:
+                return False
+            if image_name in images_map:
                 return False  # Image name already exists
-            
-            existing_images.append(image_data)
-            config_dict['images'] = existing_images            
+
+            images_map[image_name] = value_conf
+            config_dict['images'] = images_map
             return self._save_config_dict(project_name, config_dict)
         except Exception:
             return False
@@ -109,30 +114,31 @@ class ProjectService:
             config_dict = self._load_config_dict(project_name)
             if not config_dict:
                 return False
-            
-            existing_images = config_dict.get('images', [])
-            updated = False
-            for i, img in enumerate(existing_images):
-                if img.get('name') == image_name:
-                    merged_image = img | image_data
-                    new_name = merged_image.get('name')
-                    if new_name != image_name:
-                        if any(other_img.get('name') == new_name for j, other_img in enumerate(existing_images) if j != i):
-                            return False  # New name already exists
-                    try:
-                        ImageModel.model_validate(merged_image)
-                    except ValidationError:
-                        return False  # 合并后的配置无效
-                    
-                    existing_images[i] = merged_image
-                    updated = True
-                    break
-            
-            if not updated:
-                return False  # Image does not exist
-            
-            config_dict['images'] = existing_images
-            
+            images_map = config_dict.get('images', {})
+            if not isinstance(images_map, dict):
+                return False
+
+            current = images_map.get(image_name)
+            if not current:
+                return False
+
+            # merge on value-only
+            merged_image = current | {k: v for k, v in image_data.items() if k != 'name'}
+            new_name = image_data.get('name') or image_name
+            # prevent duplicate targeting a different key
+            if new_name != image_name and new_name in images_map:
+                return False
+            try:
+                ImageModel.model_validate(merged_image)
+            except ValidationError:
+                return False  # 合并后的配置无效
+
+            # apply update (handle rename)
+            if new_name != image_name:
+                images_map.pop(image_name, None)
+            images_map[new_name] = merged_image
+            config_dict['images'] = images_map
+
             return self._save_config_dict(project_name, config_dict)
         except Exception:
             return False
@@ -143,15 +149,13 @@ class ProjectService:
             config_dict = self._load_config_dict(project_name)
             if not config_dict:
                 return False
-            
-            existing_images = config_dict.get('images', [])
-            original_length = len(existing_images)
-            existing_images = [img for img in existing_images if img.get('name') != image_name]
-            
-            if len(existing_images) == original_length:
-                return False  # Image does not exist
-            
-            config_dict['images'] = existing_images
+            images_map = config_dict.get('images', {})
+            if not isinstance(images_map, dict):
+                return False
+            if image_name not in images_map:
+                return False
+            images_map.pop(image_name, None)
+            config_dict['images'] = images_map
             
             return self._save_config_dict(project_name, config_dict)
         except Exception:
@@ -163,7 +167,10 @@ class ProjectService:
             config_dict = self._load_config_dict(project_name)
             if not config_dict:
                 return []
-            return config_dict.get('images', [])
+            images_map = config_dict.get('images', {})
+            if not isinstance(images_map, dict):
+                return []
+            return [{"name": name} | conf for name, conf in images_map.items()]
         except Exception:
             return []
 
@@ -173,13 +180,11 @@ class ProjectService:
             config_dict = self._load_config_dict(project_name)
             if not config_dict:
                 return None
-            
-            existing_images = config_dict.get('images', [])
-            for img in existing_images:
-                if img.get('name') == image_name:
-                    return img
-            
-            return None
+            images_map = config_dict.get('images', {})
+            if not isinstance(images_map, dict):
+                return None
+            value = images_map.get(image_name)
+            return ({"name": image_name} | value) if value else None
         except Exception:
             return None
 
@@ -193,9 +198,10 @@ class ProjectService:
             config_dict = self._load_config_dict(project_name)
             if not config_dict:
                 return []
-            
-            existing_images = config_dict.get('images', [])
-            return [img.get('name') for img in existing_images if img.get('name')]
+            images_map = config_dict.get('images', {})
+            if not isinstance(images_map, dict):
+                return []
+            return [name for name in images_map.keys()]
         except Exception:
             return []
 

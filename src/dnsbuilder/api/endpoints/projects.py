@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List
+from typing import List, Dict
 from ..services.project_service import ProjectService
 from ...datacls.messages import (
     ProjectName, ProjectCreationResponse, ConfigUpdateResponse,
@@ -119,7 +119,7 @@ def delete_image(project_name: str, image_name: str, project_service: ProjectSer
     else:
         raise HTTPException(status_code=404, detail="Image not found")
 
-@router.get("/projects/{project_name}/images", response_model=List[dict])
+@router.get("/projects/{project_name}/images", response_model=Dict[str, Dict])
 def get_all_images(project_name: str, project_service: ProjectService = Depends(get_project_service)):
     """
         Get all images from the project.
@@ -127,7 +127,9 @@ def get_all_images(project_name: str, project_service: ProjectService = Depends(
     if not project_service.get_project_config(project_name):
         raise HTTPException(status_code=404, detail="Project not found")
     
-    return project_service.get_all_images(project_name)
+    # Return dict[name] = conf to mirror builds API
+    images = project_service.get_all_images(project_name)
+    return {img["name"]: {k: v for k, v in img.items() if k != "name"} for img in images}
 
 @router.get("/projects/{project_name}/images/{image_name}", response_model=ImageResponse)
 def get_image(project_name: str, image_name: str, project_service: ProjectService = Depends(get_project_service)):

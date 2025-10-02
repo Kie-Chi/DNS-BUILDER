@@ -10,7 +10,6 @@ def get_image_template():
         Get a default JSON template for a new image.
     """
     template = {
-        "name": "",
         "from": "ubuntu:22.04",
         "software": "bind",
         "version": "9.18.0",
