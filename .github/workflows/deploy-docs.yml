@@ -29,7 +29,15 @@ jobs:
       - name: Install documentation dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mkdocs mkdocs-material mkdocstrings[python] mkdocs-git-revision-date-localized-plugin mkdocs-mermaid2-plugin mkdocs-swagger-ui-tag
+          pip install \
+            mkdocs \
+            mkdocs-material \
+            mkdocstrings[python] \
+            mkdocs-git-revision-date-localized-plugin \
+            mkdocs-mermaid2-plugin \
+            mkdocs-swagger-ui-tag \
+            pymdown-extensions \
+            mdx_truly_sane_lists
 
       - name: Install project (editable)
         run: |

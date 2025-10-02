@@ -1,6 +1,6 @@
-# DNSBuilder (DNSB)
+# DNSB
 
-DNSBuilder 是用于构建与模拟 DNS 环境的工具套件，包含：
+DNSBuilder 是用于构建与模拟 DNS 环境的工具，包含：
 
 - CLI：完整功能，可直接从配置生成构建产物。
 - API：基于 FastAPI，提供项目、构建、资源等接口；当前 UI 尚未完工。

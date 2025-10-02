@@ -1,4 +1,4 @@
-site_name: DNSBuilder (DNSB)
+site_name: DNSB
 site_description: DNSBuilder 文档与使用指南
 docs_dir: doc
 theme:
@@ -21,20 +21,42 @@ markdown_extensions:
   - admonition
   - toc:
       permalink: true
+  - footnotes
+  - meta
+  - def_list
+  - attr_list
+  - md_in_html
   - pymdownx.superfences
   - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.magiclink
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - mdx_truly_sane_lists
 nav:
   - 首页: index.md
-  - 快速开始: getting-started.md
-  - 安装与运行: install.md
-  - CLI 手册: cli.md
-  - 配置参考: config.md
-  - 构建流程: build-pipeline.md
+  - 开始: 
+    - 安装与运行: root/install.md
+    - 快速开始: root/getting-started.md
+  - 配置参考: 
+    - 概览: config/index.md
+    - 顶层配置: config/top-level.md
+    - 服务配置: config/builds.md
+    - 内部镜像配置: config/images.md
+    - 外部镜像配置: config/external-images.md
+  - 语法与规则:
+    - 概览: rule/index.md
+    - 推导式语法: rule/comprehension.md
+    - 合并与覆盖规则: rule/merge-and-override.md
+    - 标准服务模板: rule/build-templates.md
+    - 行为 DSL: rule/behavior-dsl.md
+    - 内置变量与占位符: rule/builtins-and-placeholders.md
+    - 文件路径与FS: rule/paths-and-fs.md
   - API:
       - 概览: api/index.md
       - OpenAPI: api/openapi.md
-  - 架构与设计: architecture.md
-  - 资源与模板: resources.md
-  - UI 路线图: ui-roadmap.md
-  - 开发者指南: developer-guide.md
   - FAQ: faq.md
