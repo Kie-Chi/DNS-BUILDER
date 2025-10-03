@@ -1,6 +1,6 @@
 # DNSBuilder\src\dnsbuilder\builder\substitute.py
-import re
 import logging
+import re
 import os
 from typing import Dict, Any
 from functools import wraps
@@ -20,6 +20,23 @@ def no_required(func):
             return f"${{{key}}}"
         return resolved_value
 
+    return wrapper
+
+def lenient_resolver(func):
+    """Decorator that catches resolution errors and returns None with a warning."""
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        key = None
+        if args:
+            key = args[0]
+        else:
+            key = kwargs.get('key')
+        try:
+            return func(self, *args, **kwargs)
+        except (ReferenceNotFoundError, BuildError) as e:
+            key_repr = f"${{{key}}}" if key else "<unknown>"
+            logger.warning(f"Failed to resolve {key_repr}: {e}. Returning string 'none'.")
+            return "none"
     return wrapper
 
 class VariableSubstitutor:
@@ -74,6 +91,7 @@ class VariableSubstitutor:
             
         return var_map
 
+    @lenient_resolver
     @no_required
     def _resolve_env_variable(self, key: str) -> str:
         """Resolve environment variables with optional default values."""
@@ -88,6 +106,7 @@ class VariableSubstitutor:
         
         raise BuildError(f"Environment variable '{env_var_name}' is not set and no default value was provided.")
 
+    @lenient_resolver
     @no_required
     def _resolve_service_ip(self, key: str) -> str:
         """Resolve service IP addresses."""
@@ -103,6 +122,7 @@ class VariableSubstitutor:
         else:
             raise ReferenceNotFoundError(f"Cannot resolve IP for service '{service_to_find}': service not found in builds configuration.")
 
+    @lenient_resolver
     @no_required
     def _resolve_service_image_property(self, key: str) -> str:
         """Resolve service image properties using getattr."""
@@ -137,6 +157,7 @@ class VariableSubstitutor:
         except AttributeError:
             raise ReferenceNotFoundError(f"Cannot resolve image.{image_property} for service '{service_to_find}': property does not exist.")
 
+    @lenient_resolver
     @no_required
     def _resolve_build_conf_property(self, key: str, var_map: Dict[str, str]) -> str:
         """
@@ -203,35 +224,39 @@ class VariableSubstitutor:
             return var_map[key]
 
         # Try to resolve from build_conf as a path
-        try:
-            return self._resolve_build_conf_property(key, var_map)
-        except (ReferenceNotFoundError, BuildError):
-            pass
+        value = self._resolve_build_conf_property(key, var_map)
+        if value is not None:
+            return value
 
         # Variable not found
-        logger.warning(f"Could not resolve variable '${{{key}}}' for service '{var_map.get('name', 'unknown')}'. Leaving it unchanged.")
-        return f"${{{key}}}"
+        logger.warning(f"Could not resolve variable '${{{key}}}' for service '{var_map.get('name', 'unknown')}'. Returning string 'none'.")
+        return "none"
 
     def _recursive_substitute(self, item: Any, var_map: Dict[str, str]) -> Any:
         """
         Recursively substitutes variables.
         """
         if isinstance(item, str):
-            # Regex to find all types of variables we support
-            var_regex = re.compile(r"\$\{(.*?)\}")
+            # Nested placeholder-aware substitution: resolve innermost `${...}` first
+            substituted_string: Any = item
 
-            def replacer(match):
-                key = match.group(1)
-                return self._resolve_variable(key, var_map)
-            
-            substituted_string = item
-            for _ in range(5): # Limit recursion to 5, just as I like
-                new_string = var_regex.sub(replacer, substituted_string)
+            # Replace all innermost `${...}` occurrences in a single pass.
+            pattern = re.compile(r"\$\{([^{}]+)\}")
+
+            def expand_innermost_pass(text: str) -> str:
+                def _repl(m: re.Match) -> str:
+                    key = m.group(1)
+                    resolved = self._resolve_variable(key, var_map)
+                    return str(resolved)
+                return pattern.sub(_repl, text)
+
+            for _ in range(10):  # allow deeper nesting safely
+                new_string = expand_innermost_pass(substituted_string)
                 if new_string == substituted_string:
-                    break # Not Found
+                    break
                 substituted_string = new_string
             else:
-                 logger.warning(f"Possible circular or deeply nested variable reference in: {item}")
+                logger.warning(f"Possible circular or deeply nested variable reference in: {item}")
 
             return substituted_string
 

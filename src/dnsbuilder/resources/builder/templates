@@ -95,9 +95,11 @@
                 "ENABLE_PROMETHEUS_EXPORTER": "true",
                 "INET": "${project.inet}",
                 "FILTER": "udp and port 53",
-                "ATTACKER": "${required}",
-                "RECURSOR": "${required}",
-                "SOFTWARE": "${required}"
+                "ANAME": "${required}",
+                "ATTACKER": "${services.${environment.ANAME}.ip}",
+                "RNAME": "${required}",
+                "RECURSOR": "${services.${environment.RNAME}.ip}",
+                "SOFTWARE": "${services.${environment.RNAME}.image.software}"
             },
             "volumes": [
                 "resource:/scripts/sh/pcap.sh:/usr/local/etc/pcap.sh",
@@ -106,7 +108,7 @@
                 "resource:/scripts/py/trace.py:/usr/local/etc/trace.py",
                 "resource:/scripts/py/${environment.SOFTWARE}.py:/usr/local/etc/${environment.SOFTWARE}.py",
                 "resource:/scripts/py/stat.py:/usr/local/etc/stat.py",
-                "${required}:/usr/local/var/${environment.SOFTWARE}:rw"
+                "resource:/images/controls/${environment.SOFTWARE}:/usr/local/var/${environment.SOFTWARE}:rw"
             ],
             "command": [
                 "bash",
