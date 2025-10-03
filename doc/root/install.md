@@ -1,6 +1,11 @@
 # 安装与运行
 
+## 环境准备
+
+- Docker 与 Compose：需已安装并可用的 Docker 环境（Windows 建议 Docker Desktop + WSL2）。验证：`docker --version` 与 `docker compose version` 均正常输出
+
 ## 安装
+
 ```shell
 git clone https://github.com/Kie-Chi/DNS-BUILDER.git && \
 cd DNS-BUILDER && \
@@ -8,6 +13,7 @@ pip install .
 ```
 
 ## 运行(CLI)
+
 ```shell
 dnsb config.yml [cli-args]
 ```
@@ -18,6 +24,7 @@ dnsb config.yml [cli-args]
 - `--vfs`：内存构建，不使用真实磁盘空间
 
 ## 运行(GUI)
+
 ```shell
 dnsb --ui
 ```

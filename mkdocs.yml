@@ -56,6 +56,7 @@ nav:
     - 行为 DSL: rule/behavior-dsl.md
     - 内置变量与占位符: rule/builtins-and-placeholders.md
     - 文件路径与FS: rule/paths-and-fs.md
+  - 资源参考: resources.md
   - API:
       - 概览: api/index.md
       - OpenAPI: api/openapi.md
