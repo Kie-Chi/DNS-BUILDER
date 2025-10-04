@@ -2,8 +2,8 @@
 
 除在顶层 `images` 中声明的内部镜像外，服务还可以直接使用外部镜像。外部镜像分为两类：
 
-- 本地构建上下文（Local）：`image` 指向一个包含 `Dockerfile` 的目录路径；由系统在构建阶段本地构建
-- 远端镜像（Remote）：`image` 指向一个仓库镜像名（如 `ubuntu:22.04`、`grafana/grafana`）；拉取并直接使用
+- DNSB构建镜像（Local）：`image` 指向一个包含 `Dockerfile` 的目录路径（也可使用DNSB协议文件系统拉取）；由DNSB在构建阶段获取本地构建
+- Docker社区镜像（Remote）：`image` 指向一个仓库镜像名（如 `ubuntu:22.04`、`grafana/grafana`）；由Docker拉取并直接使用
 
 ## 与内部镜像的区别
 
@@ -12,7 +12,7 @@
 
 ## 用法示例
 
-### 使用本地构建上下文（LocalImage）
+### DNSB构建
 
 ```yaml
 builds:
@@ -25,10 +25,10 @@ builds:
 
 说明：
 
-- 路径可为相对路径或绝对路径；相对路径相对于主配置文件所在目录解析
-- 该目录应包含 `Dockerfile` 及相关构建上下文文件
+- 路径可为DNSB中可支持的任意路径，详见[文件路径与FS](../rule/paths-and-fs.md)；相对路径相对于主配置文件所在目录解析
+- 该路径指向的目录应包含 `Dockerfile` 及相关构建上下文文件，或直接指向 `Dockerfile`文件
 
-### 使用远端镜像（RemoteImage）
+### Docker社区
 
 ```yaml
 builds:
@@ -42,6 +42,7 @@ builds:
 
 说明：
 
+- 符合Docker Compose的[image要求](https://docs.docker.com/reference/compose-file/services/#image)
 - 仍可透传 Compose 字段（如 `ports`、`environment`、`volumes` 等）
 
 ## 约束与注意事项
@@ -52,7 +53,7 @@ builds:
 ## 何时选择外部镜像
 
 - 直接使用社区或厂商提供的镜像（如 `grafana/grafana`、`google/cadvisor`）。
-- 已有成熟的本地 `Dockerfile` 与构建上下文，且不需要内部镜像的校验与模板扩展。
+- 已有用户自定义的、成熟的 `Dockerfile` 构建上下文，且不需要内部镜像的校验与模板扩展。
 
 更多内部镜像的声明与约束，详见[内部镜像配置](images.md)
 

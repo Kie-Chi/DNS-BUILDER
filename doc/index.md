@@ -9,7 +9,9 @@ DNSBuilder 是用于构建与模拟 DNS 环境的工具，包含：
 
 ## 端口与运行提醒
 
-- 后端 API：执行 `dnsb --ui` 将启动后端服务，默认地址为 `http://localhost:8000`。当前仅提供 API，无完整 Web UI；API 使用示例见 `api/index.md` 与 OpenAPI。
+- 后端 API：
+  - 执行 `dnsb --ui` 将启动后端服务，默认地址为 `http://localhost:8000`, 当前仅提供 API，无完整 Web UI
+  - API 使用示例见 [API使用](api/index.md) 与 OpenAPI。
 - 文档预览：本地预览文档默认使用 `http://localhost:8001`（示例命令：`mkdocs serve -a 127.0.0.1:8001`）。
 - 端口占用：如 `8000/8001` 被占用，请关闭占用进程或临时调整预览端口以避免冲突。
 
