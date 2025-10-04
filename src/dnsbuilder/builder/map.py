@@ -99,20 +99,20 @@ class Mapper:
 
     def _log_topology(self, topology_data: Dict[str, List[str]]):
         """Logs the generated topology in a readable format."""
-        logger.info("--- Network Topology ---")
+        logger.debug("--- Network Topology ---")
         if not topology_data:
-            logger.info("No explicit service relationships found in behaviors.")
-            logger.info("------------------------")
+            logger.debug("No explicit service relationships found in behaviors.")
+            logger.debug("------------------------")
             return
 
         for source, targets in topology_data.items():
             source_ip = self.service_ips.get(source, "Dynamic/IP")
-            logger.info(f"  - Service: {source} ({source_ip})")
+            logger.debug(f"  - Service: {source} ({source_ip})")
             for target in targets:
                 # Check if the target is another service we know or an external entity
                 target_ip = self.service_ips.get(target, "External/IP")
-                logger.info(f"    -> {target} ({target_ip})")
-        logger.info("------------------------")
+                logger.debug(f"    -> {target} ({target_ip})")
+        logger.debug("------------------------")
 
 class GraphGenerator:
     """

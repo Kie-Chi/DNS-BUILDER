@@ -197,7 +197,7 @@ class InternalImage(Image, ABC):
         content = self._generate_dockerfile_content()
         dockerfile_path = directory / "Dockerfile"
         self.fs.write_text(dockerfile_path, content)
-        logger.info(f"Dockerfile for '{self.name}' written to {dockerfile_path}")
+        logger.debug(f"Dockerfile for '{self.name}' written to {dockerfile_path}")
 
     def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
         """

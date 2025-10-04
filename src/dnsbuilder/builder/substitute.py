@@ -31,10 +31,14 @@ def lenient_resolver(func):
             key = args[0]
         else:
             key = kwargs.get('key')
+        fallback = kwargs.get('fallback')
         try:
             return func(self, *args, **kwargs)
         except (ReferenceNotFoundError, BuildError) as e:
             key_repr = f"${{{key}}}" if key else "<unknown>"
+            if fallback is not None:
+                logger.warning(f"Failed to resolve {key_repr}: {e}. Using fallback '{fallback}'.")
+                return str(fallback)
             logger.warning(f"Failed to resolve {key_repr}: {e}. Returning string 'none'.")
             return "none"
     return wrapper
@@ -43,11 +47,27 @@ class VariableSubstitutor:
     """
     Handles the substitution of variables within resolved build configurations.
     """
+    
     def __init__(self, config: Config, images: Dict[str, Image], service_ips: Dict[str, str], resolved_builds: Dict[str, Dict]):
         self.config = config
         self.images = images
         self.service_ips = service_ips
         self.resolved_builds = resolved_builds
+
+    def _normalize_key_aliases(self, key: str) -> str:
+        """Normalize key by applying alias mapping on dot-separated parts."""
+        parts = key.split('.')
+        changed = False
+        normalized_parts = []
+        for p in parts:
+            np = constants.ALIAS_MAP.get(p, p)
+            if np != p:
+                changed = True
+            normalized_parts.append(np)
+        normalized = '.'.join(normalized_parts)
+        if changed:
+            logger.debug(f"[Alias] Normalized key '{key}' -> '{normalized}'.")
+        return normalized
 
     def run(self, resolved_builds: Dict[str, Dict]) -> Dict[str, Dict]:
         """
@@ -100,20 +120,23 @@ class VariableSubstitutor:
         value = os.environ.get(env_var_name)
         
         if value is not None:
+            logger.debug(f"[Resolve/env] variable '${{{key}}}' -> '{value}' via env '{env_var_name}'.")
             return value
         if len(parts) > 1:  # Default value is provided
+            logger.debug(f"[Resolve/env] variable '${{{key}}}' using default fallback '{parts[1]}'.")
             return parts[1]
         
         raise BuildError(f"Environment variable '{env_var_name}' is not set and no default value was provided.")
 
     @lenient_resolver
     @no_required
-    def _resolve_service_ip(self, key: str) -> str:
+    def _resolve_service_ip(self, key: str, fallback: str = None) -> str:
         """Resolve service IP addresses."""
         service_to_find = key[9:-3]  # Remove 'services.' prefix and '.ip' suffix
         ip = self.service_ips.get(service_to_find)
         
         if ip:
+            logger.debug(f"[Resolve/services.ip] service '{service_to_find}' -> ip '{ip}'.")
             return ip
         
         # Check if buildable
@@ -124,7 +147,7 @@ class VariableSubstitutor:
 
     @lenient_resolver
     @no_required
-    def _resolve_service_image_property(self, key: str) -> str:
+    def _resolve_service_image_property(self, key: str, fallback: str = None) -> str:
         """Resolve service image properties using getattr."""
         parts = key.split(".")
         if len(parts) < 4 or parts[0] != "services" or parts[2] != "image":
@@ -153,13 +176,14 @@ class VariableSubstitutor:
             value = getattr(image_obj, image_property, None)
             if value is None:
                 raise ReferenceNotFoundError(f"Cannot resolve image.{image_property} for service '{service_to_find}': property not found or is None.")
+            logger.debug(f"[Resolve/services.image] service '{service_to_find}', image '{image_name}', property '{image_property}' -> '{value}'.")
             return str(value)
         except AttributeError:
             raise ReferenceNotFoundError(f"Cannot resolve image.{image_property} for service '{service_to_find}': property does not exist.")
 
     @lenient_resolver
     @no_required
-    def _resolve_build_conf_property(self, key: str, var_map: Dict[str, str]) -> str:
+    def _resolve_build_conf_property(self, key: str, var_map: Dict[str, str], fallback: str = None) -> str:
         """
         Resolves a value from a build configuration using a dot-separated path.
         Can resolve from the current service's build_conf or another service's.
@@ -198,7 +222,7 @@ class VariableSubstitutor:
         
         if isinstance(value, (dict, list)):
              raise BuildError(f"Variable '{key}' resolved to a complex type ({type(value).__name__}), which cannot be substituted into a string.")
-
+        logger.debug(f"[Resolve/build_conf] service '{service_name}', path '{'.'.join(path_parts)}' -> '{value}'.")
         return str(value)
 
     def _resolve_variable(self, key: str, var_map: Dict[str, str]) -> str:
@@ -211,25 +235,39 @@ class VariableSubstitutor:
         if key.startswith("env."):
             return self._resolve_env_variable(key)
 
+        # Extract generic fallback from non-env keys: `${some.path:default}`
+        core_key = key
+        fallback = None
+        if ":" in key:
+            core_key, fallback = key.split(":", 1)
+
+        # Normalize aliases on core_key (dot-separated)
+        core_key = self._normalize_key_aliases(core_key)
+
         # Service IP addresses
-        if key.startswith("services.") and key.endswith(".ip"):
-            return self._resolve_service_ip(key)
+        if core_key.startswith("services.") and core_key.endswith(".ip"):
+            return self._resolve_service_ip(core_key, fallback=fallback)
 
         # Service image properties
-        if key.startswith("services.") and ".image." in key:
-            return self._resolve_service_image_property(key)
+        if core_key.startswith("services.") and ".image." in core_key:
+            return self._resolve_service_image_property(core_key, fallback=fallback)
 
         # Local variables from var_map
-        if key in var_map:
-            return var_map[key]
+        if core_key in var_map:
+            resolved = var_map[core_key]
+            logger.debug(f"[Resolve/var_map] service '{var_map.get('name', 'unknown')}', key '{core_key}' -> '{resolved}'.")
+            return resolved
 
         # Try to resolve from build_conf as a path
-        value = self._resolve_build_conf_property(key, var_map)
+        value = self._resolve_build_conf_property(core_key, var_map, fallback=fallback)
         if value is not None:
             return value
 
         # Variable not found
-        logger.warning(f"Could not resolve variable '${{{key}}}' for service '{var_map.get('name', 'unknown')}'. Returning string 'none'.")
+        if fallback is not None:
+            logger.warning(f"Could not resolve variable '${{{core_key}}}' for service '{var_map.get('name', 'unknown')}'. Using fallback '{fallback}'.")
+            return str(fallback)
+        logger.warning(f"Could not resolve variable '${{{core_key}}}' for service '{var_map.get('name', 'unknown')}'. Returning string 'none'.")
         return "none"
 
     def _recursive_substitute(self, item: Any, var_map: Dict[str, str]) -> Any:
@@ -247,6 +285,7 @@ class VariableSubstitutor:
                 def _repl(m: re.Match) -> str:
                     key = m.group(1)
                     resolved = self._resolve_variable(key, var_map)
+                    logger.debug(f"[Substitute] Service '{var_map.get('name', 'unknown')}', variable '${{{key}}}' replaced with '{resolved}'.")
                     return str(resolved)
                 return pattern.sub(_repl, text)
 
