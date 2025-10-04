@@ -4,7 +4,7 @@
 
 ## 适用范围
 
-- 所有字符串字段都会参与变量替换，包括但不限于：`builds.*` 下的 `behavior`、`volumes`、`files` 内容、`container_name`、`command`、`environment` 等。
+- 所有字符串字段都会参与变量替换，包括但不限于：`builds.*` 下的 `behavior`、`volumes`、`files` 内容、`container_name`、`command`、`environment` 等
 
 ## 变量来源与上下文
 
@@ -21,7 +21,7 @@
 
 - 保留占位符（不会被替换器解析为具体值）：
   - `${required}`：标记该值为必填。如果最终仍保留该占位符，将在校验阶段报错
-  - `${origin}`：表示不进行路径存在性、合法性检查，主要用于卷挂载路径（如 `${origin}./<service>/contents:/data`）
+  - `${origin}`：表示不进行路径存在性/合法性检查，仅用于“来源路径”跳过校验（如 `${origin}./<service_name>/contents:/data`）；不要用于目标路径或非路径字段
 
 ## 变量
 
@@ -42,8 +42,8 @@
 ## 解析规则与递归替换
 
 - 替换器会为每个服务构建变量映射（包括当前服务与项目级变量）
-- 字符串内使用正则匹配 `${...}` 形式的占位，并进行最多 5 次递归替换（用于支持嵌套变量）
-- 未识别的变量会被保留为原样并记录警告日志
+- 字符串内使用正则匹配 `${...}` 形式的占位，并进行最多 10 次递归替换（用于支持嵌套变量）
+- 未识别或解析失败的变量会替换为字符串 `none` 并记录警告日志；如提供了默认值（fallback），则使用默认值
 
 ### 示例
 
@@ -59,17 +59,23 @@ builds:
 ```
 
 说明：
+
 - 若未显式设置 `ANAME`/`RNAME`，将使用默认值；随后 `RECURSOR`/`SOFTWARE` 会基于前两者递归替换并解析。
-- 替换器最多递归 5 层；过深或循环引用将保留原样并记录警告。
+- 替换器最多递归 10 层；过深或循环引用将记录警告。
+
+### 别名与通用 fallback 语法
+
+- 变量键支持别名规范化，常用别名包括：`address→ip`、`svc/srv/s→services`、`img→image`、`proj→project`、`reference→ref`、`caps/cap→cap_add`、`vols→volumes`、`stack→software`、`ver→version`。例如 `${svc.recursor.ip}` 等价于 `${services.recursor.ip}`。
+- 除环境变量外，所有变量均支持通用默认值语法：`${<path>:<default>}`。当 `<path>` 无法解析时使用 `<default>`，否则返回 `none` 并记录警告。
 
 ## 错误与校验
 
 - `${required}` 未被实际值替换：
   - 在服务校验阶段会检测该占位符是否仍存在；存在则抛出错误（如 `BuildDefinitionError` 或 `VolumeError`）
-  - 该变量的值必须要被覆盖，覆盖详情参考[]
+  - 该变量的值必须要被覆盖，覆盖详情参考相关配置章节
 - 引用不存在的服务或属性：
-  - `${services.<service>.ip}` 或 `${services.<service>.image.<prop>}` 解析失败时会抛出 `ReferenceNotFoundError`
-- 环境变量缺失且无默认值：抛出 `BuildError`
+  - `${services.<service>.ip}` 或 `${services.<service>.image.<prop>}` 在替换阶段解析失败时会返回 `none` 并记录警告；若后续行为/校验依赖该值，则会在对应阶段抛出错误
+- 环境变量缺失且无默认值：在替换阶段返回 `none` 并记录警告；提供默认值时使用默认值
 - 变量解析为复杂类型（dict/list）：抛出 `BuildError`，因为字符串替换仅接受标量
 
 ### 实践建议

@@ -5,7 +5,7 @@
 ## 适用位置与解析时机
 
 - 位置：`builds.<service>.behavior`，类型为 `string`，支持多行，每行一条行为
-- 解析时机：变量替换完成后进行解析与产物生成。建议在行为中直接使用“服务名”作为目标，避免在行为里嵌入复杂占位符。
+- 解析时机：变量替换完成后进行解析与产物生成。建议在行为中直接使用“服务名”作为目标，避免在行为里嵌入复杂占位符
 
 ## 语法总览
 
@@ -29,6 +29,7 @@
 - `master`：聚合并生成权威区文件（`db.<zone>` 或 `db.root`），并写入相应配置（`type master` 或 `auth-zone`）。
 
 ## 域名与 FQDN 约定
+
 - 名称归一化规则（应用于 `master` 行为中的 `<rname>`，以及 `NS/CNAME/TXT` 等目标域名）：
   - `@` 表示当前 Zone 的根（apex），例如 `<zone>=com` 时 `@` 展开为 `com`；根区 `"."` 时为 `"."`
   - 以 `.` 结尾的名称视为全称域名（FQDN），保持原样，不再拼接 Zone，例如 `www.`
@@ -77,15 +78,15 @@ builds:
 
 ## 生成产物
 
-- 配置片段：按软件类型分别写入 `named.conf` 或 `unbound.conf` 的相应部分（`forward-zone`/`stub-zone`/`auth-zone`/`type forward|stub|hint|master`）。
-- Zone 文件：`master` 行为会汇总所有记录并生成 `db.<zone>`（根区为 `db.root`），同时创建卷挂载与配置条目。
-- 根提示：`hint` 行为会生成 `gen_<service>_root.hints` 文件并挂载到容器中相应路径。
+- 配置片段：按软件类型分别写入 `named.conf` 或 `unbound.conf` 的相应部分（`forward-zone`/`stub-zone`/`auth-zone`/`type forward|stub|hint|master`）
+- Zone 文件：`master` 行为会汇总所有记录并生成 `db.<zone>`（根区为 `db.root`），同时创建卷挂载与配置条目
+- 根提示：`hint` 行为会生成 `gen_<service>_root.hints` 文件并挂载到容器中相应路径
 
 ## 错误与约束
 
-- 引用了不存在的服务名或无效 IP：抛出 `BehaviorError`。
-- 记录类型不支持或语法不合法：抛出 `UnsupportedFeatureError`。
-- `hint` 目标数量不为 1：抛出 `BehaviorError`。
+- 引用了不存在的服务名或无效 IP：抛出 `BehaviorError`
+- 记录类型不支持或语法不合法：抛出 `UnsupportedFeatureError`
+- `hint` 目标数量不为 1：抛出 `BehaviorError`
 
 ## 延伸阅读
 

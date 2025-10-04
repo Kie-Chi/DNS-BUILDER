@@ -8,7 +8,26 @@
 - 最小化配置复现：先移除复杂 include/模板/DSL，仅保留核心字段，逐步加回。
 - 路径与挂载：阅读[文件路径与FS](rule/paths-and-fs.md)，确认 `resource:/`、相对/绝对路径行为
 
-## 配置加载与校验（ConfigurationError）
+### 日志与排查
+
+- 全局级别：`--debug` 开启后基础级别为 `DEBUG`；不加时为 `INFO`。
+- 模块级微调：`-l/--log-levels` 支持对特定模块单独设定级别，覆盖全局。示例：
+
+  ```shell
+  dnsb config.yml --debug -l "res=INFO"    # 使用别名
+  dnsb config.yml -l "builder.*=DEBUG"                 # 顶层通配，等价于 dnsbuilder.builder
+  setx DNSB_LOG_LEVELS "fs=WARNING,api=DEBUG"        # 环境变量（CLI 参数优先生效）
+  dnsb config.yml
+  ```
+- 别名与自动前缀：
+
+  - 别名包括 `sub、res、svc、bld、io、fs、conf、api、pre`，会扩展为完整模块名。
+  - `builder.*` 表示基础 logger（去掉 `.*`）；未以 `dnsbuilder.` 开头但属于已知顶层模块名（如 `builder`、`io`、`api` 等）会自动补全前缀。
+- 典型场景：
+
+  - 替换流程细到 DEBUG，其余都不关心：`-l "sub=DEBUG"`
+
+## 配置加载与校验
 
 - ConfigFileMissingError
   - 现象：提示找不到配置文件
@@ -27,7 +46,7 @@
     - 镜像名含冒号或重复 → 去掉冒号并保证唯一
     - `inet` 非合法私有 IPv4 网段 → 使用如 `10.88.0.0/24` 的有效网段
 
-## 定义与引用（DefinitionError）
+## 定义与引用
 
 - ReferenceNotFoundError
   - 现象：`ref` 指向的镜像/服务不存在
@@ -46,7 +65,7 @@
   - 常见原因：`address` 不属于项目 `inet` 子网；格式不符 IPv4
   - 解决：保证 `address` 在 `inet` 范围内且合法
 
-## 构建阶段（BuildError）
+## 构建阶段
 
 - VolumeError
   - 现象：卷处理失败（源路径不存在或不可复制）
@@ -60,7 +79,7 @@
   - 现象：请求了尚未实现的功能或不支持的组合
   - 解决：调整为已支持的配置；关注发行说明与文档中的可用特性
 
-## 路径与文件系统（DNSBIOError）
+## 路径与文件系统
 
 - InvalidPathError / ProtocolError
   - 现象：路径或协议不支持（如错误的 `resource:/`/自定义协议）

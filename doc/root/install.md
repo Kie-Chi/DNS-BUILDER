@@ -22,6 +22,23 @@ dnsb config.yml [cli-args]
 - `-h`：获取CLI参数帮助
 - `-g/--graph GRAPH_PATH`：生成构建过程服务拓扑环境，保存至 `GRAPH_PATH`处
 - `--vfs`：内存构建，不使用真实磁盘空间
+- `-l/--log-levels`: 模块级控制日志
+
+#### 日志示例
+
+```shell
+# 全局调试 + 指定子模块级别（别名：sub、res、svc、bld、io、fs、conf、api、pre）
+dnsb demo.yml --debug -l "res=INFO"
+
+# 为顶层 builder 应用（自动补全为 dnsbuilder.builder）
+dnsb demo.yml -l "builder.*=DEBUG"
+
+# 使用环境变量（CLI 参数优先生效）
+setx DNSB_LOG_LEVELS"sub=DEBUG,fs=WARNING"
+dnsb demo.yml
+
+```
+
 
 ## 运行(GUI)
 
