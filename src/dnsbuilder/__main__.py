@@ -18,6 +18,16 @@ def main():
     parser = argparse.ArgumentParser(description="DNS Builder CLI")
     parser.add_argument("config_file", nargs='?', default=None, help="Path to the config.yml file.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
+    parser.add_argument(
+        "-l",
+        "--log-levels",
+        help=(
+            "Comma-separated per-module log levels. Examples: \n"
+            "  'sub=DEBUG,res=INFO' (use aliases: sub, res, svc, bld, io, fs, conf, api, pre)\n"
+            "  'builder.*=INFO' (apply to base logger)\n"
+            "Overrides DNSB_LOG_LEVELS env if provided."
+        ),
+    )
     parser.add_argument("--vfs", action="store_true", help="Enable virtual file system.")
     parser.add_argument(
         "-g",
@@ -27,7 +37,17 @@ def main():
     parser.add_argument("--ui", action="store_true", help="Start the web UI.")
     args = parser.parse_args()
 
-    setup_logger(debug=args.debug)
+    module_levels = None
+    if args.log_levels:
+        module_levels = {}
+        for pair in args.log_levels.split(','):
+            pair = pair.strip()
+            if not pair or '=' not in pair:
+                continue
+            name, lvl = pair.split('=', 1)
+            module_levels[name.strip()] = lvl.strip().upper()
+
+    setup_logger(debug=args.debug, module_levels=module_levels)
 
     if args.ui:
         uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,6 +1,40 @@
 from enum import Enum
 from dnslib import A, CNAME, AAAA, TXT, NS
 
+# --- Log and Debug ---
+# Short aliases for module names to keep CLI/env concise
+LOG_ALIAS_MAP = {
+    "sub": "dnsbuilder.builder.substitute",
+    "resolve": "dnsbuilder.builder.resolve",
+    "res": "dnsbuilder.builder.resolve",
+    "build": "dnsbuilder.builder.build",
+    "bld": "dnsbuilder.builder.build",
+    "service": "dnsbuilder.builder.service",
+    "svc": "dnsbuilder.builder.service",
+    "net": "dnsbuilder.builder.net",
+    "map": "dnsbuilder.builder.map",
+    "io": "dnsbuilder.io",
+    "fs": "dnsbuilder.io.fs",
+    "conf": "dnsbuilder.config",
+    "api": "dnsbuilder.api",
+    "pre": "dnsbuilder.preprocess",
+}
+
+# Top-level modules within dnsbuilder for auto-prefixing
+KNOWN_TOP_MODULES = {
+    "builder",
+    "io",
+    "api",
+    "resources",
+    "rules",
+    "bases",
+    "datacls",
+    "utils",
+    "exceptions",
+    "config",
+}
+
+
 # --- Filenames and Paths ---
 GENERATED_ZONES_FILENAME = "generated_zones.conf"
 GENERATED_ZONES_SUBDIR = "zones"
@@ -33,6 +67,25 @@ PLACEHOLDER = {
     "REQUIRED": "${required}",
     "ORIGIN": "${origin}",
     # add more place holders, avoiding replaced by VariableSubstituter
+}
+
+# --- Alias Variable ---
+ALIAS_MAP = {
+    "address": "ip",
+    "s": "services",
+    "img": "image",
+    "svc": "services",
+    "srv": "services",
+    "addr": "ip",
+    "network": "inet",
+    "proj": "project",
+    "reference": "ref",
+    "caps": "cap_add",
+    "cap": "cap_add",
+    "vols": "volumes",
+    "stack": "software",
+    "env": "environment",
+    "ver": "version",
 }
 
 # --- supported protocol ---
