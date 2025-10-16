@@ -31,7 +31,7 @@ class Builder:
         self.image_cache: Dict[str, Image] = {}
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")
 
-    def run(self):
+    def run(self, need_context: bool = False) -> Optional[BuildContext]:
         """Orchestrates the entire build process step by step."""
         logger.info(f"Starting build for project '{self.config.name}'...")
         self._setup_workspace()
@@ -64,6 +64,9 @@ class Builder:
         self._assemble_and_write_compose(compose_services, context)
         
         logger.info(f"Build finished. Files are in '{self.output_dir}'")
+        if need_context:
+            return context
+        return None
 
     def _initialize_context(self) -> BuildContext:
         """Creates the initial build context and resolves images defined in the config."""

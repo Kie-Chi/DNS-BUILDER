@@ -1,4 +1,4 @@
-import uuid
+import hashlib
 import threading
 import time
 import logging
@@ -40,7 +40,9 @@ class BuildService:
         self.fs: FileSystem = fs
 
     def start_build(self, project_name: str, debug: bool, generate_graph: bool) -> str:
-        build_id = str(uuid.uuid4())
+        # Generate semantic build ID based on project name and timestamp
+        timestamp = str(time.time())
+        build_id = hashlib.sha256(f"{project_name}:{timestamp}".encode()).hexdigest()[:32]
         builds[build_id] = {
             "status": "started",
             "start_time": time.time(),

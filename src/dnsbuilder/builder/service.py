@@ -1,7 +1,6 @@
 import logging
 from typing import Dict, Any, List, Tuple
 import collections
-import uuid
 import hashlib
 
 from ..bases.internal import InternalImage
@@ -117,9 +116,16 @@ class ServiceHandler:
         logger.debug(f"Generating temporary volumes for '{self.service_name}'...")
         for container_path, content in files.items():            
             extension = DNSBPath(container_path).suffix
-            temp_uri = DNSBPath(f"temp:/{uuid.uuid4().hex[:24]}{extension}")
+            # Generate semantic hash based on service name, container path and content
+            content_hash = hashlib.sha256(f"{self.service_name}:{container_path}:{content}".encode()).hexdigest()[:24]
+            temp_uri = DNSBPath(f"temp:/{content_hash}{extension}")
+            
+            # Handle collision (very unlikely with SHA256)
+            counter = 0
             while self.context.fs.exists(temp_uri):
-                temp_uri = DNSBPath(f"temp:/{uuid.uuid4().hex[:24]}{extension}")
+                counter += 1
+                collision_hash = hashlib.sha256(f"{self.service_name}:{container_path}:{content}:{counter}".encode()).hexdigest()[:24]
+                temp_uri = DNSBPath(f"temp:/{collision_hash}{extension}")
 
             self.context.fs.write_text(temp_uri, content)
             volume_str = f"{str(temp_uri)}:{container_path}"

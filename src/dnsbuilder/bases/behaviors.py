@@ -1,7 +1,7 @@
 from typing import List, Tuple, TYPE_CHECKING
 from abc import ABC, abstractmethod
 from ..base import Behavior
-import uuid
+import hashlib
 if TYPE_CHECKING:
     from ..datacls.contexts import BuildContext
 from dnslib import RR, NS, CNAME, A, QTYPE
@@ -135,7 +135,9 @@ class MasterBehavior(Behavior, ABC):
                 # Check for and generate glue records
                 target_ip = build_context.service_ips.get(target)
                 if target_ip:
-                    subfix = f"ns{uuid.uuid4().hex[:16]}"
+                    # Generate semantic hash based on zone, target and IP for consistent NS naming
+                    ns_hash = hashlib.sha256(f"{self.zone_file_key}:{target}:{target_ip}".encode()).hexdigest()[:16]
+                    subfix = f"ns{ns_hash}"
                     ns_name = f"{subfix}.{self.zone_file_key}" if self.zone_file_key != "." else f"{subfix}."
                     logger.debug(f"Generated Default NS record: {ns_name} -> {target_ip}({target})")
                     records.append(
