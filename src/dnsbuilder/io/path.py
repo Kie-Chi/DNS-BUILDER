@@ -199,6 +199,36 @@ class DNSBPath(PurePosixPath):
         For URLs, the path part must be absolute (start with /).
         """
         return is_path_absolute(self.__path__())
+    
+    @override
+    def __eq__(self, other) -> bool:
+        """
+        Compare two DNSBPath objects for equality.
+        Two paths are equal if they have the same protocol, host, path, query, and fragment.
+        """
+        if not isinstance(other, DNSBPath):
+            return False
+        
+        return (
+            self.protocol == other.protocol and
+            self.host == other.host and
+            self.__path__() == other.__path__() and
+            self.query_str == other.query_str and
+            self.fragment == other.fragment
+        )
+    
+    def __hash__(self) -> int:
+        """
+        Return hash of the DNSBPath.
+        Hash is based on protocol, host, path, query, and fragment.
+        """
+        return hash((
+            self.protocol,
+            self.host,
+            self.__path__(),
+            self.query_str,
+            self.fragment
+        ))
 
 def is_path_valid(path: str) -> bool:
     """
