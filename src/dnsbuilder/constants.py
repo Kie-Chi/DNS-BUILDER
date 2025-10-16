@@ -20,6 +20,7 @@ LOG_ALIAS_MAP = {
     "pre": "dnsbuilder.preprocess",
     "cbld": "dnsbuilder.builder.cached_builder",
     "cache": "dnsbuilder.cache",
+    "rty": "dnsbuilder.registry",
 }
 
 # Top-level modules within dnsbuilder for auto-prefixing
@@ -34,7 +35,8 @@ KNOWN_TOP_MODULES = {
     "utils",
     "exceptions",
     "config",
-    "cache"
+    "cache",
+    "registry",
 }
 
 
@@ -53,6 +55,9 @@ SOFTWARE_BIND = "bind"
 SOFTWARE_UNBOUND = "unbound"
 
 # --- Behavior Sections ---
+
+BEHAVIOR_TYPES = {"Forward", "Stub", "Master", "Hint", "Slave"}
+
 class BehaviorSection(str, Enum):
     SERVER = "server"
     TOPLEVEL = "toplevel"

@@ -1,13 +1,12 @@
-from typing import Dict, Set, Tuple, List, Any, Type
+from typing import Dict, Set, Tuple, List, Any
 import logging
 
-from .bases.internal import InternalImage, BindImage, UnboundImage, PythonImage, JudasImage
-from .bases.behaviors import BindForwardBehavior, BindHintBehavior, BindStubBehavior, BindMasterBehavior
-from .bases.behaviors import UnboundForwardBehavior, UnboundHintBehavior, UnboundStubBehavior, UnboundMasterBehavior
+from .bases.internal import InternalImage
 from .bases.includers import BindIncluder, UnboundIncluder
 from .base import Image, Behavior, Includer
 from .io.fs import FileSystem, AppFileSystem
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError
+from .registry import behavior_registry, image_registry, initialize_registries
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +19,20 @@ logger = logging.getLogger(__name__)
 class ImageFactory:
     """
     Factory Resolves internal image inheritance and creates final, materialized Image objects.
+    Uses reflection-based registry for dynamic image discovery.
     """
 
     def __init__(self, images_config: Dict[str, Dict[str, Any]], fs: FileSystem = AppFileSystem()):
         self.configs = {name: ({"name": name} | conf) for name, conf in images_config.items()}
         self.resolved_images: Dict[str, InternalImage] = {}
         self.resolving_stack: Set[str] = set()
-        self.software_map: Dict[str, Type[InternalImage]] = {
-            "bind": BindImage,
-            "unbound": UnboundImage,
-            "python": PythonImage,
-            "judas": JudasImage,
-        }
         self.fs = fs
-        logger.debug("ImageFactory initialized.")
+        
+        # Initialize registries if not already done
+        if not image_registry._images:
+            initialize_registries()
+            
+        logger.debug("ImageFactory initialized with reflection-based registry.")
 
     def create_all(self) -> Dict[str, Image]:
         """Creates all defined images, resolving their references."""
@@ -87,10 +86,12 @@ class ImageFactory:
                 f"Cannot instantiate image '{config['name']}': missing 'software' type for an internal image."
             )
 
-        image_class = self.software_map.get(software_type)
+        image_class = image_registry.get_image_class(software_type)
         if not image_class:
+            supported_software = image_registry.get_supported_software()
             raise ImageDefinitionError(
-                f"Image '{config['name']}' has an unknown 'software' type: {software_type}"
+                f"Image '{config['name']}' has an unknown 'software' type: {software_type}. "
+                f"Supported types: {sorted(supported_software)}"
             )
 
         logger.debug(
@@ -108,22 +109,15 @@ class ImageFactory:
 
 class BehaviorFactory:
     """
-    Factory Creates the appropriate Behavior object based on software type
+    Factory Creates the appropriate Behavior object based on software type.
+    Uses reflection-based registry for dynamic behavior discovery.
     """
     def __init__(self):
-        self._behaviors = {
-            # BIND Implementations
-            ("bind", "hint"): BindHintBehavior,
-            ("bind", "stub"): BindStubBehavior,
-            ("bind", "forward"): BindForwardBehavior,
-            ("bind", "master"): BindMasterBehavior,
-            # Unbound Implementations
-            ("unbound", "hint"): UnboundHintBehavior,
-            ("unbound", "stub"): UnboundStubBehavior,
-            ("unbound", "forward"): UnboundForwardBehavior,
-            ("unbound", "master"): UnboundMasterBehavior,
-            # To add more SoftWare Implementations
-        }
+        # Initialize registries if not already done
+        if not behavior_registry._behaviors:
+            initialize_registries()
+        
+        logger.debug("BehaviorFactory initialized with reflection-based registry.")
 
     def _parse_behavior(self, line: str) -> Tuple[str, List[Any]]:
         """
@@ -167,12 +161,15 @@ class BehaviorFactory:
         """
         behavior_type, args = self._parse_behavior(line)
 
-        key = (software_type, behavior_type)
-        behavior_class = self._behaviors.get(key)
+        behavior_class = behavior_registry.get_behavior_class(software_type, behavior_type)
 
         if not behavior_class:
+            supported_behaviors = behavior_registry.get_supported_behaviors(software_type)
+            supported_software = behavior_registry.get_supported_software()
             raise UnsupportedFeatureError(
-                f"Behavior '{behavior_type}' is not supported for software '{software_type}'."
+                f"Behavior '{behavior_type}' is not supported for software '{software_type}'. "
+                f"Supported behaviors for {software_type}: {sorted(supported_behaviors)}. "
+                f"Supported software types: {sorted(supported_software)}"
             )
 
         return behavior_class(*args)
