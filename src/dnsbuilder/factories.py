@@ -2,11 +2,10 @@ from typing import Dict, Set, Tuple, List, Any
 import logging
 
 from .bases.internal import InternalImage
-from .bases.includers import BindIncluder, UnboundIncluder
 from .base import Image, Behavior, Includer
 from .io.fs import FileSystem, AppFileSystem
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError
-from .registry import behavior_registry, image_registry, initialize_registries
+from .registry import behavior_registry, image_registry, includer_registry, initialize_registries
 
 logger = logging.getLogger(__name__)
 
@@ -188,19 +187,16 @@ class IncluderFactory:
     """
 
     def __init__(self, fs: FileSystem = AppFileSystem()):
-        self._includers = {
-            "bind": BindIncluder,
-            "unbound": UnboundIncluder,
-            # other like PowerDNS etc...
-        }
         self.fs = fs
 
     def create(self, path: str, software_type: str) -> Includer:
-        includer_class = self._includers.get(software_type)
+        includer_class = includer_registry.get_includer_class(software_type)
 
         if not includer_class:
+            supported_software = includer_registry.get_supported_software()
             raise ImageDefinitionError(
-                f"Includer '{software_type}' is not supported for software '{software_type}'."
+                f"Includer for software '{software_type}' is not supported. "
+                f"Supported software types: {sorted(supported_software)}"
             )
 
         return includer_class(path, fs=self.fs)

@@ -6,7 +6,7 @@ import re
 
 
 from . import constants
-from .base import Behavior
+from .base import Behavior, Includer
 from .bases.internal import InternalImage
 
 logger = logging.getLogger(__name__)
@@ -212,9 +212,101 @@ class ImageRegistry:
         return base_name.lower()
 
 
+class IncluderRegistry:
+    """
+    Registry for dynamically discovering and managing includer classes.
+    Uses reflection to automatically find and register includer implementations.
+    """
+    
+    def __init__(self):
+        self._includers: Dict[str, Type[Includer]] = {}
+        self._software_types: Set[str] = set()
+        
+    def register_includer(self, software: str, includer_class: Type[Includer]):
+        """
+        Manually register an includer class.
+        
+        Args:
+            software: Software type (e.g., 'bind', 'unbound')
+            includer_class: The includer class to register
+        """
+        self._includers[software] = includer_class
+        self._software_types.add(software)
+        logger.debug(f"Registered includer: {software} -> {includer_class.__name__}")
+    
+    def get_includer_class(self, software: str) -> Optional[Type[Includer]]:
+        """
+        Get an includer class by software type.
+        
+        Args:
+            software: Software type
+            
+        Returns:
+            The includer class if found, None otherwise
+        """
+        return self._includers.get(software)
+    
+    def get_supported_software(self) -> Set[str]:
+        """
+        Get all supported software types.
+        
+        Returns:
+            Set of supported software types
+        """
+        return self._software_types.copy()
+    
+    def auto_discover_includers(self):
+        """
+        Automatically discover and register includer classes.
+        Searches for classes that inherit from Includer and follow naming conventions.
+        """
+        logger.debug("Auto-discovering includer classes...")
+        
+        # Import the includers module to ensure classes are loaded
+        try:
+            includers_module = importlib.import_module('dnsbuilder.bases.includers')
+            
+            # Find all classes in the module
+            for name, obj in inspect.getmembers(includers_module, inspect.isclass):
+                # Skip the base class itself
+                if obj is Includer:
+                    continue
+                    
+                # Check if it's a subclass of Includer
+                if issubclass(obj, Includer):
+                    software_type = self._extract_software_info(name)
+                    if software_type:
+                        self.register_includer(software_type, obj)
+                        logger.debug(f"Auto-discovered includer: {name} -> {software_type}")
+                        
+        except ImportError as e:
+            logger.warning(f"Could not import includers module: {e}")
+    
+    def _extract_software_info(self, class_name: str) -> Optional[str]:
+        """
+        Extract software type from class name using naming convention.
+        Expected format: <Software>Includer (e.g., BindIncluder -> bind)
+        
+        Args:
+            class_name: Name of the includer class
+            
+        Returns:
+            Software type or None if not parseable
+        """
+        if not class_name.endswith('Includer'):
+            return None
+            
+        # Remove 'Includer' suffix
+        base_name = class_name[:-8]
+        
+        # Convert to lowercase
+        return base_name.lower()
+
+
 # Global registries
 behavior_registry = BehaviorRegistry()
 image_registry = ImageRegistry()
+includer_registry = IncluderRegistry()
 
 
 def initialize_registries():
@@ -222,7 +314,7 @@ def initialize_registries():
     Initialize the global registries with auto-discovery.
     This should be called once during application startup.
     """
-    logger.debug("Initializing behavior and image registries...")
+    logger.debug("Initializing behavior, image, and includer registries...")
     
     # Auto-discover behaviors
     behavior_registry.auto_discover_behaviors()
@@ -230,6 +322,10 @@ def initialize_registries():
     # Auto-discover images  
     image_registry.auto_discover_images()
     
+    # Auto-discover includers
+    includer_registry.auto_discover_includers()
+    
     logger.debug(f"Discovered {len(behavior_registry._behaviors)} behavior implementations")
     logger.debug(f"Discovered {len(image_registry._images)} image implementations")
+    logger.debug(f"Discovered {len(includer_registry._includers)} includer implementations")
     logger.debug(f"Supported software types: {behavior_registry.get_supported_software()}")
