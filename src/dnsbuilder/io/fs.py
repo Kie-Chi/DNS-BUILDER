@@ -1,7 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Union, Dict, List
+from typing import Dict, List
+from datetime import datetime
 import logging
+import os
 import fsspec
+from morefs.dict import DictFS
+from morefs.memory import MemFS
 from importlib import resources
 import git
 import hashlib
@@ -144,6 +148,10 @@ class FileSystem(ABC):
     
     def absolute(self, path: DNSBPath) -> DNSBPath:
         """Get the absolute path"""
+        return NotImplemented
+
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        """Get file status"""
         return NotImplemented
     
 
@@ -304,6 +312,12 @@ class AppFileSystem(FileSystem):
 
     @override
     @wrap_io_error
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        """Get file status"""
+        return self._get_handler(path).stat(path)
+
+    @override
+    @wrap_io_error
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         src_handler = self._get_handler(src)
         dst_handler = self._get_handler(dst)
@@ -329,103 +343,220 @@ class AppFileSystem(FileSystem):
 #
 # --------------------
 
-class GenericFileSystem(FileSystem):
-    """fsspec Generic File System"""
+class GenericFileSystem(FileSystem, ABC):
+    """Generic File System base class for fsspec and morefs implementations"""
 
-    def __init__(self, protocol="file"):
-        self.fs = fsspec.filesystem(protocol)
-        self.protocol = protocol
-        self.name = f"{protocol}FS"
+    def __init__(self, fs_instance, name=None):
+        """
+        Initialize with a filesystem instance
+        
+        Args:
+            fs_instance: The underlying filesystem instance (fsspec or morefs)
+            name: Optional name for logging purposes
+        """
+        self.fs = fs_instance
+        self.name = name or f"{type(fs_instance).__name__}"
+
+    @abstractmethod
+    def path2str(self, path: DNSBPath) -> str:
+        """Convert DNSBPath to string"""
+        pass
 
     @override
     def read_text(self, path: DNSBPath, encoding: str = "utf-8") -> str:
-        logger.debug(f"[{self.name}] Reading from disk: {path}")
-        with self.fs.open(str(path), "r", encoding=encoding) as f:
+        logger.debug(f"[{self.name}] Reading from: {path}")
+        with self.fs.open(self.path2str(path), "r", encoding=encoding) as f:
             return f.read()
 
     @override
     def read_bytes(self, path: DNSBPath) -> bytes:
-        logger.debug(f"[{self.name}] Reading bytes from disk: {path}")
-        with self.fs.open(str(path), "rb") as f:
+        logger.debug(f"[{self.name}] Reading bytes from: {path}")
+        with self.fs.open(self.path2str(path), "rb") as f:
             return f.read()
 
     @override
     def write_text(self, path: DNSBPath, content: str, encoding: str = "utf-8"):
-        logger.debug(f"[{self.name}] Writing to disk: {path}")
-        self.fs.mkdirs(str(path.parent), exist_ok=True)
-        with self.fs.open(str(path), "w", encoding=encoding) as f:
+        logger.debug(f"[{self.name}] Writing to: {path}")
+        self.fs.mkdirs(self.path2str(path.parent), exist_ok=True)
+        with self.fs.open(self.path2str(path), "w", encoding=encoding) as f:
             f.write(content)
 
     @override
     def write_bytes(self, path: DNSBPath, content: bytes):
-        logger.debug(f"[{self.name}] Writing bytes to disk: {path}")
-        self.fs.mkdirs(str(path.parent), exist_ok=True)
-        with self.fs.open(str(path), "wb") as f:
+        logger.debug(f"[{self.name}] Writing bytes to: {path}")
+        self.fs.mkdirs(self.path2str(path.parent), exist_ok=True)
+        with self.fs.open(self.path2str(path), "wb") as f:
             f.write(content)
 
     @override
     def append_text(self, path: DNSBPath, content: str, encoding: str = "utf-8"):
-        logger.debug(f"[{self.name}] Appending to disk: {path}")
-        self.fs.mkdirs(str(path.parent), exist_ok=True)
-        with self.fs.open(str(path), "a", encoding=encoding) as f:
+        logger.debug(f"[{self.name}] Appending to: {path}")
+        self.fs.mkdirs(self.path2str(path.parent), exist_ok=True)
+        with self.fs.open(self.path2str(path), "a", encoding=encoding) as f:
             f.write(content)
 
     @override
     def append_bytes(self, path: DNSBPath, content: bytes):
-        logger.debug(f"[{self.name}] Appending bytes to disk: {path}")
-        self.fs.mkdirs(str(path.parent), exist_ok=True)
-        with self.fs.open(str(path), "ab") as f:
+        logger.debug(f"[{self.name}] Appending bytes to: {path}")
+        self.fs.mkdirs(self.path2str(path.parent), exist_ok=True)
+        with self.fs.open(self.path2str(path), "ab") as f:
             f.write(content)
 
     @override
     def copy(self, src: DNSBPath, dst: DNSBPath):
-        logger.debug(f"[{self.name}] Copying disk path '{src}' to '{dst}'")
-        self.fs.mkdirs(str(dst.parent), exist_ok=True)
-        self.fs.copy(str(src), str(dst))
+        logger.debug(f"[{self.name}] Copying path '{src}' to '{dst}'")
+        self.fs.mkdirs(self.path2str(dst.parent), exist_ok=True)
+        self.fs.copy(self.path2str(src), self.path2str(dst))
 
     @override
     def copytree(self, src: DNSBPath, dst: DNSBPath):
-        logger.debug(f"[{self.name}] Copying disk tree '{src}' to '{dst}'")
-        self.fs.put(str(src), str(dst), recursive=True)
+        logger.debug(f"[{self.name}] Copying tree '{src}' to '{dst}'")
+        self.fs.cp(self.path2str(src), self.path2str(dst), recursive=True)
 
     @override
     def exists(self, path: DNSBPath) -> bool:
-        return self.fs.exists(str(path))
+        return self.fs.exists(self.path2str(path))
 
     @override
     def is_dir(self, path: DNSBPath) -> bool:
-        return self.fs.isdir(str(path))
+        return self.fs.isdir(self.path2str(path))
 
     @override
     def is_file(self, path: DNSBPath) -> bool:
-        return self.fs.isfile(str(path))
+        return self.fs.isfile(self.path2str(path))
 
     @override
     def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
-        self.fs.mkdirs(str(path), exist_ok=exist_ok)
+        self.fs.mkdirs(self.path2str(path), exist_ok=exist_ok)
 
     @override
     def rmtree(self, path: DNSBPath):
-        if self.fs.exists(str(path)):
-            self.fs.rm(str(path), recursive=True)
+        if self.fs.exists(self.path2str(path)):
+            self.fs.rm(self.path2str(path), recursive=True)
         else:
             logger.debug(f"Path {path} does not exist, skipping rmtree.")
 
     @override
     def listdir(self, path: DNSBPath) -> List[DNSBPath]:
-        return [DNSBPath(p) for p in self.fs.ls(str(path))]
+        return [DNSBPath(p) for p in self.fs.ls(self.path2str(path))]
 
     @override
     def remove(self, path: DNSBPath):
-        self.fs.rm(str(path))
+        self.fs.rm(self.path2str(path))
 
     @override
     def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
-        return [DNSBPath(p) for p in self.fs.glob(str(path / pattern))]
+        return [DNSBPath(p) for p in self.fs.glob(self.path2str(path / pattern))]
 
     @override
     def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
-        return [DNSBPath(p) for p in self.fs.glob(str(path / pattern))]
+        return [DNSBPath(p) for p in self.fs.glob(self.path2str(path / f"**/{pattern}"))]
+
+class FsspecFileSystem(GenericFileSystem):
+    """fsspec-based File System"""
+
+    def __init__(self, protocol="file"):
+        fs_instance = fsspec.filesystem(protocol)
+        super().__init__(fs_instance, name=f"{protocol}FS")
+        self.protocol = protocol
+
+    @override
+    def path2str(self, path: DNSBPath) -> str:
+        """Convert DNSBPath to string"""
+        return str(path)
+
+    @override
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        """Get file status"""
+        stat_info = self.fs.stat(self.path2str(path))
+
+        # fsspec may return a dict, convert to os.stat_result
+        if isinstance(stat_info, dict):
+            # Extract common fields from fsspec stat dict
+            size = stat_info.get("size", 0)
+            mtime = stat_info.get("mtime", 0)
+            mode = stat_info.get(
+                "mode", 0o100644 if stat_info.get("type") == "file" else 0o040755
+            )
+
+            # Create os.stat_result from dict
+            return os.stat_result(
+                (
+                    mode,  # st_mode
+                    0,  # st_ino (inode number)
+                    0,  # st_dev (device)
+                    1,  # st_nlink (number of hard links)
+                    0,  # st_uid (user id)
+                    0,  # st_gid (group id)
+                    size,  # st_size
+                    mtime,  # st_atime (access time)
+                    mtime,  # st_mtime (modification time)
+                    mtime,  # st_ctime (creation time)
+                )
+            )
+        else:
+            # Already an os.stat_result
+            return stat_info
+
+class MorefsFileSystem(GenericFileSystem):
+    """morefs-based File System"""
+
+    def __init__(self, fs_type="dict"):
+        """
+        Initialize morefs filesystem
+
+        Args:
+            fs_type: Type of morefs filesystem ("dict" or "mem")
+        """
+        if fs_type == "dict":
+            fs_instance = DictFS()
+        elif fs_type == "mem":
+            fs_instance = MemFS()
+        else:
+            raise ValueError(f"Unsupported morefs type: {fs_type}")
+        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS")
+        self.fs_type = fs_type
+
+    @override
+    def path2str(self, path: DNSBPath) -> str:
+        """Convert DNSBPath to string"""
+        return path.__path__()
+
+    @override
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        """Get file status"""
+        stat_info = self.fs.stat(self.path2str(path))
+
+        if not isinstance(stat_info, dict):
+            raise TypeError(
+                f"[{self.name}] Expected a dict from stat, but got {type(stat_info)}"
+            )
+
+        epoch = datetime(1970, 1, 1)
+        mtime = stat_info.get("modified", epoch).timestamp()
+        atime = stat_info.get("accessed", epoch).timestamp()
+        ctime = stat_info.get("created", epoch).timestamp()
+
+        size = stat_info.get("size", 0)
+
+        # Infer mode, as morefs doesn't provide it
+        ftype = stat_info.get("type", "file")
+        mode = 0o040755 if ftype == "directory" else 0o100644
+
+        return os.stat_result(
+            (
+                mode,  # st_mode
+                0,  # st_ino
+                0,  # st_dev
+                1,  # st_nlink
+                0,  # st_uid
+                0,  # st_gid
+                size,  # st_size
+                atime,  # st_atime
+                mtime,  # st_mtime
+                ctime,  # st_ctime
+            )
+        )
 
 # --------------------
 #
@@ -433,16 +564,20 @@ class GenericFileSystem(FileSystem):
 #
 # --------------------
 
-class DiskFileSystem(GenericFileSystem):
-    """Disk File System"""
+class DiskFileSystem(FsspecFileSystem):
+    """Local disk file system using fsspec"""
 
     def __init__(self):
         super().__init__(protocol="file")
-        self.name = "DiskFS"
 
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
         return DNSBPath(Path(path).absolute())
+
+    @override
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        """Get file status"""
+        return Path(str(path)).stat()
 
 # --------------------
 #
@@ -450,8 +585,8 @@ class DiskFileSystem(GenericFileSystem):
 #
 # --------------------
 
-class NetworkFileSystem(GenericFileSystem):
-    """Network File System"""
+class NetworkFileSystem(FsspecFileSystem):
+    """Network file system using fsspec"""
 
     def __init__(self, protocol):
         super().__init__(protocol=protocol)
@@ -560,6 +695,37 @@ class ResourceFileSystem(FileSystem):
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         self._raise_read_only(dst)
 
+    @override
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        """Return immutable stat information for resource files."""
+        if not self.exists(path):
+            raise DNSBPathNotFoundError(f"Resource path does not exist: {path}")
+        
+        # For resource files, we create a const
+        if self.is_file(path):
+            content = self.read_bytes(path)
+            size = len(content)
+            mtime = 0  # January 1, 1970
+            mode = 0o100644  # Regular file with read permissions
+        else:
+            # Directory
+            size = 0
+            mtime = 0
+            mode = 0o040755  # Directory with read/execute permissions
+        
+        return os.stat_result((
+            mode,           # st_mode
+            0,              # st_ino (inode number)
+            0,              # st_dev (device)
+            1,              # st_nlink (number of hard links)
+            0,              # st_uid (user id)
+            0,              # st_gid (group id)
+            size,           # st_size
+            mtime,          # st_atime (access time)
+            mtime,          # st_mtime (modification time)
+            mtime           # st_ctime (creation time)
+        ))
+
     def copy2disk(self, src: DNSBPath, dst: DNSBPath, disk_fs: FileSystem):
         src_trav = self._get_resource_traversable(src)
         self._copy_to_disk_recursive(src_trav, dst, disk_fs)
@@ -589,196 +755,20 @@ class ResourceFileSystem(FileSystem):
 #
 # --------------------
 
-class MemoryFileSystem(FileSystem):
+class MemoryFileSystem(FsspecFileSystem):
     """
-    An in-memory implementation of the FileSystem ABC for fast, isolated testing.
-    It simulates a POSIX-like file system.
+    in-memory filesystem using fsspec
     """
-
     def __init__(self):
-        # The root directory always exists.
-        self.files: Dict[str, Union[bytes, None]] = {"/": None}
-        self.name = "MemoryFS"
+        super().__init__(protocol="memory")
 
-    def _get_path_str(self, path: DNSBPath) -> str:
-        """Normalizes a path object to a consistent string representation for use as a dictionary key."""
-        return path.__path__()
+class HyperMemoryFileSystem(MorefsFileSystem):
+    """
+    High-performance in-memory filesystem
+    """
+    def __init__(self, fs_type="mem"):
+        super().__init__(fs_type=fs_type)
 
-    @override
-    def exists(self, path: DNSBPath) -> bool:
-        return self._get_path_str(path) in self.files
-
-    @override
-    def is_dir(self, path: DNSBPath) -> bool:
-        path_str = self._get_path_str(path)
-        return self.exists(path) and self.files[path_str] is None
-    
-    @override
-    def is_file(self, path: DNSBPath) -> bool:
-        path_str = self._get_path_str(path)
-        return self.exists(path) and self.files[path_str] is not None
-
-    @override
-    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
-        path_str = self._get_path_str(path)
-
-        if self.exists(path):
-            if self.is_file(path):
-                raise FileExistsError(f"Path exists and is a file: '{path_str}'")
-            if not exist_ok:
-                raise FileExistsError(f"Path exists and is a directory: '{path_str}'")
-            return  # Directory exists and exist_ok is True
-
-        parent_path = path.parent
-        if not self.exists(parent_path):
-            if not parents:
-                raise FileNotFoundError(
-                    f"Parent directory does not exist: '{self._get_path_str(parent_path)}'"
-                )
-            self.mkdir(parent_path, parents=True, exist_ok=True)
-
-        self.files[path_str] = None  # Mark as a directory
-
-    @override
-    def write_text(self, path: DNSBPath, content: str):
-        logger.debug(f"[{self.name}] Writing to memory: {path}")
-        path_str = self._get_path_str(path)
-        if self.is_dir(path):
-            raise IsADirectoryError(f"Cannot write to a directory: '{path_str}'")
-
-        # Ensure parent directory exists
-        self.mkdir(path.parent, parents=True, exist_ok=True)
-        self.files[path_str] = content.encode("utf-8")
-    
-    @override
-    def write_bytes(self, path: DNSBPath, content: bytes):
-        logger.debug(f"[{self.name}] Writing bytes to memory: {path}")
-        path_str = self._get_path_str(path)
-        if self.is_dir(path):
-            raise IsADirectoryError(f"Cannot write to a directory: '{path_str}'")
-
-        # Ensure parent directory exists
-        self.mkdir(path.parent, parents=True, exist_ok=True)
-        self.files[path_str] = content
-
-    @override
-    def read_text(self, path: DNSBPath) -> str:
-        logger.debug(f"[{self.name}] Reading from memory: {path}")
-        path_str = self._get_path_str(path)
-        if not self.exists(path):
-            raise FileNotFoundError(f"No such file or directory: '{path_str}'")
-        if self.is_dir(path):
-            raise IsADirectoryError(f"Cannot read from a directory: '{path_str}'")
-
-        return self.files[path_str].decode("utf-8")
-
-    @override
-    def read_bytes(self, path: DNSBPath) -> bytes:
-        logger.debug(f"[{self.name}] Reading bytes from memory: {path}")
-        path_str = self._get_path_str(path)
-        if not self.exists(path):
-            raise FileNotFoundError(f"No such file or directory: '{path_str}'")
-        if self.is_dir(path):
-            raise IsADirectoryError(f"Cannot read from a directory: '{path_str}'")
-
-        return self.files[path_str]
-
-    @override
-    def append_text(self, path: DNSBPath, content: str):
-        logger.debug(f"[{self.name}] Appending to memory: {path}")
-        path_str = self._get_path_str(path)
-        if not self.exists(path):
-            self.write_text(path, content)
-            return
-        if self.is_dir(path):
-            raise IsADirectoryError(f"Cannot append to a directory: '{path_str}'")
-        current_content = self.read_bytes(path)
-        self.write_bytes(path, current_content + content.encode("utf-8"))
-
-    @override
-    def append_bytes(self, path: DNSBPath, content: bytes):
-        logger.debug(f"[{self.name}] Appending bytes to memory: {path}")
-        path_str = self._get_path_str(path)
-        if not self.exists(path):
-            self.write_bytes(path, content)
-            return
-        if self.is_dir(path):
-            raise IsADirectoryError(f"Cannot append to a directory: '{path_str}'")
-        current_content = self.read_bytes(path)
-        self.write_bytes(path, current_content + content)
-
-    @override
-    def rmtree(self, path: DNSBPath):
-        """Recursively removes a directory or a single file."""
-        path_str = self._get_path_str(path)
-        if not self.exists(path):
-            return  # Silently ignore non-existent paths, like shutil.rmtree
-
-        if self.is_file(path):
-            del self.files[path_str]
-            return
-
-        # It's a directory, remove it and everything inside it
-        prefix = path_str if path_str.endswith("/") else f"{path_str}/"
-        keys_to_delete = [k for k in self.files if k.startswith(prefix)]
-        keys_to_delete.append(path_str)  # Also remove the directory itself
-
-        for k in set(keys_to_delete):
-            if k in self.files:
-                del self.files[k]
-
-    @override
-    def copy(self, src: DNSBPath, dst: DNSBPath):
-        """
-        Copies a single file from src to dst. Mimics `shutil.copy`.
-            - If src is a directory, raises IsADirectoryError.
-            - If dst is a directory, src is copied into it.
-            - If dst is a file, it is overwritten.
-        """
-        logger.debug(f"[{self.name}] Copying memory path '{src}' to '{dst}'")
-        src_str = self._get_path_str(src)
-        if not self.exists(src):
-            raise FileNotFoundError(f"Source path does not exist: '{src_str}'")
-        if self.is_dir(src):
-            raise IsADirectoryError(
-                f"Source path is a directory, use copy_tree instead: '{src_str}'"
-            )
-
-        content = self.read_bytes(src)
-        final_dst = dst
-
-        if self.is_dir(dst):
-            # Destination is a directory, copy the file inside it.
-            final_dst = dst / src.name
-
-        self.write_bytes(final_dst, content)
-
-    @override
-    def copytree(self, src: DNSBPath, dst: DNSBPath):
-        """Recursively copies a directory tree. Mimics `shutil.copytree`."""
-        logger.debug(f"[{self.name}] Copying memory tree '{src}' to '{dst}'")
-        src_str = self._get_path_str(src)
-        if not self.is_dir(src):
-            raise NotADirectoryError(f"Source path is not a directory: '{src_str}'")
-
-        # Create destination directory
-        self.mkdir(dst, parents=True, exist_ok=True)
-
-        src_prefix = src_str if src_str.endswith("/") else f"{src_str}/"
-
-        # Iterate over all items in the filesystem
-        for path_str, content in list(self.files.items()):
-            if path_str.startswith(src_prefix):
-                # Get the relative path from the source directory
-                relative_path = path_str[len(src_prefix) :]
-
-                # Construct the full destination path
-                new_dst_path = dst / relative_path
-
-                if content is None:  # It's a directory
-                    self.mkdir(new_dst_path, parents=True, exist_ok=True)
-                else:  # It's a file
-                    self.write_bytes(new_dst_path, content)
 
 # --------------------
 #
@@ -966,6 +956,15 @@ class GitFileSystem(FileSystem):
     @override
     def rmtree(self, path: DNSBPath):
         self._raise_read_only(path)
+
+    @override
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        try:
+            full_path = self._get_synced_repo_path(path)
+            return self.cache_fs.stat(full_path)
+        except Exception as e:
+            logger.error(f"[{self.name}] Error in stat for '{path}': {e}")
+            raise
 
     def copy2disk(self, src: DNSBPath, dst: DNSBPath):
         try:
