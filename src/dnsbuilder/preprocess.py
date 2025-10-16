@@ -62,12 +62,12 @@ class Preprocessor:
             include_files = [include_files]
 
         base_dir = DNSBPath(self.config_path).parent
-        
+        logger.debug(f"Base directory for includes: {base_dir}")
         merged_from_includes = {}
 
         for file_path in include_files:
             path = DNSBPath(file_path)
-            if not path.is_absolute() and not path.is_resource:
+            if not path.is_absolute() and base_dir.is_resource:
                 path = base_dir / path
 
             abs_path = str(path)
