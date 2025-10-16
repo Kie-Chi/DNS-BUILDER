@@ -54,6 +54,18 @@ STD_BUILD_PREFIX = "std:"
 SOFTWARE_BIND = "bind"
 SOFTWARE_UNBOUND = "unbound"
 
+RECOGNIZED_PATTERNS = {
+    "bind": [
+        r"\bbind\b",  # exact word match
+        r"\bisc-bind\b",  # ISC BIND
+        r"\bnamed\b",  # BIND daemon name
+    ],
+    "unbound": [
+        r"\bunbound\b"  # exact word match
+    ],
+}
+
+
 # --- Behavior Sections ---
 
 BEHAVIOR_TYPES = {"Forward", "Stub", "Master", "Hint", "Slave"}
