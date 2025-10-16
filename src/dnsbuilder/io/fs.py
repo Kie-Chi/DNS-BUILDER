@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import os
 import fsspec
@@ -176,14 +176,18 @@ class AppFileSystem(FileSystem):
         support a lot kind of file system, 
         like file, resource, http, s3, etc.
     """
-    _handlers: Dict[str, FileSystem] = {}
 
-    def __init__(self):
+    def __init__(self, enable_fallback: bool = False):
         # register default file system handlers
+        self._handlers: Dict[str, FileSystem] = {}
         self.register_handler("file", DiskFileSystem())
         self.register_handler("temp", MemoryFileSystem())
         self.register_handler("resource", ResourceFileSystem())
-        self.register_handler("git", GitFileSystem(self))
+        self.register_handler("git", GitFileSystem(DiskFileSystem()))
+        
+        # fallback mechanism
+        self.enable_fallback = enable_fallback
+        self._fallback_handler = DiskFileSystem() if enable_fallback else None
 
         
     def register_handler(self, protocol: str, handler: FileSystem):
@@ -202,7 +206,21 @@ class AppFileSystem(FileSystem):
             method = getattr(handler, method_name, None)
             if method is None:
                 raise NotImplementedError(f"FileSystem handler for protocol '{path.protocol}' does not support '{method_name}'")
-            return method(path, *args, **kwargs)
+            
+            # Try primary handler first
+            try:
+                return method(path, *args, **kwargs)
+            except Exception as e:
+                if self.enable_fallback and path.protocol == "file":
+                    logger.warning(f"Primary handler failed for {path}, trying fallback: {e}")
+                    fallback_method = getattr(self._fallback_handler, method_name, None)
+                    if fallback_method:
+                        try:
+                            return fallback_method(path, *args, **kwargs)
+                        except Exception as fallback_e:
+                            logger.error(f"Fallback handler also failed for {path}: {fallback_e}")
+                            raise e  # Raise original exception
+                raise e
         return decorator
 
     def _get_handler(self, path: DNSBPath) -> 'FileSystem':
@@ -325,16 +343,16 @@ class AppFileSystem(FileSystem):
             src_handler.copytree(src, dst)
             return
 
-        if isinstance(dst_handler, DiskFileSystem):
-            if isinstance(src_handler, GitFileSystem):
-                src_handler.copy2disk(src, dst)
-                return
-            if isinstance(src_handler, ResourceFileSystem):
-                src_handler.copy2disk(src, dst, dst_handler)
-                return
+        
+        if isinstance(src_handler, GitFileSystem):
+            src_handler.copy2fs(src, dst, dst_handler)
+            return
+        if isinstance(src_handler, ResourceFileSystem):
+            src_handler.copy2fs(src, dst, dst_handler)
+            return
 
         raise UnsupportedFeatureError(
-            f"Cross-filesystem copytree from '{src.protocol}' to '{dst.protocol}' is not yet implemented."
+            f"Cross-filesystem copytree from '{src_handler.__class__.__name__}' to '{dst_handler.__class__.__name__}' is not yet implemented."
         )
 
 # --------------------
@@ -532,10 +550,21 @@ class MorefsFileSystem(GenericFileSystem):
                 f"[{self.name}] Expected a dict from stat, but got {type(stat_info)}"
             )
 
-        epoch = datetime(1970, 1, 1)
-        mtime = stat_info.get("modified", epoch).timestamp()
-        atime = stat_info.get("accessed", epoch).timestamp()
-        ctime = stat_info.get("created", epoch).timestamp()
+        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        def safe_timestamp(dt_obj):
+            if dt_obj is None:
+                return epoch.timestamp()
+            if isinstance(dt_obj, datetime):
+                try:
+                    return dt_obj.timestamp()
+                except (OSError, ValueError):
+                    # Handle invalid datetime objects
+                    return epoch.timestamp()
+            return epoch.timestamp()
+        
+        mtime = safe_timestamp(stat_info.get("modified", epoch))
+        atime = safe_timestamp(stat_info.get("accessed", epoch))
+        ctime = safe_timestamp(stat_info.get("created", epoch))
 
         size = stat_info.get("size", 0)
 
@@ -726,26 +755,26 @@ class ResourceFileSystem(FileSystem):
             mtime           # st_ctime (creation time)
         ))
 
-    def copy2disk(self, src: DNSBPath, dst: DNSBPath, disk_fs: FileSystem):
+    def copy2fs(self, src: DNSBPath, dst: DNSBPath, fs: FileSystem):
         src_trav = self._get_resource_traversable(src)
-        self._copy_to_disk_recursive(src_trav, dst, disk_fs)
+        self._copy_to_fs_recursive(src_trav, dst, fs)
 
-    def _copy_to_disk_recursive(
+    def _copy_to_fs_recursive(
         self,
         src_trav: resources.abc.Traversable,
         dst_path: DNSBPath,
-        disk_fs: FileSystem,
+        fs: FileSystem,
     ):
         if src_trav.is_file():
             content = src_trav.read_bytes()
-            disk_fs.write_bytes(dst_path, content)
+            fs.write_bytes(dst_path, content)
         elif src_trav.is_dir():
-            if not disk_fs.exists(dst_path):
-                disk_fs.mkdir(dst_path, parents=True, exist_ok=True)
+            if not fs.exists(dst_path):
+                fs.mkdir(dst_path, parents=True, exist_ok=True)
 
             for item in src_trav.iterdir():
                 item_dst_path = dst_path / item.name
-                self._copy_to_disk_recursive(item, item_dst_path, disk_fs)
+                self._copy_to_fs_recursive(item, item_dst_path, fs)
 
 
 
@@ -761,6 +790,14 @@ class MemoryFileSystem(FsspecFileSystem):
     """
     def __init__(self):
         super().__init__(protocol="memory")
+    
+    @override
+    def absolute(self, path: DNSBPath) -> DNSBPath:
+        """Return absolute path for memory filesystem"""
+        path_str = str(path)
+        if not path_str.startswith('/'):
+            path_str = '/' + path_str
+        return DNSBPath(path_str)
 
 class HyperMemoryFileSystem(MorefsFileSystem):
     """
@@ -768,6 +805,14 @@ class HyperMemoryFileSystem(MorefsFileSystem):
     """
     def __init__(self, fs_type="mem"):
         super().__init__(fs_type=fs_type)
+    
+    @override
+    def absolute(self, path: DNSBPath) -> DNSBPath:
+        """Return absolute path for memory filesystem"""
+        path_str = str(path)
+        if not path_str.startswith('/'):
+            path_str = '/' + path_str
+        return DNSBPath(path_str)
 
 
 # --------------------
@@ -966,16 +1011,41 @@ class GitFileSystem(FileSystem):
             logger.error(f"[{self.name}] Error in stat for '{path}': {e}")
             raise
 
-    def copy2disk(self, src: DNSBPath, dst: DNSBPath):
+    def copy2fs(self, src: DNSBPath, dst: DNSBPath, fs: FileSystem):
         try:
             full_path = self._get_synced_repo_path(src)
-            if self.cache_fs.is_dir(full_path):
-                self.cache_fs.copytree(full_path, dst)
-            elif self.cache_fs.is_file(full_path):
-                self.cache_fs.copy(full_path, dst)
+            if isinstance(fs, DiskFileSystem):
+                if self.cache_fs.is_dir(full_path):
+                    self.cache_fs.copytree(full_path, dst)
+                elif self.cache_fs.is_file(full_path):
+                    self.cache_fs.copy(full_path, dst)
+            else:
+                if self.cache_fs.is_dir(full_path):
+                    self._copy_directory_to_fs(full_path, dst, fs)
+                elif self.cache_fs.is_file(full_path):
+                    content = self.cache_fs.read_bytes(full_path)
+                    fs.write_bytes(dst, content)
         except Exception as e:
-            logger.error(f"[{self.name}] Error in copy2disk for '{src}' to '{dst}': {e}")
+            logger.error(f"[{self.name}] Error in copy2fs for '{src}' to '{dst}': {e}")
             raise
+
+    def _copy_directory_to_fs(self, src_dir: DNSBPath, dst_dir: DNSBPath, fs: FileSystem):
+        if not self.cache_fs.exists(src_dir):
+            return
+        fs.mkdir(dst_dir, parents=True, exist_ok=True)
+        for item in self.cache_fs.listdir(src_dir):
+            src_item = src_dir / item.name
+            dst_item = dst_dir / item.name
+            
+            if self.cache_fs.is_dir(src_item):
+                self._copy_directory_to_fs(src_item, dst_item, fs)
+            else:
+                try:
+                    content = self.cache_fs.read_bytes(src_item)
+                    fs.write_bytes(dst_item, content)
+                except Exception as e:
+                    logger.warning(f"[{self.name}] Failed to copy file {src_item} to {dst_item}: {e}")
+                    raise
 
 
 # --------------------
@@ -984,13 +1054,11 @@ class GitFileSystem(FileSystem):
 #
 # --------------------
 
-def create_app_fs(use_vfs: bool = False) -> "FileSystem" :
+def create_app_fs(use_vfs: bool = False, enable_fallback: bool = False) -> "FileSystem" :
     """
-    Create the appropriate FileSystem for the application.
+    Create an AppFileSystem instance with optional VFS and fallback support.
     """
-    app_fs = AppFileSystem()
-    if not use_vfs:
-        app_fs.register_handler("file", DiskFileSystem())
-    else:
-        app_fs.register_handler("file", MemoryFileSystem())
+    app_fs = AppFileSystem(enable_fallback=enable_fallback)
+    if use_vfs:
+        app_fs.register_handler("file", HyperMemoryFileSystem())
     return app_fs
