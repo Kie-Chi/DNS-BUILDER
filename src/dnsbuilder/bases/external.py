@@ -42,13 +42,13 @@ class ExternalImage(Image, ABC):
 
 # -------------------------
 #
-#   REMOTE IMAGE
+#   DOCKER IMAGE
 #
 # -------------------------
 
-class RemoteImage(ExternalImage):
+class DockerImage(ExternalImage):
     """
-    Class describing a Docker Image from remote
+    Class describing a Docker Image from Docker Hub or registry
     """
     @override
     def _post_init_hook(self, config: Dict[str, Any]):
@@ -60,20 +60,20 @@ class RemoteImage(ExternalImage):
     @override
     def write(self, directory: DNSBPath):
         """
-        Write the remote image to the specified directory.
+        Write the Docker image to the specified directory.
         """
-        logger.debug(f"[{self.name}] [RemoteImage] Nothing to write")
+        logger.debug(f"[{self.name}] [DockerImage] Nothing to write")
         pass
 
 # -------------------------
 #
-#   LOCAL IMAGE
+#   SELF-DEFINED IMAGE
 #
 # -------------------------
 
-class LocalImage(ExternalImage):
+class SelfDefinedImage(ExternalImage):
     """
-    Class describing a Docker Image from local
+    Class describing a Docker Image from self-defined source
     """
     @override
     def _post_init_hook(self, config: Dict[str, Any]):
@@ -82,7 +82,7 @@ class LocalImage(ExternalImage):
         """
         path = DNSBPath(self.name)
         if not self.fs.exists(path):
-            raise ImageDefinitionError(f"Local image path '{self.name}' does not exist")
+            raise ImageDefinitionError(f"Self-defined image path '{self.name}' does not exist")
 
         if self.fs.is_file(path):
             self.path = path
@@ -102,14 +102,14 @@ class LocalImage(ExternalImage):
                 self.path = DNSBPath(dockerfile_path)
                 return
 
-        raise ImageDefinitionError(f"Local image path '{self.name}' is not a file, and does not contain a Dockerfile")
+        raise ImageDefinitionError(f"Self-defined image path '{self.name}' is not a file, and does not contain a Dockerfile")
 
     @override
     def write(self, directory: DNSBPath):
         """
-        Write the local image to the specified directory.
+        Write the self-defined image to the specified directory.
         """
-        logger.debug(f"[{self.name}] [LocalImage] content from {self.path} to {directory}")
+        logger.debug(f"[{self.name}] [SelfDefinedImage] content from {self.path} to {directory}")
         dockerfile = directory / "Dockerfile"
         self.fs.copy(self.path, dockerfile)
         pass

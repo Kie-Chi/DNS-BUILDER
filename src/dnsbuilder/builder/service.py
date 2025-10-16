@@ -4,7 +4,7 @@ import collections
 import hashlib
 
 from ..bases.internal import InternalImage
-from ..bases.external import LocalImage
+from ..bases.external import SelfDefinedImage
 from ..datacls.contexts import BuildContext
 from ..datacls.artifacts import BehaviorArtifact
 from ..datacls.volume import Volume
@@ -28,7 +28,7 @@ class ServiceHandler:
         self.image_name = self.build_conf.get('image', "")
         self.image_obj = context.images.get(self.image_name)
         self.is_internal_image = isinstance(self.image_obj, InternalImage)
-        self.has_dockerfile = self.is_internal_image or isinstance(self.image_obj, LocalImage)
+        self.has_dockerfile = self.is_internal_image or isinstance(self.image_obj, SelfDefinedImage)
 
         self.ip = context.service_ips.get(service_name)
         

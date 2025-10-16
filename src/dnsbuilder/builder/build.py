@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 from ..factories import ImageFactory
 from ..base import Image
-from ..bases.external import LocalImage, RemoteImage
+from ..bases.external import SelfDefinedImage, DockerImage
 from ..datacls.contexts import BuildContext
 from .map import Mapper, GraphGenerator
 from .substitute import VariableSubstitutor
@@ -152,24 +152,24 @@ class Builder:
         if image_name in self.image_cache:
             return self.image_cache[image_name]
 
-        # Try to resolve as LocalImage first.
+        # Try to resolve as SelfDefinedImage first.
         try:
-            logger.debug(f"Image '{image_name}' resolved as a local build context path.")
+            logger.debug(f"Image '{image_name}' resolved as a self-defined build context path.")
             config = {"name": image_name, "ref": image_name}
-            image_obj = LocalImage(config, fs=self.fs)
+            image_obj = SelfDefinedImage(config, fs=self.fs)
             self.image_cache[image_name] = image_obj
             return image_obj
         except (TypeError, ValueError, OSError, DNSBuilderError):
-            # Not a LocalImage
+            # Not a SelfDefinedImage
             pass
         except Exception:
             # error
             raise
 
-        # Default to RemoteImage.
-        logger.debug(f"Image '{image_name}' resolved as a remote image.")
+        # Default to DockerImage.
+        logger.debug(f"Image '{image_name}' resolved as a Docker image.")
         config = {"name": image_name, "ref": image_name}
-        image_obj = RemoteImage(config, fs=self.fs)
+        image_obj = DockerImage(config, fs=self.fs)
         self.image_cache[image_name] = image_obj
         return image_obj
 
