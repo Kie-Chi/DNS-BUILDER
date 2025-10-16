@@ -2,6 +2,7 @@ import argparse
 import logging
 from .config import Config
 from .builder.build import Builder
+from .builder.cached_builder import CachedBuilder
 from .utils.logger import setup_logger
 from .io.fs import create_app_fs
 from .exceptions import (
@@ -35,6 +36,12 @@ def main():
         help="Generate a DOT file for the network topology graph and save it to the specified path.",
     )
     parser.add_argument("--ui", action="store_true", help="Start the web UI.")
+    parser.add_argument(
+        "-i",
+        "--incremental",
+        action="store_true",
+        help="Enable incremental build using cache to speed up builds by only rebuilding changed services."
+    )
     args = parser.parse_args()
 
     module_levels = None
@@ -59,7 +66,15 @@ def main():
     try:
         cli_fs = create_app_fs(use_vfs=args.vfs)
         config = Config(args.config_file, cli_fs)
-        builder = Builder(config, graph_output=args.graph, fs=cli_fs)
+        
+        # Choose builder based on incremental flag
+        if args.incremental:
+            builder = CachedBuilder(config, graph_output=args.graph, fs=cli_fs)
+            logging.info("Using incremental build with cache")
+        else:
+            builder = Builder(config, graph_output=args.graph, fs=cli_fs)
+            logging.info("Using standard build")
+            
         builder.run()
     except ConfigurationError as e:
         logging.error(f"Configuration error: {e}")

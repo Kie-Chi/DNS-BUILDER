@@ -18,6 +18,8 @@ LOG_ALIAS_MAP = {
     "conf": "dnsbuilder.config",
     "api": "dnsbuilder.api",
     "pre": "dnsbuilder.preprocess",
+    "cbld": "dnsbuilder.builder.cached_builder",
+    "cache": "dnsbuilder.cache",
 }
 
 # Top-level modules within dnsbuilder for auto-prefixing
@@ -32,6 +34,7 @@ KNOWN_TOP_MODULES = {
     "utils",
     "exceptions",
     "config",
+    "cache"
 }
 
 
@@ -89,7 +92,7 @@ ALIAS_MAP = {
 }
 
 # --- supported protocol ---
-KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp", "git"}
+KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp", "git", "cache"}
 
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]
