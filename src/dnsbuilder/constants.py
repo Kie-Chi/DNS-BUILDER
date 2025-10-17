@@ -10,6 +10,7 @@ LOG_ALIAS_MAP = {
     "build": "dnsbuilder.builder.build",
     "bld": "dnsbuilder.builder.build",
     "service": "dnsbuilder.builder.service",
+    "srv": "dnsbuilder.builder.service",
     "svc": "dnsbuilder.builder.service",
     "net": "dnsbuilder.builder.net",
     "map": "dnsbuilder.builder.map",

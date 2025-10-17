@@ -2,6 +2,9 @@ import logging
 from typing import Dict, Any, List, Tuple
 import collections
 import hashlib
+import json
+from dataclasses import dataclass, field
+from datetime import datetime
 
 from ..bases.internal import InternalImage
 from ..bases.external import SelfDefinedImage
@@ -12,9 +15,73 @@ from ..bases.behaviors import MasterBehavior
 from .zone import ZoneGenerator
 from .. import constants
 from ..io.path import DNSBPath
+from ..io.fs import FileSystem, create_app_fs
 from ..exceptions import BuildError, VolumeError, BehaviorError, BuildDefinitionError
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConfigGenerationTrace:
+    """Trace configuration generation process for debugging and analysis"""
+    service_name: str
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    stages: List[Dict[str, Any]] = field(default_factory=list)
+    decisions: List[Dict[str, Any]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    fs: FileSystem = field(default_factory=create_app_fs)
+    
+    def add_stage(self, stage_name: str, description: str, details: Dict[str, Any] = None):
+        """Add processing stage record"""
+        stage_info = {
+            "stage": stage_name,
+            "description": description,
+            "timestamp": datetime.now().isoformat(),
+            "details": details or {}
+        }
+        self.stages.append(stage_info)
+        logger.debug(f"[TRACE] {self.service_name} - {stage_name}: {description}")
+    
+    def add_decision(self, decision_type: str, description: str, source: str, value: Any, reason: str = ""):
+        """Add automatic decision record"""
+        decision_info = {
+            "type": decision_type,
+            "description": description,
+            "source": source,
+            "value": value,
+            "reason": reason,
+            "timestamp": datetime.now().isoformat()
+        }
+        self.decisions.append(decision_info)
+        logger.debug(f"[TRACE] {self.service_name} - Decision: {description} = {value} (from {source})")
+    
+    def add_warning(self, message: str):
+        """Add warning message"""
+        self.warnings.append(f"{datetime.now().isoformat()}: {message}")
+        logger.warning(f"[TRACE] {self.service_name} - Warning: {message}")
+    
+    def add_error(self, message: str):
+        """Add error message"""
+        self.errors.append(f"{datetime.now().isoformat()}: {message}")
+        logger.error(f"[TRACE] {self.service_name} - Error: {message}")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format"""
+        return {
+            "service_name": self.service_name,
+            "timestamp": self.timestamp,
+            "stages": self.stages,
+            "decisions": self.decisions,
+            "warnings": self.warnings,
+            "errors": self.errors
+        }
+    
+    def save_report(self, output_path: DNSBPath):
+        """Save trace report to file using the file system abstraction"""
+        report_data = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+        self.fs.write_text(output_path, report_data)
+
 
 class ServiceHandler:
     """
@@ -24,33 +91,135 @@ class ServiceHandler:
         self.service_name = service_name
         self.context = context
         self.build_conf = context.resolved_builds[service_name]
+        
+        # Initialize configuration generation tracer
+        self.trace = ConfigGenerationTrace(service_name, fs=context.fs)
+        self.trace.add_stage("initialization", "ServiceHandler initialization started")
 
         self.image_name = self.build_conf.get('image', "")
         self.image_obj = context.images.get(self.image_name)
         self.is_internal_image = isinstance(self.image_obj, InternalImage)
         self.has_dockerfile = self.is_internal_image or isinstance(self.image_obj, SelfDefinedImage)
 
+        # Record image-related decisions
+        self.trace.add_decision(
+            "image_selection", 
+            "Service image selection", 
+            "build_conf", 
+            self.image_name,
+            "Retrieved image name from build configuration"
+        )
+        
+        if self.is_internal_image:
+            self.trace.add_decision(
+                "image_type", 
+                "Image type determination", 
+                "image_obj", 
+                "internal",
+                "Image is internal, will use build method"
+            )
+        elif isinstance(self.image_obj, SelfDefinedImage):
+            self.trace.add_decision(
+                "image_type", 
+                "Image type determination", 
+                "image_obj", 
+                "self_defined",
+                "Image is self-defined, will use build method"
+            )
+        else:
+            self.trace.add_decision(
+                "image_type", 
+                "Image type determination", 
+                "image_obj", 
+                "docker",
+                "Image is docker, will use image method"
+            )
+
         self.ip = context.service_ips.get(service_name)
+        
+        # Record IP allocation decisions
+        if self.ip:
+            self.trace.add_decision(
+                "ip_allocation", 
+                "IP address allocation", 
+                "service_ips", 
+                self.ip,
+                "Retrieved static IP from service IP configuration"
+            )
+        else:
+            self.trace.add_decision(
+                "ip_allocation", 
+                "IP address allocation", 
+                "default", 
+                "dynamic",
+                "No static IP configured, will use dynamic IP allocation"
+            )
         
         self.service_dir = self.context.output_dir / self.service_name
         self.contents_dir = self.service_dir / 'contents'
         self.processed_volumes: List[str] = []
+        
         ip_display = f"with IP '{self.ip}'" if self.ip else "with dynamic IP"
         logger.debug(f"ServiceHandler initialized for '{self.service_name}' {ip_display} and image '{self.image_name}'.")
+        
+        self.trace.add_stage("initialization", "ServiceHandler initialization completed", {
+            "service_name": self.service_name,
+            "image_name": self.image_name,
+            "ip": self.ip,
+            "has_dockerfile": self.has_dockerfile
+        })
 
     def generate_all(self) -> Dict[str, Any]:
         """Orchestrates artifact generation and returns the docker-compose service block."""
+        self.trace.add_stage("generation_start", "Start generating all artifacts")
         logger.info(f"Generating artifacts for service: '{self.service_name}'...")
+        
+        # Setup service directory
+        self.trace.add_stage("setup_directory", "Setup service directory")
         self._setup_service_directory()
+        
+        # Write image files
+        self.trace.add_stage("write_image", "Write image related files")
         self.image_obj.write(directory=self.service_dir)
         
+        # Process files
+        self.trace.add_stage("process_files", "Process service files")
         self._process_files()
+        
+        # Process volume mounts
+        self.trace.add_stage("process_volumes", "Process volume mount configuration")
         main_conf_path = self._process_volumes()
+        if main_conf_path:
+            self.trace.add_decision(
+                "main_config_path", 
+                "Main configuration file path", 
+                "_process_volumes", 
+                str(main_conf_path),
+                "Obtained main config file path from volume processing"
+            )
+        
+        # Process behavior configuration
+        self.trace.add_stage("process_behavior", "Process behavior configuration")
         self._process_behavior(main_conf_path)
         
+        # Assemble compose service block
+        self.trace.add_stage("assemble_compose", "Assemble docker-compose service configuration")
         compose_service_block = self._assemble_compose_service()
+        
+        # Validate required fields
+        self.trace.add_stage("validate_fields", "Validate required fields")
         self._validate_required_fields()
+        
+        self.trace.add_stage("generation_complete", "Artifact generation completed", {
+            "compose_service_keys": list(compose_service_block.keys()),
+            "total_stages": len(self.trace.stages),
+            "total_decisions": len(self.trace.decisions)
+        })
+        
         logger.debug(f"Generated docker-compose block for '{self.service_name}': {compose_service_block}")
+        if logger.isEnabledFor(logging.DEBUG):
+            rep_path = self.save_generation_report()
+            logger.debug(f"[{self.service_name}] Generation report saved to '{rep_path}'.")
         return compose_service_block
     
     def _validate_required_fields(self):
@@ -267,9 +436,9 @@ class ServiceHandler:
             raise BehaviorError(
                 f"Service '{self.service_name}' has 'behavior' but no main .conf file."
             )
-        if not self.is_internal_image or not self.image_obj.software:
+        if not self.image_obj.software:
             raise BehaviorError(
-                f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' must be internal and have a 'software' type."
+                f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' must have a 'software' type."
             )
 
         # Step 1: Generate all artifacts from behavior lines
@@ -352,38 +521,224 @@ class ServiceHandler:
 
         return "\n\n".join(output_parts)
 
-    def _assemble_compose_service(self) -> Dict:
-        logger.debug(f"Assembling final docker-compose service block for '{self.service_name}'.")
-        service_config = {
-            'container_name': f"{self.context.config.name}-{self.service_name}",
-            'hostname': self.service_name
-        }
-        if self.has_dockerfile:
-            service_config['build'] = f"./{self.service_name}"
-        else:
-            if not self.image_name:
-                 raise BuildError(f"Service '{self.service_name}' is configured for a Non-Dockerfile build, but the 'image' key is missing.")
-            service_config['image'] = self.image_name
-        if self.ip:
-            service_config['networks'] = {
-                constants.DEFAULT_NETWORK_NAME: {'ipv4_address': self.ip}
-            }
-        else:
-            # with no `networks`
-            pass
-        passthrough_mounts = self.build_conf.get('mounts', [])
-        final_volumes = self.processed_volumes + passthrough_mounts
-        if final_volumes: 
-            service_config['volumes'] = sorted(list(set(final_volumes)))
-        if 'mounts' in self.build_conf: 
-            del self.build_conf['mounts']
-        
-        if 'cap_add' in self.build_conf and self.build_conf['cap_add']:
-            service_config['cap_add'] = self.build_conf['cap_add']
-        else:
-            service_config['cap_add'] = constants.DEFAULT_CAP_ADD
+    def _generate_passthrough_config(self, service_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate passthrough configuration items"""
+        passthrough_configs = {}
         for key, value in self.build_conf.items():
             if key not in constants.RESERVED_BUILD_KEYS: 
                 service_config[key] = value
+                passthrough_configs[key] = value
+        
+        if passthrough_configs:
+            self.trace.add_decision(
+                "passthrough_configs", 
+                "Passthrough configuration items", 
+                "build_conf", 
+                passthrough_configs,
+                f"Added {len(passthrough_configs)} non-reserved key configuration items"
+            )
+        
+        return passthrough_configs
+
+    def _generate_capability_config(self, service_config: Dict[str, Any]) -> None:
+        """Generate container capability configuration"""
+        if 'cap_add' in self.build_conf and self.build_conf['cap_add']:
+            cap_add_value = self.build_conf['cap_add']
+            service_config['cap_add'] = cap_add_value
+            self.trace.add_decision(
+                "cap_add", 
+                "Container capability configuration", 
+                "build_conf", 
+                cap_add_value,
+                "Obtained cap_add setting from build configuration"
+            )
+        else:
+            default_cap_add = constants.DEFAULT_CAP_ADD
+            service_config['cap_add'] = default_cap_add
+            self.trace.add_decision(
+                "cap_add", 
+                "Container capability configuration", 
+                "default", 
+                default_cap_add,
+                "Using default cap_add configuration"
+            )
+
+    def _generate_volume_config(self, service_config: Dict[str, Any]) -> None:
+        """Generate volume mount configuration"""
+        passthrough_mounts = self.build_conf.get('mounts', [])
+        final_volumes = self.processed_volumes + passthrough_mounts
+        
+        self.trace.add_decision(
+            "volume_processing", 
+            "Volume mount processing", 
+            "processed_volumes + passthrough_mounts", 
+            {
+                "processed_volumes_count": len(self.processed_volumes),
+                "passthrough_mounts_count": len(passthrough_mounts),
+                "total_volumes": len(final_volumes)
+            },
+            f"Merged processed volumes ({len(self.processed_volumes)}) and passthrough volumes ({len(passthrough_mounts)})"
+        )
+        
+        if final_volumes: 
+            # Use set for deduplication and sort
+            unique_volumes = sorted(list(set(final_volumes)))
+            service_config['volumes'] = unique_volumes
+            
+            if len(unique_volumes) != len(final_volumes):
+                self.trace.add_warning(f"Detected duplicate volume mounts, deduplicated: original {len(final_volumes)}, after deduplication {len(unique_volumes)}")
+            
+            self.trace.add_decision(
+                "final_volumes", 
+                "Final volume configuration", 
+                "volume_deduplication", 
+                unique_volumes,
+                "Deduplicated and sorted volume mount list"
+            )
+        
+        # Clean up mounts configuration
+        if 'mounts' in self.build_conf: 
+            del self.build_conf['mounts']
+            self.trace.add_decision(
+                "cleanup_mounts", 
+                "Clean up mounts configuration", 
+                "build_conf", 
+                "removed",
+                "Removed mounts key from build configuration to avoid duplication"
+            )
+
+    def _generate_network_config(self, service_config: Dict[str, Any]) -> None:
+        """Generate network configuration"""
+        if self.ip:
+            network_config = {constants.DEFAULT_NETWORK_NAME: {'ipv4_address': self.ip}}
+            service_config['networks'] = network_config
+            self.trace.add_decision(
+                "network_config", 
+                "Network configuration", 
+                "static_ip", 
+                network_config,
+                f"Configured static IP address: {self.ip}"
+            )
+        else:
+            self.trace.add_decision(
+                "network_config", 
+                "Network configuration", 
+                "default", 
+                "dynamic",
+                "No static IP configured, using default network configuration"
+            )
+
+    def _generate_image_build_config(self, service_config: Dict[str, Any]) -> None:
+        """Generate image or build configuration"""
+        if self.has_dockerfile:
+            build_path = f"./{self.service_name}"
+            service_config['build'] = build_path
+            self.trace.add_decision(
+                "build_config", 
+                "Build configuration", 
+                "has_dockerfile", 
+                build_path,
+                "Dockerfile detected, using build method"
+            )
+        else:
+            if not self.image_name:
+                error_msg = f"Service '{self.service_name}' is configured for a Non-Dockerfile build, but the 'image' key is missing."
+                self.trace.add_error(error_msg)
+                raise BuildError(error_msg)
+            service_config['image'] = self.image_name
+            self.trace.add_decision(
+                "image_config", 
+                "Image configuration", 
+                "image_name", 
+                self.image_name,
+                "No Dockerfile detected, using external image"
+            )
+
+    def _generate_basic_config(self) -> Dict[str, str]:
+        """Generate basic configuration (container_name, hostname)"""
+        container_name = f"{self.context.config.name}-{self.service_name}"
+        hostname = self.service_name
+        
+        self.trace.add_decision(
+            "container_name", 
+            "Container name", 
+            "config_name + service_name", 
+            container_name,
+            f"Using project name '{self.context.config.name}' and service name '{self.service_name}' combination"
+        )
+        
+        self.trace.add_decision(
+            "hostname", 
+            "Hostname", 
+            "service_name", 
+            hostname,
+            "Using service name as hostname"
+        )
+        
+        return {
+            'container_name': container_name,
+            'hostname': hostname
+        }
+
+    def _assemble_compose_service(self) -> Dict:
+        """Assembles the final docker-compose service block."""
+        self.trace.add_stage("assemble_start", "Start assembling docker-compose service configuration")
+        logger.debug(f"Assembling final docker-compose service block for '{self.service_name}'.")
+        
+        # Generate basic configuration
+        service_config = self._generate_basic_config()
+        
+        # Generate image or build configuration
+        self._generate_image_build_config(service_config)
+        
+        # Generate network configuration
+        self._generate_network_config(service_config)
+        
+        # Generate volume mount configuration
+        self._generate_volume_config(service_config)
+        
+        # Generate container capability configuration
+        self._generate_capability_config(service_config)
+        
+        # Generate passthrough configuration
+        passthrough_configs = self._generate_passthrough_config(service_config)
+        
+        self.trace.add_stage("assemble_complete", "Docker-compose service configuration assembly completed", {
+            "final_config_keys": list(service_config.keys()),
+            "has_build": 'build' in service_config,
+            "has_image": 'image' in service_config,
+            "has_networks": 'networks' in service_config,
+            "has_volumes": 'volumes' in service_config,
+            "volume_count": len(service_config.get('volumes', [])),
+            "passthrough_count": len(passthrough_configs)
+        })
+        
         return service_config
+    
+    def save_generation_report(self, output_dir: DNSBPath = None) -> DNSBPath:
+        """Save configuration generation trace report to file"""
+        if output_dir is None:
+            output_dir = self.service_dir
+        
+        report_filename = f"{self.service_name}_trace.log"
+        report_path = output_dir / report_filename
+        
+        self.trace.save_report(report_path)
+        logger.info(f"Configuration generation trace report saved to: {report_path}")
+        return report_path
+    
+    def get_generation_summary(self) -> Dict[str, Any]:
+        """Get summary information of the configuration generation process"""
+        return {
+            "service_name": self.service_name,
+            "total_stages": len(self.trace.stages),
+            "total_decisions": len(self.trace.decisions),
+            "warnings_count": len(self.trace.warnings),
+            "errors_count": len(self.trace.errors),
+            "generation_timestamp": self.trace.timestamp,
+            "key_decisions": [
+                decision for decision in self.trace.decisions 
+                if decision["type"] in ["image_selection", "ip_allocation", "network_config", "final_volumes"]
+            ]
+        }
     
