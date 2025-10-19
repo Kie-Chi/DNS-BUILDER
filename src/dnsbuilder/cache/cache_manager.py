@@ -49,7 +49,7 @@ class CacheManager:
         """
         try:
             cache_path = self._get_project_cache_path(project_cache.name)
-            cache_data = project_cache.model_dump()
+            cache_data = project_cache.model_dump(by_alias=True, exclude_none=True)
             
             # serialize datetime objects
             cache_data = self._serialize_datetime(cache_data)

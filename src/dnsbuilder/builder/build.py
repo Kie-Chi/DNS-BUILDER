@@ -17,6 +17,7 @@ from ..config import Config
 from ..io.path import DNSBPath
 from ..io.fs import FileSystem, AppFileSystem
 from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError
+from ..auto import AutomationManager
 
 logger = logging.getLogger(__name__)
 
@@ -29,48 +30,82 @@ class Builder:
         self.output_dir = DNSBPath("output") / self.config.name
         self.predefined_builds = self._load_predefined_builds()
         self.image_cache: Dict[str, Image] = {}
+        self.auto_manager = AutomationManager(fs=fs)
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")
 
     def run(self, need_context: bool = False) -> Optional[BuildContext]:
         """Orchestrates the entire build process step by step."""
-        logger.info(f"Starting build for project '{self.config.name}'...")
+        logger.info(f"[Builder] Starting build for project '{self.config.name}'...")
         self._setup_workspace()
 
-        # Step 1: Initialize context and resolve all defined images from the 'images' block.
+        # Execute setup phase automation
+        logger.debug("[Builder] Executing AutomationManager setup phase...")
+        config_data = self.config.model.model_dump(by_alias=True, exclude_none=True)
+        self.auto_manager.execute_setup_phase(config_data)
+        
+        # Update config with modified data from setup phase
+        self.config.model = self.config.model.model_validate(config_data)
+
+        # Initialize context and resolve all defined images from the 'images' block
         context = self._initialize_context()
 
-        # Step 2: Resolve all service build configurations, handling inheritance and mixins.
+        # Resolve all service build configurations, handling inheritance and mixins
+        logger.debug("[Builder] Invoking Resolver for build configurations...")
         resolved_builds = self._resolve_builds(context)
         context = context.model_copy(update={'resolved_builds': resolved_builds})
-        
-        # Step 3: Resolve all images referenced in services.
-        context = self._resolve_service_images(context)
 
-        # Step 4: Plan network addresses for all services.
+        # Plan network addresses for all services
+        logger.debug("[Builder] Invoking NetworkManager for IP planning...")
         service_ips = self._plan_network(context)
         context = context.model_copy(update={'service_ips': service_ips})
 
-        # Step 5: Substitute variables (like ${name}, ${ip}) in the resolved configurations.
+        # Execute modify phase automation
+        logger.debug("[Builder] Executing AutomationManager modify phase...")
+        config_data = context.config.model.model_dump(by_alias=True, exclude_none=True)
+        config_data['builds'] = context.resolved_builds
+        self.auto_manager.execute_modify_phase(config_data)
+        
+        # Update context with modified resolved builds and config
+        context = context.model_copy(update={'resolved_builds': config_data['builds']})
+        context.config.model = context.config.model.model_validate(config_data)
+        
+        # Resolve all images referenced in services (after modify phase)
+        context = self._resolve_service_images(context)
+
+        # Substitute variables (like ${name}, ${ip}) in the resolved configurations
+        logger.debug("[Builder] Invoking VariableSubstitutor for variable replacement...")
         substituted_builds = self._substitute_variables(context)
         context = context.model_copy(update={'resolved_builds': substituted_builds})
 
-        # Step 6: Map the network topology and generate a graph if requested.
+        # Map the network topology and generate a graph if requested
+        logger.debug("[Builder] Invoking Mapper for topology analysis...")
         self._map_topology(context)
 
-        # Step 7: Generate artifacts (Dockerfiles, configs) for each service.
+        # Generate artifacts (Dockerfiles, configs) for each service
+        logger.debug("[Builder] Invoking ServiceHandler for artifact generation...")
         compose_services = self._generate_services(context)
+        
+        # Execute restrict phase automation
+        logger.debug("[Builder] Executing AutomationManager restrict phase...")
+        config_data = context.config.model.model_dump(by_alias=True, exclude_none=True)
+        config_data['builds'] = context.resolved_builds
+        results = self.auto_manager.execute_restrict_phase(config_data)
+        for res in results:
+            for srv, _res in res.items():
+                if _res != "PASS":
+                    raise BuildError(f"Restrict phase failed for service {srv}")
 
-        # Step 8: Assemble the final docker-compose.yml file and write it to disk.
+        # Assemble the final docker-compose.yml file and write it to disk
         self._assemble_and_write_compose(compose_services, context)
         
-        logger.info(f"Build finished. Files are in '{self.output_dir}'")
+        logger.info(f"[Builder] Build finished. Files are in '{self.output_dir}'")
         if need_context:
             return context
         return None
 
     def _initialize_context(self) -> BuildContext:
         """Creates the initial build context and resolves images defined in the config."""
-        logger.debug("[Builder] Step 1: Initializing context...")
+        logger.debug("[Builder] Initializing context...")
         image_factory = ImageFactory(self.config.images_config, self.fs)
         resolved_images = image_factory.create_all()
         self.image_cache.update(resolved_images) # Cache the explicitly defined images
@@ -86,24 +121,24 @@ class Builder:
 
     def _resolve_builds(self, context: BuildContext) -> Dict:
         """Resolves the flattened configuration for each service."""
-        logger.debug("[Builder] Step 2: Resolving build configurations...")
+        logger.debug("[Resolver] Resolving build configurations...")
         resolver = Resolver(context.config, context.images, self.predefined_builds)
         resolved_builds = resolver.resolve_all()
         resolved_builds = {key : value for key, value in resolved_builds.items() if value.get("build")}
-        logger.debug("[Builder] Build resolution complete.")
+        logger.debug("[Resolver] Build resolution complete.")
         return resolved_builds
 
     def _plan_network(self, context: BuildContext) -> Dict[str, str]:
         """Allocates IP addresses to services."""
-        logger.debug("[Builder] Step 4: Planning network...")
+        logger.debug("[NetworkManager] Planning network addresses...")
         network_manager = NetworkManager(self.config.inet)
         service_ips = network_manager.plan_network(context.resolved_builds)
-        logger.debug("[Builder] Network planning complete.")
+        logger.debug("[NetworkManager] Network planning complete.")
         return service_ips
 
     def _substitute_variables(self, context: BuildContext) -> Dict:
         """Performs variable substitution across all resolved build configs."""
-        logger.debug("[Builder] Step 5: Substituting variables...")
+        logger.debug("[VariableSubstitutor] Substituting variables...")
         substitutor = VariableSubstitutor(
             config=context.config, 
             images=context.images, 
@@ -111,28 +146,28 @@ class Builder:
             resolved_builds=context.resolved_builds
         )
         substituted_builds = substitutor.run(context.resolved_builds)
-        logger.debug("[Builder] Variable substitution complete.")
+        logger.debug("[VariableSubstitutor] Variable substitution complete.")
         return substituted_builds
 
     def _map_topology(self, context: BuildContext):
         """Analyzes service behaviors to map the network topology."""
-        logger.debug("[Builder] Step 6: Mapping topology...")
+        logger.debug("[Mapper] Mapping topology...")
         mapper = Mapper(context.resolved_builds, context.service_ips)
         topology = mapper.map_topology()
         if self.graph_output:
             if GraphGenerator is None:
-                logger.warning("Graphviz library not found, skipping graph generation.")
+                logger.warning("[GraphGenerator] Graphviz library not found, skipping graph generation.")
             else:
                 graph_gen = GraphGenerator(topology, context.service_ips, self.config.name, self.fs)
                 graph_gen.generate_dot_file(self.graph_output)
-        logger.debug("[Builder] Topology mapping complete.")
+        logger.debug("[Mapper] Topology mapping complete.")
 
     def _resolve_service_images(self, context: BuildContext) -> BuildContext:
         """
         Ensures all images referenced by services are resolved and cached.
         This includes images not explicitly defined in the top-level 'images' block.
         """
-        logger.debug("[Builder] Step 3: Resolving service images...")
+        logger.debug("[Builder] Resolving service images...")
         for name, conf in context.resolved_builds.items():
             image_name = conf.get('image')
             if image_name:
@@ -175,28 +210,28 @@ class Builder:
 
     def _generate_services(self, context: BuildContext) -> Dict[str, Dict]:
         """Generates all artifacts for each buildable service."""
-        logger.debug("[Builder] Step 7: Generating services...")
+        logger.debug("[ServiceHandler] Generating services...")
         compose_services = {}
         buildable_services = {
             name: conf for name, conf in context.resolved_builds.items()
             if conf.get('build', True)
         }
-        logger.info(f"Found {len(buildable_services)} buildable services.")
+        logger.info(f"[ServiceHandler] Found {len(buildable_services)} buildable services.")
 
         for name, conf in buildable_services.items():
-            logger.debug(f"Handling buildable service: '{name}'")
+            logger.debug(f"[ServiceHandler] Handling buildable service: '{name}'")
             if 'image' not in conf:
                 raise ImageDefinitionError(f"Buildable service '{name}' is missing the required 'image' key.")
 
             handler = ServiceHandler(name, context)
             compose_services[name] = handler.generate_all()
         
-        logger.debug("[Builder] All services generated.")
+        logger.debug("[ServiceHandler] All services generated.")
         return compose_services
          
     def _assemble_and_write_compose(self, services: Dict, context: BuildContext):
         """Assembles the final docker-compose dictionary and writes it to a YAML file."""
-        logger.debug("[Builder] Step 8: Assembling final docker-compose file...")
+        logger.debug("[Builder] Assembling final docker-compose file...")
         compose_config = {
             "version": "3.9",
             "name": self.config.name,
@@ -210,7 +245,7 @@ class Builder:
             if key not in constants.RESERVED_CONFIG_KEYS
         }
         if extra_config:
-            logger.debug(f"Adding extra top-level configurations to docker-compose: {list(extra_config.keys())}")
+            logger.debug(f"[Builder] Adding extra top-level configurations to docker-compose: {list(extra_config.keys())}")
             compose_config.update(extra_config)
 
         self._write_compose_file(compose_config)
@@ -228,14 +263,14 @@ class Builder:
 
     def _setup_workspace(self):
         if self.fs.exists(self.output_dir): 
-            logger.debug(f"Output directory '{self.output_dir}' exists. Cleaning it up.")
+            logger.debug(f"[Builder] Output directory '{self.output_dir}' exists. Cleaning it up.")
             self.fs.rmtree(self.output_dir)
         self.fs.mkdir(self.output_dir, parents=True)
-        logger.debug(f"Workspace initialized at '{self.output_dir}'.")
+        logger.debug(f"[Builder] Workspace initialized at '{self.output_dir}'.")
     
     def _write_compose_file(self, compose_config: Dict):
         file_path = self.output_dir / constants.DOCKER_COMPOSE_FILENAME
-        logger.debug(f"Writing final docker-compose configuration to '{file_path}'...")
+        logger.debug(f"[Builder] Writing final docker-compose configuration to '{file_path}'...")
         content = yaml.dump(compose_config, default_flow_style=False, sort_keys=False)
         self.fs.write_text(file_path, content)
-        logger.info(f"{constants.DOCKER_COMPOSE_FILENAME} successfully generated at {file_path}")
+        logger.info(f"[Builder] {constants.DOCKER_COMPOSE_FILENAME} successfully generated at {file_path}")

@@ -22,6 +22,7 @@ LOG_ALIAS_MAP = {
     "cbld": "dnsbuilder.builder.cached_builder",
     "cache": "dnsbuilder.cache",
     "rty": "dnsbuilder.registry",
+    "auto": "dnsbuilder.auto",
 }
 
 # Top-level modules within dnsbuilder for auto-prefixing
@@ -38,6 +39,7 @@ KNOWN_TOP_MODULES = {
     "config",
     "cache",
     "registry",
+    "auto",
 }
 
 
@@ -118,6 +120,6 @@ DEFAULT_NETWORK_NAME = "app_net"
 DEFAULT_DEVICE_NAME = "bridge"
 
 # --- Reserved Keys in Build Configs ---
-RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', "mixins", "mounts", "files"}
+RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', "mixins", "mounts", "files", "auto"}
 
-RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include'}
+RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include', 'auto'}

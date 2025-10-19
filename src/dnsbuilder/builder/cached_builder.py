@@ -114,7 +114,7 @@ class CachedBuilder(Builder):
         
         self.memory_project_cache = ProjectCacheView(
             name=self.config.name,
-            proj_config=self.config.model.model_dump(),
+            proj_config=self.config.model.model_dump(by_alias=True, exclude_none=True),
             services={},
             output_dir=str(memory_output_dir)
         )
