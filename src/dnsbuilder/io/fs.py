@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Dict, List, IO
 from datetime import datetime, timezone
 import logging
 import os
@@ -153,6 +153,10 @@ class FileSystem(ABC):
     def stat(self, path: DNSBPath) -> os.stat_result:
         """Get file status"""
         return NotImplemented
+
+    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
+        """Open a file"""
+        return NotImplemented
     
 
 # --------------------------------------------------------
@@ -181,7 +185,7 @@ class AppFileSystem(FileSystem):
         # register default file system handlers
         self._handlers: Dict[str, FileSystem] = {}
         self.register_handler("file", DiskFileSystem())
-        self.register_handler("temp", MemoryFileSystem())
+        self.register_handler("temp", HyperMemoryFileSystem())
         self.register_handler("resource", ResourceFileSystem())
         self.register_handler("git", GitFileSystem(DiskFileSystem()))
         
@@ -336,6 +340,12 @@ class AppFileSystem(FileSystem):
 
     @override
     @wrap_io_error
+    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
+        """Open a file"""
+        return AppFileSystem._delegator("open")(self, path, mode, **kwargs)
+
+    @override
+    @wrap_io_error
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         src_handler = self._get_handler(src)
         dst_handler = self._get_handler(dst)
@@ -469,6 +479,18 @@ class GenericFileSystem(FileSystem, ABC):
     @override
     def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
         return [DNSBPath(p) for p in self.fs.glob(self.path2str(path / f"**/{pattern}"))]
+
+    @override
+    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
+        """Open a file"""
+        logger.debug(f"[{self.name}] Opening: {path} with mode '{mode}'")
+
+        if "w" in mode or "a" in mode:
+            parent_path_str = self.path2str(path.parent)
+            if parent_path_str and parent_path_str != "/":
+                self.fs.mkdirs(parent_path_str, exist_ok=True)
+
+        return self.fs.open(self.path2str(path), mode=mode, **kwargs)
 
 class FsspecFileSystem(GenericFileSystem):
     """fsspec-based File System"""
@@ -607,6 +629,11 @@ class DiskFileSystem(FsspecFileSystem):
     def stat(self, path: DNSBPath) -> os.stat_result:
         """Get file status"""
         return Path(str(path)).stat()
+
+    @override
+    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
+        """Open a file"""
+        return open(str(path), mode, **kwargs)
 
 # --------------------
 #
@@ -754,6 +781,14 @@ class ResourceFileSystem(FileSystem):
             mtime,          # st_mtime (modification time)
             mtime           # st_ctime (creation time)
         ))
+
+    @override
+    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
+        """Open a file - not supported for read-only"""
+        if 'w' in mode or 'a' in mode or '+' in mode:
+            self._raise_read_only(path)
+        logger.debug(f"[ResourceFS] Opening resource: {path} with mode '{mode}'")        
+        return self._get_resource_traversable(path).open(mode, **kwargs)
 
     def copy2fs(self, src: DNSBPath, dst: DNSBPath, fs: FileSystem):
         src_trav = self._get_resource_traversable(src)
@@ -1010,6 +1045,15 @@ class GitFileSystem(FileSystem):
         except Exception as e:
             logger.error(f"[{self.name}] Error in stat for '{path}': {e}")
             raise
+
+    @override
+    def open(self, path: DNSBPath, mode: str = "rb") -> IO:
+        """Open a file - not supported for read-only git filesystem"""
+        if 'w' in mode or 'a' in mode or '+' in mode:
+            self._raise_read_only(path)
+        # For read modes, delegate to cache filesystem
+        full_path = self._get_synced_repo_path(path)
+        return self.cache_fs.open(full_path, mode)
 
     def copy2fs(self, src: DNSBPath, dst: DNSBPath, fs: FileSystem):
         try:
