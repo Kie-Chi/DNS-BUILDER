@@ -54,20 +54,20 @@ class Builder:
         resolved_builds = self._resolve_builds(context)
         context = context.model_copy(update={'resolved_builds': resolved_builds})
 
-        # Plan network addresses for all services
-        logger.debug("[Builder] Invoking NetworkManager for IP planning...")
-        service_ips = self._plan_network(context)
-        context = context.model_copy(update={'service_ips': service_ips})
-
         # Execute modify phase automation
         logger.debug("[Builder] Executing AutomationManager modify phase...")
         config_data = context.config.model.model_dump(by_alias=True, exclude_none=True)
         config_data['builds'] = context.resolved_builds
         self.auto_manager.execute_modify_phase(config_data)
-        
+
         # Update context with modified resolved builds and config
         context = context.model_copy(update={'resolved_builds': config_data['builds']})
         context.config.model = context.config.model.model_validate(config_data)
+
+        # Plan network addresses for all services
+        logger.debug("[Builder] Invoking NetworkManager for IP planning...")
+        service_ips = self._plan_network(context)
+        context = context.model_copy(update={"service_ips": service_ips})
         
         # Resolve all images referenced in services (after modify phase)
         context = self._resolve_service_images(context)

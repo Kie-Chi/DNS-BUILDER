@@ -119,6 +119,7 @@ class ScriptExecutor:
         
         Args:
             scripts: List of script definitions with 'content', 'type', 'config', and optional 'service_name'
+                    is_list: Whether the content is a list of scripts to execute serially
             
         Returns:
             None (scripts modify config in-place)
@@ -129,12 +130,26 @@ class ScriptExecutor:
         # For single script, execute directly
         if len(scripts) == 1:
             script = scripts[0]
-            script['config'] = self.execute_script(
-                script['content'], 
-                script['type'], 
-                script['config'],  # Config is modified in-place
-                script.get('service_name')
-            )
+            if script.get('is_list', False):
+                config = script['config']
+                for i, script_content in enumerate(script['content']):
+                    logger.debug(f"[Auto@{self.max_workers}] Executing script {i+1}/{len(script['content'])} for service {script.get('service_name', 'global')}")
+                    config = self.execute_script(
+                        script_content,
+                        script['type'][i],
+                        config,
+                        script.get('service_name')
+                    )
+                script['config'] = config
+            else:
+                # Single script, execute directly
+                logger.debug(f"[Auto@{self.max_workers}] Executing single script for service {script.get('service_name', 'global')}")
+                script['config'] = self.execute_script(
+                    script['content'], 
+                    script['type'], 
+                    script['config'],  # Config is modified in-place
+                    script.get('service_name')
+                )
             logger.debug(f"[Auto@{self.max_workers}] Script config after execution: {script['config']}")
             return script['config']
         
@@ -206,6 +221,7 @@ class ScriptExecutor:
         
         Args:
             script: Script dictionary with 'content', 'type', 'config', and optional 'service_name'
+                   is_list: Whether the content is a list of scripts to execute serially
             executor: ScriptExecutor instance to use (if None, creates a new one)
             
         Returns:
@@ -214,12 +230,27 @@ class ScriptExecutor:
         """
         if executor is None:
             executor = ScriptExecutor()
-        return executor.execute_script(
-            script['content'], 
-            script['type'], 
-            script['config'], 
-            script.get('service_name')
-        )
+        
+        if script.get('is_list', False):
+            # Execute list of scripts serially within this service
+            config = script['config']
+            for i, script_content in enumerate(script['content']):
+                logger.debug(f"[Auto@{executor.max_workers}] Executing script {i+1}/{len(script['content'])} for service {script.get('service_name', 'global')}")
+                config = executor.execute_script(
+                    script_content,
+                    script['type'][i],
+                    config,
+                    script.get('service_name')
+                )
+            return config
+        else:
+            # Single script
+            return executor.execute_script(
+                script['content'], 
+                script['type'], 
+                script['config'], 
+                script.get('service_name')
+            )
     
     # Alias
     _execute_script_worker = _exec

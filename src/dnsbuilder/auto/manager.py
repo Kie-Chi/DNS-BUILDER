@@ -42,18 +42,25 @@ class AutomationManager:
         global_setup = auto_config.pop('setup', None)
         current_config = config
         if global_setup:
-            if not isinstance(global_setup, str):
-                raise UnsupportedFeatureError("Global setup must be a single string")
-            logger.info(f"[Auto@{self.max_workers}] Executing global setup script")
-            current_config = self.executor.execute_script(
-                global_setup,
-                'python',
-                current_config
-            )
+            if isinstance(global_setup, str):
+                # Single script
+                logger.info(f"[Auto@{self.max_workers}] Executing global setup script: {global_setup[:20]}...")
+                current_config = self.executor.execute_script(
+                    global_setup,
+                    'python',
+                    current_config
+                )
+            else:
+                logger.info(f"[Auto@{self.max_workers}] Executing {len(global_setup)} global setup scripts serially")
+                for i, script in enumerate(self._normalize_scripts(global_setup)):
+                    current_config = self.executor.execute_script(
+                        script.get('content', ""),
+                        script.get('type', 'python'),
+                        current_config
+                    )
         else:
             logger.debug(f"[Auto@{self.max_workers}] No global setup script found")
         
-        # Execute service-level setup scripts in parallel
         service_scripts = []
         builds = current_config.get('builds', {})
         
@@ -62,13 +69,21 @@ class AutomationManager:
             service_setup = service_auto.pop('setup', None)
             
             if service_setup:
-                if not isinstance(service_setup, str):
-                    raise UnsupportedFeatureError(f"Service '{service_name}' setup must be a single string")
-                service_scripts.append({
-                    'content': service_setup,
-                    'type': 'python',
-                    'service_name': service_name
-                })
+                if isinstance(service_setup, str):
+                    # Single script
+                    service_scripts.append({
+                        'content': service_setup,
+                        'type': 'python',
+                        'service_name': service_name
+                    })
+                else:
+                    normal_scripts = self._normalize_scripts(service_setup)
+                    service_scripts.append({
+                        'content': [script.get('content', "") for script in normal_scripts], 
+                        'type': [script.get('type', 'python') for script in normal_scripts],
+                        'service_name': service_name,
+                        'is_list': True
+                    })
             else:
                 logger.debug(f"[Auto@{self.max_workers}] No setup script found for service: {service_name}")
         
@@ -83,7 +98,8 @@ class AutomationManager:
                     'content': script['content'],
                     'type': script['type'],
                     'config': service_config, 
-                    'service_name': script['service_name']
+                    'service_name': script['service_name'],
+                    'is_list': script.get('is_list', False)
                 })
             
             self.executor.parallel(scripts_for_executor)
@@ -111,18 +127,26 @@ class AutomationManager:
         global_modify = auto_config.pop('modify', None)
         current_config = config
         if global_modify:
-            if not isinstance(global_modify, str):
-                raise UnsupportedFeatureError("Global modify must be a single string")
-            logger.info(f"[Auto@{self.max_workers}] Executing global modify script")
-            current_config = self.executor.execute_script(
-                global_modify,
-                'python',
-                current_config
-            )
+            if isinstance(global_modify, str):
+                # Single script
+                logger.info(f"[Auto@{self.max_workers}] Executing global modify script: {global_modify[:20]}...")
+                current_config = self.executor.execute_script(
+                    global_modify,
+                    'python',
+                    current_config
+                )
+            else:
+                # List of scripts - execute serially
+                logger.info(f"[Auto@{self.max_workers}] Executing {len(global_modify)} global modify scripts serially")
+                for i, script in enumerate(self._normalize_scripts(global_modify)):
+                    current_config = self.executor.execute_script(
+                        script.get('content', ""),
+                        script.get('type', 'python'),
+                        current_config
+                    )
         else:
             logger.debug(f"[Auto@{self.max_workers}] No global modify script found")
         
-        # Execute service-level modify scripts in parallel
         service_scripts = []
         builds = current_config.get('builds', {})
         
@@ -131,13 +155,21 @@ class AutomationManager:
             service_modify = service_auto.pop('modify', None)
             
             if service_modify:
-                if not isinstance(service_modify, str):
-                    raise UnsupportedFeatureError(f"Service '{service_name}' modify must be a single string")
-                service_scripts.append({
-                    'content': service_modify,
-                    'type': 'python',
-                    'service_name': service_name
-                })
+                if isinstance(service_modify, str):
+                    # Single script
+                    service_scripts.append({
+                        'content': service_modify,
+                        'type': 'python',
+                        'service_name': service_name
+                    })
+                else:
+                    normal_scripts = self._normalize_scripts(service_modify)
+                    service_scripts.append({
+                        'content': [script.get('content', "") for script in normal_scripts], 
+                        'type': [script.get('type', 'python') for script in normal_scripts],
+                        'service_name': service_name,
+                        'is_list': True
+                    })
             else:
                 logger.debug(f"[Auto@{self.max_workers}] No modify script found for service: {service_name}")
         
@@ -152,7 +184,8 @@ class AutomationManager:
                     'content': script['content'],
                     'type': script['type'],
                     'config': service_config, 
-                    'service_name': script['service_name']
+                    'service_name': script['service_name'],
+                    'is_list': script.get('is_list', False)
                 })
             
             service_results = self.executor.parallel(scripts_for_executor)

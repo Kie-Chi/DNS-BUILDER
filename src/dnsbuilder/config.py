@@ -25,12 +25,12 @@ class AutomationModel(BaseModel):
     Class Config-Validation Model for automation scripts.
     
     Supports setup, modify, and restrict phases with Python or Bash scripts.
-    - setup: Single string script only
-    - modify: Single string script only  
-    - restrict: String or list of strings/dicts
+    - setup: String or list of strings/dicts (executed serially within service)
+    - modify: String or list of strings/dicts (executed serially within service)
+    - restrict: String or list of strings/dicts (executed in parallel)
     """
-    setup: Optional[str] = None
-    modify: Optional[str] = None
+    setup: Union[str, List[Union[str, Dict[str, Any]]]] = Field(default_factory=list)
+    modify: Union[str, List[Union[str, Dict[str, Any]]]] = Field(default_factory=list)
     restrict: Union[str, List[Union[str, Dict[str, Any]]]] = Field(default_factory=list)
     model_config = ConfigDict(extra="allow")
 
