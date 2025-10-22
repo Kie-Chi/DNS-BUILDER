@@ -8,7 +8,7 @@
                 "/usr/local/etc/named.conf"
             ],
             "volumes": [
-                "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf",
+                "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf:rw",
                 "resource:/images/controls/bind:/usr/local/var/bind:rw"
             ]
         },
@@ -20,7 +20,7 @@
                 "/usr/local/etc/named.conf"
             ],
             "volumes": [
-                "resource:/configs/bind_auth_base.conf:/usr/local/etc/named.conf"
+                "resource:/configs/bind_auth_base.conf:/usr/local/etc/named.conf:rw"
             ]
         },
         "forwarder": {
