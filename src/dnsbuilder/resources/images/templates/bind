@@ -57,7 +57,7 @@ EXPOSE 953/udp
 WORKDIR /usr/local/var/bind
 
 # Set default user
-# USER named
+USER named
 
 # Define default command
 # CMD ["/usr/local/sbin/named", "-g", "-c", "/usr/local/etc/named.conf"]
