@@ -188,8 +188,8 @@ class AutomationManager:
                     'is_list': script.get('is_list', False)
                 })
             
-            service_results = self.executor.parallel(scripts_for_executor)
-            current_config["builds"] = service_results
+            self.executor.parallel(scripts_for_executor)
+            current_config["builds"] = builds
 
         logger.info(f"[Auto@{self.max_workers}] Modify phase completed")
     

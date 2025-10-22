@@ -151,7 +151,7 @@ class ScriptExecutor:
                     script.get('service_name')
                 )
             logger.debug(f"[Auto@{self.max_workers}] Script config after execution: {script['config']}")
-            return script['config']
+            return {script.get('service_name', 'global'): script['config']}
         
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_script = {}
