@@ -914,6 +914,7 @@ class GitFileSystem(FileSystem):
         if cache_key in self._synced_repos:
             logger.debug(f"[{self.name}] '{cache_key}' already synced in this run. Using local cache.")
         else:
+            
             logger.debug(f"[{self.name}] Syncing repository for '{cache_key}'...")
             local_repo_str = str(local_repo_path)
     
@@ -936,9 +937,24 @@ class GitFileSystem(FileSystem):
             logger.debug(f"[{self.name}] Checking out ref '{ref}' for '{repo_url}'...")
             try:
                 repo.git.checkout(ref)
-                # If the ref is a branch (not a tag or commit hash), pull the latest changes.
-                if ref in repo.heads:
-                    logger.debug(f"[{self.name}] Pulling latest changes for branch '{ref}'...")
+                should_pull = False
+                current_branch = None
+                if ref == 'HEAD':
+                    try:
+                        current_branch = repo.active_branch.name
+                        should_pull = True
+                        logger.debug(f"[{self.name}] HEAD points to branch '{current_branch}'")
+                    except TypeError:
+                        logger.debug(f"[{self.name}] HEAD is detached, no pull needed")
+                        should_pull = False
+                elif ref in repo.heads:
+                    current_branch = ref
+                    should_pull = True
+                else:
+                    logger.debug(f"[{self.name}] Ref '{ref}' is a tag or commit hash, no pull needed")
+                    should_pull = False
+                if should_pull and current_branch:
+                    logger.debug(f"[{self.name}] Pulling latest changes for branch '{current_branch}'...")
                     repo.remotes.origin.pull()
     
             except git.exc.GitCommandError as e:
