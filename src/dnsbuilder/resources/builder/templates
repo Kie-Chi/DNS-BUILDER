@@ -1,48 +1,36 @@
 {
     "bind": {
         "recursor": {
-            "command": [
-                "named",
-                "-g",
-                "-c",
-                "/usr/local/etc/named.conf"
-            ],
+            "user": "root",
+            "command": "named -g -c /usr/local/etc/named.conf",
             "volumes": [
-                "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf",
+                "resource:/configs/bind_recursor_base.conf:/usr/local/etc/named.conf:rw",
                 "resource:/images/controls/bind:/usr/local/var/bind:rw"
             ]
         },
         "auth": {
-            "command": [
-                "named",
-                "-g",
-                "-c",
-                "/usr/local/etc/named.conf"
-            ],
+            "command": "named -g -c /usr/local/etc/named.conf",
             "volumes": [
-                "resource:/configs/bind_auth_base.conf:/usr/local/etc/named.conf"
+                "resource:/configs/bind_auth_base.conf:/usr/local/etc/named.conf:rw"
             ]
         },
         "forwarder": {
-            "command": [
-                "named",
-                "-g",
-                "-c",
-                "/usr/local/etc/named.conf"
-            ],
+            "command": "named -g -c /usr/local/etc/named.conf",
             "volumes": [
-                "resource:/configs/bind_forwarder_base.conf:/usr/local/etc/named.conf"
+                "resource:/configs/bind_forwarder_base.conf:/usr/local/etc/named.conf:rw"
             ]
         }
     },
     "unbound": {
         "recursor": {
+            "command": "unbound -d",
             "volumes": [
                 "resource:/configs/unbound_recursor_base.conf:/usr/local/etc/unbound/unbound.conf",
                 "resource:/images/controls/unbound:/usr/local/var/unbound:rw"
             ]
         },
         "forwarder": {
+            "command": "unbound -d",
             "volumes": [    
                 "resource:/configs/unbound_forwarder_base.conf:/usr/local/etc/unbound/unbound.conf"
             ]
