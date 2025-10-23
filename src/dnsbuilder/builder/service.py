@@ -368,7 +368,7 @@ class ServiceHandler:
                         logger.debug(f"Identified '{filename}' as the main configuration file.")
                     else:
                         logger.debug(f"Found additional config file '{filename}', will attempt to include it in the main config.")
-                        if self.context.fs.read_text(main_conf_output_path).find(container_path) != -1:
+                        if self.context.fs.read_text(main_conf_output_path).find(str(container_path)) != -1:
                             logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
                         else:
                             self.context.includer_factory.create(container_path, self.image_obj.software).write(main_conf_output_path)
