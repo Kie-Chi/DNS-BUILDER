@@ -4,6 +4,7 @@ import logging
 from .bases.internal import InternalImage
 from .base import Image, Behavior, Includer
 from .io.fs import FileSystem, AppFileSystem
+from .datacls.volume import Pair
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError
 from .registry import behavior_registry, image_registry, includer_registry, initialize_registries
 
@@ -189,7 +190,7 @@ class IncluderFactory:
     def __init__(self, fs: FileSystem = AppFileSystem()):
         self.fs = fs
 
-    def create(self, path: str, software_type: str) -> Includer:
+    def create(self, confs: Dict[str, Pair], software_type: str) -> Includer:
         includer_class = includer_registry.get_includer_class(software_type)
 
         if not includer_class:
@@ -199,4 +200,4 @@ class IncluderFactory:
                 f"Supported software types: {sorted(supported_software)}"
             )
 
-        return includer_class(path, fs=self.fs)
+        return includer_class(confs=confs, fs=self.fs)

@@ -1,8 +1,12 @@
-from typing import List, Dict
+from typing import List, Dict, NamedTuple
 
 from .. import constants
 from ..io.path import DNSBPath, is_path_valid
 from ..exceptions import VolumeError
+
+class Pair(NamedTuple):
+    src: DNSBPath
+    dst: str
 
 """
     Class Volume to resolve volumes like src:dst:mode

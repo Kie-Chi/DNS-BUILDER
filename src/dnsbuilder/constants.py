@@ -53,9 +53,38 @@ DOCKER_COMPOSE_FILENAME = "docker-compose.yml"
 RESOURCE_PREFIX = "resource:"
 STD_BUILD_PREFIX = "std:"
 
-# --- Software Types ---
+# --- Software Configuration ---
 SOFTWARE_BIND = "bind"
 SOFTWARE_UNBOUND = "unbound"
+
+# DNS Software Top-level Block Definitions
+DNS_SOFTWARE_BLOCKS = {
+    "bind": {
+        "global",
+        "acl",          # Access Control Lists
+        "controls",     # Control channel configuration
+        "options",      # Global options
+        "logging",      # Logging configuration
+        "zone",         # Zone definitions
+        "view",         # View definitions
+        "key",          # TSIG key definitions
+        "server",       # Server-specific options
+        "trusted-keys", # Trusted keys for DNSSEC
+        "managed-keys", # Managed keys for DNSSEC
+        "statistics-channels", # Statistics channel configuration
+    },
+    "unbound": {
+        "global",
+        "server",           # Main server configuration
+        "remote-control",   # Remote control configuration
+        "stub-zone",        # Stub zone configuration
+        "forward-zone",     # Forward zone configuration
+        "auth-zone",        # Authoritative zone configuration
+        "view",             # View configuration
+        "python",           # Python module configuration
+        "dynlib",           # Dynamic library configuration
+    }
+}
 
 RECOGNIZED_PATTERNS = {
     "bind": [

@@ -10,7 +10,7 @@ from ..bases.internal import InternalImage
 from ..bases.external import SelfDefinedImage
 from ..datacls.contexts import BuildContext
 from ..datacls.artifacts import BehaviorArtifact
-from ..datacls.volume import Volume
+from ..datacls.volume import Pair, Volume
 from ..bases.behaviors import MasterBehavior
 from .zone import ZoneGenerator
 from .. import constants
@@ -192,19 +192,19 @@ class ServiceHandler:
         
         # Process volume mounts
         self.trace.add_stage("process_volumes", "Process volume mount configuration")
-        main_conf_path = self._process_volumes()
-        if main_conf_path:
+        pairs = self._process_volumes()
+        if pairs:
             self.trace.add_decision(
                 "main_config_path", 
                 "Main configuration file path", 
                 "_process_volumes", 
-                str(main_conf_path),
+                str(pairs.get("global", None)),
                 "Obtained main config file path from volume processing"
             )
         
         # Process behavior configuration
         self.trace.add_stage("process_behavior", "Process behavior configuration")
-        self._process_behavior(main_conf_path)
+        self._process_behavior(pairs.get("global", None))
         
         # Assemble compose service block
         self.trace.add_stage("assemble_compose", "Assemble docker-compose service configuration")
@@ -325,8 +325,9 @@ class ServiceHandler:
         self.build_conf.setdefault('volumes', []).append(volume_str)
         logger.debug(f"Generated extra_conf volume: {volume_str}")
 
-    def _process_volumes(self) -> DNSBPath | None:
-        main_conf_output_path: DNSBPath | None = None
+    def _process_volumes(self) -> Dict[str, Pair] | None:
+        pairs = {}
+        _nd_iclds = []
         filtered_volumes = self.__filter_volumes()
         for volume in filtered_volumes:
             logger.debug(f"Processing volume for '{self.service_name}': '{volume}'")
@@ -362,23 +363,33 @@ class ServiceHandler:
                     filename = host_path.__rname__
                     target_path = gen_target_path(filename)
                     self.context.fs.copy(host_path, target_path)
-                if str(container_path).endswith('.conf'):
-                    if not main_conf_output_path:
-                        main_conf_output_path = target_path
-                        logger.debug(f"Identified '{filename}' as the main configuration file.")
-                    else:
-                        logger.debug(f"Found additional config file '{filename}', will attempt to include it in the main config.")
-                        if self.context.fs.read_text(main_conf_output_path).find(str(container_path)) != -1:
-                            logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
+                suffixes = DNSBPath(container_path).suffixes
+                if (len(suffixes) >= 1 and suffixes[-1] == '.conf') or (len(suffixes) >= 2 and suffixes[-2] == '.conf'):
+                    blk = suffixes[-1].strip(".") if (len(suffixes) >= 2 and suffixes[-2] == '.conf') else 'global'
+                    _blks = constants.DNS_SOFTWARE_BLOCKS.get(self.image_obj.software, set())
+                    if blk in _blks:
+                        if not pairs.get(blk, None):
+                            pairs[blk] = Pair(src=target_path, dst=container_path)
+                            logger.debug(f"Identified '{filename}' as the main `{blk}` configuration file.")
                         else:
-                            self.context.includer_factory.create(container_path, self.image_obj.software).write(main_conf_output_path)
-                
+                            if self.context.fs.read_text(pairs[blk].src).find(str(container_path)) != -1:
+                                logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
+                            else:
+                                _nd_iclds.append(Pair(src=target_path, dst=container_path))
+                    else:
+                        logger.warning(f"Configuration file '{filename}' is not in a recognized block for '{self.image_obj.software}', skipping.")
+            
                 final_volume_str = f"./{self.service_name}/contents/{filename}:{container_path}"
                 if volume.mode:
                     final_volume_str += f":{volume.mode}"
                 self.processed_volumes.append(final_volume_str)
                 logger.debug(f"Path copied and added as processed volume: {final_volume_str}")
-        return main_conf_output_path
+        if self.image_obj.software in constants.DNS_SOFTWARE_BLOCKS:
+            includer = self.context.includer_factory.create(pairs, self.image_obj.software)
+            for _icld in _nd_iclds:
+                logger.debug(f"Found additional config file '{_icld.src}', will attempt to include it in the main `{blk}` config.")
+                includer.include(_icld)
+        return pairs
 
     def _generate_artifacts_from_behaviors(
         self,
@@ -449,14 +460,14 @@ class ServiceHandler:
 
         return all_config_lines
 
-    def _process_behavior(self, main_conf_path: DNSBPath | None):
+    def _process_behavior(self, main_conf: Pair | None):
         """Orchestrates the entire behavior processing workflow."""
         if not self.build_conf.get("behavior"):
             logger.debug(f"Service '{self.service_name}' has no behavior to process.")
             return
 
         logger.debug(f"Processing behavior for '{self.service_name}'...")
-        if not main_conf_path:
+        if not main_conf:
             raise BehaviorError(
                 f"Service '{self.service_name}' has 'behavior' but no main .conf file."
             )
@@ -511,11 +522,16 @@ class ServiceHandler:
         )
 
         includer = self.context.includer_factory.create(
-            container_conf_path, self.image_obj.software
+            {"global": main_conf}, self.image_obj.software
         )
-        includer.write(main_conf_path)
+        # Create a Pair for the generated zones config
+        generated_zones_pair = Pair(
+            src=gen_zones_path, 
+            dst=container_conf_path
+        )
+        includer.include(generated_zones_pair)
         logger.debug(
-            f"Appended include directive for '{container_conf_path}' to '{main_conf_path}'."
+            f"Appended include directive for '{container_conf_path}' to '{main_conf.dst}'."
         )
 
     def _format_behavior_config(

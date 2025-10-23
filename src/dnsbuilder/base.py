@@ -4,10 +4,12 @@ from typing import Dict, Any, Optional, List, TYPE_CHECKING
 import logging
 
 from .datacls.artifacts import BehaviorArtifact
+from .datacls.volume import Pair
 if TYPE_CHECKING:
     from .datacls.contexts import BuildContext
 from .io.path import DNSBPath
 from .io.fs import FileSystem, AppFileSystem
+from .exceptions import UnsupportedFeatureError
 
 logger = logging.getLogger(__name__)
 
@@ -98,18 +100,55 @@ class Includer(ABC):
     Abstract Class describe the `include config` line used in software config-file
     """
 
-    def __init__(self, config_line: str, fs: FileSystem = AppFileSystem()):
-        self.config_line = config_line
+    def __init__(self, confs: Dict[str, Pair] = {}, fs: FileSystem = AppFileSystem()):
         self.fs = fs
+        self.confs = confs
+        self.contain()
+
+    @staticmethod
+    def parse_blk(pair: Pair) -> Optional[str]:
+        """
+        parse block name from volume name
+        """
+        name = DNSBPath(pair.dst).name
+        _format = name.split(".")
+        if len(_format) == 2:
+            if _format[-1] == "conf":
+                return "global"
+            else:
+                raise UnsupportedFeatureError(f"unsupported block format: {name}")
+        elif len(_format) > 2:
+            _blk = _format[-1]
+            _val = _format[-2]
+            if _val != "conf":
+                raise UnsupportedFeatureError(f"unsupported block format: {name}")
+            return _blk
+        else:
+            raise UnsupportedFeatureError(f"unsupported block format: {name}")
+
 
     @abstractmethod
-    def write(self, conf: DNSBPath):
+    def include(self, pair: Pair):
         """
         write `include config_line` line into conf
 
         Args:
-            conf (DNSBPath): main configuration file path
+            confs (Dict[str, DNSBPath]): main configuration file paths
+                If dict, keys are block names and values are paths.
+            pair (Pair): volume pair to include
+        Returns:
+            None
+        """
+        pass
 
+    @abstractmethod
+    def contain(self) -> None:
+        """
+        contain block-main config in global-main config
+        
+        Args:
+            confs (Dict[str, DNSBPath]): main configuration file paths
+                If dict, keys are block names and values are paths.
         Returns:
             None
         """
