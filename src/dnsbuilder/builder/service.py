@@ -288,7 +288,7 @@ class ServiceHandler:
         
         logger.debug(f"Generating temporary volumes for '{self.service_name}'...")
         for container_path, content in files.items():            
-            extension = DNSBPath(container_path).suffix
+            extension = "".join(DNSBPath(container_path).suffixes)
             # Generate semantic hash based on service name, container path and content
             content_hash = hashlib.sha256(f"{self.service_name}:{container_path}:{content}".encode()).hexdigest()[:24]
             temp_uri = DNSBPath(f"temp:/{content_hash}{extension}")
