@@ -185,6 +185,10 @@ class ServiceHandler:
         # Process files
         self.trace.add_stage("process_files", "Process service files")
         self._process_files()
+
+        # Process extra_conf
+        self.trace.add_stage("process_extra_conf", "Process extra_conf configuration")
+        self._process_extra_conf()
         
         # Process volume mounts
         self.trace.add_stage("process_volumes", "Process volume mount configuration")
@@ -300,6 +304,26 @@ class ServiceHandler:
             volume_str = f"{str(temp_uri)}:{container_path}"
             self.build_conf.setdefault('volumes', []).append(volume_str)
             logger.debug(f"Generated temporary volume: {volume_str}")
+
+    def _process_extra_conf(self):
+        """Process extra_conf field"""
+        extra_conf = self.build_conf.get('extra_conf')
+        if not extra_conf:
+            return
+        logger.debug(f"Processing extra_conf for '{self.service_name}'...")
+        
+        content_hash = hashlib.sha256(f"{self.service_name}:extra_conf:{extra_conf}".encode()).hexdigest()[:24]
+        temp_uri = DNSBPath(f"temp:/{content_hash}.conf")
+        counter = 0
+        while self.context.fs.exists(temp_uri):
+            counter += 1
+            collision_hash = hashlib.sha256(f"{self.service_name}:extra_conf:{extra_conf}:{counter}".encode()).hexdigest()[:24]
+            temp_uri = DNSBPath(f"temp:/{collision_hash}.conf")
+        self.context.fs.write_text(temp_uri, extra_conf)
+        container_path = f"/usr/local/etc/extra_{self.service_name}.conf"
+        volume_str = f"{str(temp_uri)}:{container_path}"
+        self.build_conf.setdefault('volumes', []).append(volume_str)
+        logger.debug(f"Generated extra_conf volume: {volume_str}")
 
     def _process_volumes(self) -> DNSBPath | None:
         main_conf_output_path: DNSBPath | None = None

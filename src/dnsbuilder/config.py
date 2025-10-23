@@ -75,6 +75,7 @@ class BuildModel(BaseModel):
     mounts: List[str] = Field(default_factory=list)
     cap_add: List[str] = Field(default_factory=list)
     auto: Optional[AutomationModel] = Field(default_factory=AutomationModel)
+    extra_conf: Optional[str] = None
     # other `docker-compose` config, we won't check
     model_config = ConfigDict(extra="allow")
 
