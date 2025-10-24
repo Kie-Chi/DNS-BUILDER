@@ -111,10 +111,10 @@ class Includer(ABC):
         parse block name from volume name
         """
         suffixes = DNSBPath(pair.dst).suffixes
-        if len(suffixes) >= 1 and suffixes[-1] == "conf":
+        if len(suffixes) >= 1 and suffixes[-1] == ".conf":
             return 'global'
 
-        if len(suffixes) >= 2 and suffixes[-2] == "conf":
+        if len(suffixes) >= 2 and suffixes[-2] == ".conf":
             return suffixes[-1].strip(".")
 
         raise UnsupportedFeatureError(f"unsupported block format: {pair.dst}")
