@@ -110,21 +110,14 @@ class Includer(ABC):
         """
         parse block name from volume name
         """
-        name = DNSBPath(pair.dst).name
-        _format = name.split(".")
-        if len(_format) == 2:
-            if _format[-1] == "conf":
-                return "global"
-            else:
-                raise UnsupportedFeatureError(f"unsupported block format: {name}")
-        elif len(_format) > 2:
-            _blk = _format[-1]
-            _val = _format[-2]
-            if _val != "conf":
-                raise UnsupportedFeatureError(f"unsupported block format: {name}")
-            return _blk
-        else:
-            raise UnsupportedFeatureError(f"unsupported block format: {name}")
+        suffixes = DNSBPath(pair.dst).suffixes
+        if len(suffixes) >= 1 and suffixes[-1] == "conf":
+            return 'global'
+
+        if len(suffixes) >= 2 and suffixes[-2] == "conf":
+            return suffixes[-1].strip(".")
+
+        raise UnsupportedFeatureError(f"unsupported block format: {pair.dst}")
 
 
     @abstractmethod
