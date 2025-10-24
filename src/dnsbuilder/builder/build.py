@@ -54,16 +54,6 @@ class Builder:
         resolved_builds = self._resolve_builds(context)
         context = context.model_copy(update={'resolved_builds': resolved_builds})
 
-        # Execute modify phase automation
-        logger.debug("[Builder] Executing AutomationManager modify phase...")
-        config_data = context.config.model.model_dump(by_alias=True, exclude_none=True)
-        config_data['builds'] = context.resolved_builds
-        self.auto_manager.execute_modify_phase(config_data)
-
-        # Update context with modified resolved builds and config
-        context = context.model_copy(update={'resolved_builds': config_data['builds']})
-        context.config.model = context.config.model.model_validate(config_data)
-
         # Plan network addresses for all services
         logger.debug("[Builder] Invoking NetworkManager for IP planning...")
         service_ips = self._plan_network(context)
@@ -80,6 +70,16 @@ class Builder:
         # Map the network topology and generate a graph if requested
         logger.debug("[Builder] Invoking Mapper for topology analysis...")
         self._map_topology(context)
+
+        # Execute modify phase automation
+        logger.debug("[Builder] Executing AutomationManager modify phase...")
+        config_data = context.config.model.model_dump(by_alias=True, exclude_none=True)
+        config_data['builds'] = context.resolved_builds
+        self.auto_manager.execute_modify_phase(config_data)
+
+        # Update context with modified resolved builds and config
+        context = context.model_copy(update={'resolved_builds': config_data['builds']})
+        context.config.model = context.config.model.model_validate(config_data)
 
         # Generate artifacts (Dockerfiles, configs) for each service
         logger.debug("[Builder] Invoking ServiceHandler for artifact generation...")

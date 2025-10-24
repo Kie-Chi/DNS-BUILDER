@@ -80,32 +80,6 @@ class BuildModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode='after')
-    def validate_setup_restrictions(self) -> 'BuildModel':
-        """Validate setup field restrictions in service level"""
-        if self.auto and self.auto.setup:
-            epty_fields = {'mixins', 'files', 'volumes', 'mounts', 'cap_add'}
-            allowed_fields = {"build", "auto"} | epty_fields
-            actual_fields = {
-                k
-                for k, v in self.model_dump(exclude_none=True).items()
-                if v is not None
-            }
-
-            # Check if there are any fields beyond the allowed ones
-            extra_fields = actual_fields - allowed_fields
-            if extra_fields:
-                raise ConfigValidationError(
-                    f"Config-level setup script can only coexist with fields {allowed_fields - {'auto'}}. "
-                    f"Found additional fields: {', '.join(sorted(extra_fields))}"
-                )
-            for field in epty_fields:
-                if not field:
-                    raise ConfigValidationError(
-                        f"Config-level setup script cannot coexist with field no-empty '{field}'. "
-                    )
-        return self
-
-    @model_validator(mode='after')
     def check_image_or_ref_present(self) -> 'BuildModel':
         """Check if Image is present"""
         if self.image is None and self.ref is None and (self.auto is None or not self.auto.setup) and (self.auto is None or not self.auto.modify):
@@ -126,28 +100,6 @@ class ConfigModel(BaseModel):
     include: Optional[Union[str, List[str]]] = None
     auto: Optional[AutomationModel] = Field(default_factory=AutomationModel)
     model_config = ConfigDict(extra="allow")
-
-    @model_validator(mode='after')
-    def validate_setup_restrictions(self) -> 'ConfigModel':
-        """Validate setup field restrictions in config level"""
-        if self.auto and self.auto.setup:
-            epty_fields = {'builds', 'images'}
-            allowed_fields = {'name', 'inet', 'auto'} | epty_fields
-            actual_fields = {k for k, v in self.model_dump(exclude_none=True).items() if v is not None}
-            
-            # Check if there are any fields beyond the allowed ones
-            extra_fields = actual_fields - allowed_fields
-            if extra_fields:
-                raise ConfigValidationError(
-                    f"Config-level setup script can only coexist with fields {allowed_fields - {'auto'}}. "
-                    f"Found additional fields: {', '.join(sorted(extra_fields))}"
-                )
-            for field in epty_fields:
-                if not field:
-                    raise ConfigValidationError(
-                        f"Config-level setup script cannot coexist with field no-empty '{field}'. "
-                    )
-        return self
 
     @model_validator(mode='after')
     def validate_image_keys_constraints(self) -> 'ConfigModel':
