@@ -955,12 +955,29 @@ class GitFileSystem(FileSystem):
                     should_pull = False
                 if should_pull and current_branch:
                     logger.debug(f"[{self.name}] Pulling latest changes for branch '{current_branch}'...")
-                    repo.remotes.origin.pull()
-    
+                    try:
+                        repo.remotes.origin.pull()
+                    except git.exc.GitCommandError as e:
+                        logger.warning(
+                            f"[{self.name}] Failed to pull branch '{current_branch}' for '{repo_url}': {e}. Using cached branch state."
+                        )
+
             except git.exc.GitCommandError as e:
-                raise DNSBPathNotFoundError(
-                    f"Ref '{ref}' not found in repository '{repo_url}': {e}"
-                ) from e
+                logger.warning(
+                    f"[{self.name}] Failed to checkout ref '{ref}' for '{repo_url}': {e}. Falling back to local HEAD."
+                )
+                # Try fallback to current HEAD commit (local cache)
+                try:
+                    head_commit = repo.head.commit.hexsha
+                    repo.git.checkout(head_commit)
+                    logger.debug(f"[{self.name}] Fallback checkout to HEAD commit '{head_commit}' succeeded.")
+                except Exception as e2:
+                    logger.error(
+                        f"[{self.name}] Fallback checkout to local HEAD failed: {e2}"
+                    )
+                    raise DNSBPathNotFoundError(
+                        f"Ref '{ref}' not found and fallback to HEAD failed in repository '{repo_url}': {e}"
+                    ) from e
             
             # Mark this repo+ref as synced for this run
             self._synced_repos.add(cache_key)

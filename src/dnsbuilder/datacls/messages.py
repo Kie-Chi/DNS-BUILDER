@@ -59,6 +59,7 @@ class ImageCreateRequest(BaseModel):
     from_os: Optional[str] = Field(None, alias='from')
     util: List[str] = Field(default_factory=list)
     dependency: List[str] = Field(default_factory=list)
+    mirror: Dict[str, Any] = Field(default_factory=dict)
 
 class ImageUpdateRequest(BaseModel):
     """
@@ -70,6 +71,7 @@ class ImageUpdateRequest(BaseModel):
     from_os: Optional[str] = Field(None, alias='from')
     util: List[str] = Field(default_factory=list)
     dependency: List[str] = Field(default_factory=list)
+    mirror: Dict[str, Any] = Field(default_factory=dict)
 
 class ImageResponse(BaseModel):
     """
@@ -82,6 +84,7 @@ class ImageResponse(BaseModel):
     from_os: Optional[str] = Field(None, alias='from')
     util: List[str] = Field(default_factory=list)
     dependency: List[str] = Field(default_factory=list)
+    mirror: Dict[str, Any] = Field(default_factory=dict)
 
 # 
 class BuildServiceCreateRequest(BaseModel):
@@ -148,6 +151,7 @@ class ImageTemplateResponse(BaseModel):
     from_os: Optional[str] = Field(None, alias='from')
     util: List[str] = Field(default_factory=list)
     dependency: List[str] = Field(default_factory=list)
+    mirror: Dict[str, Any] = Field(default_factory=dict)
 
 class BuildServiceTemplateResponse(BaseModel):
     """

@@ -6,6 +6,10 @@ FROM {base_image}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Optional mirror setup
+{apt_mirror_setup}
+{pip_mirror_setup}
+
 # --- STAGE 1: Install Python Dependencies via Pip ---
 # These packages are specified in the 'util' list with a 'python3-' prefix.
 {pip_packages}

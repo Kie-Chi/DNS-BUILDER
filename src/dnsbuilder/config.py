@@ -45,6 +45,7 @@ class ImageModel(BaseModel):
     from_os: Optional[str] = Field(None, alias='from') # 'from'
     util: List[str] = Field(default_factory=list)
     dependency: List[str] = Field(default_factory=list)
+    mirror: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def check_ref_or_base_image_fields(self) -> 'ImageModel':

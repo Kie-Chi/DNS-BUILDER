@@ -5,6 +5,10 @@ FROM {base_image}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Optional mirror setup
+{apt_mirror_setup}
+{pip_mirror_setup}
+
 # Update sources for archived Debian "Buster"
 RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
     sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
@@ -20,6 +24,7 @@ RUN git clone https://github.com/mandatoryprogrammer/JudasDNS.git /usr/src/judas
 WORKDIR /usr/src/judasdns
 
 # Install app dependencies
+{npm_registry_setup}
 RUN npm install
 
 # Install utils

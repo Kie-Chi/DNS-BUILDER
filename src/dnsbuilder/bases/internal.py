@@ -11,6 +11,7 @@ from ..rules.version import Version
 from ..io.path import DNSBPath
 from ..io.fs import FileSystem, AppFileSystem
 from ..exceptions import ImageDefinitionError
+from ..utils.merge import deep_merge
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,8 @@ class InternalImage(Image, ABC):
         self.version: Optional[str] = config.get("version")
         self.util: List[str] = config.get("util", [])
         self.dependency: List[str] = config.get("dependency", [])
+        # Optional mirror configuration for package managers
+        self.mirror: Dict[str, Any] = config.get("mirror", {})
         self.os, self.os_version = str(config.get("from", ":")).split(":")
 
         self.base_image = f"{self.os}:{self.os_version}"
@@ -178,6 +181,9 @@ class InternalImage(Image, ABC):
         """Provides a dictionary of variables for formatting the Dockerfile template."""
         dep_packages = " ".join(self.dependency)
         util_packages = " ".join(self.util)
+        # Mirror injections (optional)
+        apt_mirror_setup = self._apt_mro()
+        pip_mirror_setup = self._pip_mro()
 
         return {
             "name": self.name,
@@ -185,7 +191,55 @@ class InternalImage(Image, ABC):
             "base_image": self.base_image,
             "dep_packages": dep_packages,
             "util_packages": util_packages or "''",
+            "apt_mirror_setup": apt_mirror_setup,
+            "pip_mirror_setup": pip_mirror_setup,
         }
+
+    def _apt_mro(self) -> str:
+        # Support multiple key aliases for convenience
+        mirror_host = (
+            self.mirror.get("apt_mirror")
+            or self.mirror.get("apt")
+            or self.mirror.get("apt_host")
+        )
+        if not mirror_host:
+            return ""
+        _apt_defined = ["ubuntu", "debian"]
+        base_os = self.os if self.os in _apt_defined else "debian"
+        if base_os == "ubuntu":
+            # Properly escape dots in sed patterns
+            return (
+                f"RUN sed -i 's|archive\\.ubuntu\\.com|{mirror_host}|g' /etc/apt/sources.list && "
+                f"sed -i 's|security\\.ubuntu\\.com|{mirror_host}|g' /etc/apt/sources.list"
+            )
+        if base_os == "debian":
+            return (
+                "RUN set -eux; "
+                "if [ -f /etc/apt/sources.list.d/debian.sources ]; then "
+                f"sed -i 's|deb\\.debian\\.org|{mirror_host}|g' /etc/apt/sources.list.d/debian.sources; "
+                f"sed -i 's|security\\.debian\\.org|{mirror_host}|g' /etc/apt/sources.list.d/debian.sources; "
+                "elif [ -f /etc/apt/sources.list ]; then "
+                f"sed -i 's|deb\\.debian\\.org|{mirror_host}|g' /etc/apt/sources.list; "
+                f"sed -i 's|security\\.debian\\.org|{mirror_host}|g' /etc/apt/sources.list; "
+                "else "
+                "codename=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2 || echo bookworm); "
+                f"echo \"deb http://{mirror_host}/debian ${{codename}} main contrib non-free non-free-firmware\" > /etc/apt/sources.list; "
+                f"echo \"deb http://{mirror_host}/debian ${{codename}}-updates main contrib non-free non-free-firmware\" >> /etc/apt/sources.list; "
+                f"echo \"deb http://{mirror_host}/debian-security ${{codename}}-security main contrib non-free non-free-firmware\" >> /etc/apt/sources.list; "
+                "fi"
+            )
+        return ""
+
+    def _pip_mro(self) -> str:
+        index_url = (
+            self.mirror.get("pip_index_url")
+            or self.mirror.get("pip_index")
+            or self.mirror.get("pip")
+        )
+        if not index_url:
+            return ""
+        # Use pip config to persist across pip calls
+        return f"RUN pip config set global.index-url {index_url} || true"
 
     def write(self, directory: DNSBPath):
         if not self.software or not self.version:
@@ -214,10 +268,14 @@ class InternalImage(Image, ABC):
             "version": self.version,
             "dependency": copy.deepcopy(self.dependency),
             "util": copy.deepcopy(self.util),
+            "mirror": copy.deepcopy(self.mirror)
         }
         merged.update(parent_values)
         merged["software"] = child_config.get("software", merged["software"])
         merged["version"] = child_config.get("version", merged["version"])
+        parent_mirror = merged.get("mirror") or {}
+        child_mirror = child_config.get("mirror") or {}
+        merged["mirror"] = deep_merge(parent_mirror, child_mirror)
 
         child_deps = set(child_config.get("dependency", []))
         child_utils = set(child_config.get("util", []))
@@ -323,6 +381,19 @@ class JudasImage(InternalImage):
         Handle JudasDNS's specific dependency logic after base setup.
         """
         self.os = "node"
+
+    @override
+    def _get_template_vars(self) -> Dict[str, Any]:
+        base_vars = super()._get_template_vars()
+        npm_registry = (
+            self.mirror.get("npm_registry")
+            or self.mirror.get("npm")
+            or self.mirror.get("registry")
+        )
+        base_vars["npm_registry_setup"] = (
+            f"RUN npm config set registry {npm_registry}" if npm_registry else ""
+        )
+        return base_vars
 
 # -------------------------
 #
