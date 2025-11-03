@@ -102,7 +102,14 @@ class AutomationManager:
                     'is_list': script.get('is_list', False)
                 })
             
-            self.executor.parallel(scripts_for_executor)
+            results = self.executor.parallel(scripts_for_executor)
+            # Apply returned configs back to builds to ensure parallel changes persist
+            if isinstance(results, dict):
+                for svc_name, new_conf in results.items():
+                    try:
+                        builds[svc_name] = new_conf
+                    except Exception as e:
+                        logger.error(f"[Auto@{self.max_workers}] Failed to apply setup result for service '{svc_name}': {e}")
             current_config["builds"] = builds
 
         logger.info(f"[Auto@{self.max_workers}] Setup phase completed")
@@ -188,7 +195,14 @@ class AutomationManager:
                     'is_list': script.get('is_list', False)
                 })
             
-            self.executor.parallel(scripts_for_executor)
+            results = self.executor.parallel(scripts_for_executor)
+            # Apply returned configs back to builds to ensure parallel changes persist
+            if isinstance(results, dict):
+                for svc_name, new_conf in results.items():
+                    try:
+                        builds[svc_name] = new_conf
+                    except Exception as e:
+                        logger.error(f"[Auto@{self.max_workers}] Failed to apply modify result for service '{svc_name}': {e}")
             current_config["builds"] = builds
 
         logger.info(f"[Auto@{self.max_workers}] Modify phase completed")
