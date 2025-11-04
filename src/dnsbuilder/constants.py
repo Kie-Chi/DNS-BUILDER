@@ -6,6 +6,8 @@ from dnslib import A, CNAME, AAAA, TXT, NS
 LOG_ALIAS_MAP = {
     "sub": "dnsbuilder.builder.substitute",
     "resolve": "dnsbuilder.builder.resolve",
+    "rlv": "dnsbuilder.builder.resolve",
+    "rsv": "dnsbuilder.builder.resolve",
     "res": "dnsbuilder.builder.resolve",
     "build": "dnsbuilder.builder.build",
     "bld": "dnsbuilder.builder.build",
@@ -21,6 +23,7 @@ LOG_ALIAS_MAP = {
     "pre": "dnsbuilder.preprocess",
     "cbld": "dnsbuilder.builder.cached_builder",
     "cache": "dnsbuilder.cache",
+    "cc": "dnsbuilder.cache",
     "rty": "dnsbuilder.registry",
     "auto": "dnsbuilder.auto",
 }

@@ -36,7 +36,7 @@ def setup_logger(debug: bool = False, module_levels: dict | None = None):
     if use_colors:
         # Define the format with color codes
         formatter = colorlog.ColoredFormatter(
-            '%(log_color)s[%(levelname).4s]%(reset)s %(message)s',
+            '%(log_color)s[%(levelname).4s]%(reset)s %(cyan)s%(name)s%(reset)s: %(message)s',
             log_colors={
                 'DEBUG': 'cyan',
                 'INFO': 'green',
@@ -49,7 +49,7 @@ def setup_logger(debug: bool = False, module_levels: dict | None = None):
         )
     else:
         # Basic formatter for non-color environments
-        formatter = logging.Formatter('[%(levelname).4s] %(message)s')
+        formatter = logging.Formatter('[%(levelname).4s] %(name)s: %(message)s')
 
     handler.setFormatter(formatter)
     logger.addHandler(handler)
