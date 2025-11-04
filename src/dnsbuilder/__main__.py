@@ -14,8 +14,10 @@ from .exceptions import (
 import traceback
 import uvicorn
 from .api.main import app
+import asyncio
 
-def main():
+
+async def main():
     parser = argparse.ArgumentParser(description="DNS Builder CLI")
     parser.add_argument("config_file", nargs='?', default=None, help="Path to the config.yml file.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
@@ -75,7 +77,7 @@ def main():
             builder = Builder(config, graph_output=args.graph, fs=cli_fs)
             logging.info("Using standard build")
             
-        builder.run()
+        await builder.run()
     except ConfigurationError as e:
         logging.error(f"Configuration error: {e}")
         if args.debug:
@@ -107,6 +109,8 @@ def main():
             traceback.print_exc()
         exit(1)
 
+def _sync():
+    asyncio.run(main())
 
 if __name__ == "__main__":
-    main()
+    _sync()

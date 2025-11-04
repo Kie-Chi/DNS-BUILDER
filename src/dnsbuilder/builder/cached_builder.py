@@ -1,5 +1,6 @@
 import logging
 from typing import Dict, Optional
+import asyncio
 
 from .build import Builder
 from ..cache import CacheManager, ProjectCacheView, ServiceCacheView
@@ -31,7 +32,7 @@ class CachedBuilder(Builder):
         self.project_cache: Optional[ProjectCacheView] = None
         self.memory_project_cache: Optional[ProjectCacheView] = None
         
-    def run(self):
+    async def run(self):
         """run with cache"""
         logger.info(f"Starting cached build for project '{self.config.name}'...")
         
@@ -42,7 +43,7 @@ class CachedBuilder(Builder):
         cache_consistent = self._check_cache_consistency()
         
         # Step 3: build in memory
-        context = self._build_in_memory()
+        context = await self._build_in_memory()
         
         # Step 4: generate memory cache view from build result
         self._generate_memory_cache_view(context)
@@ -98,11 +99,11 @@ class CachedBuilder(Builder):
         else:
             logger.info("No existing cache found")
     
-    def _build_in_memory(self) -> BuildContext:
+    async def _build_in_memory(self) -> BuildContext:
         """build project in memory file system, return BuildContext"""
         logger.info("Building project in memory...")
         memory_builder = Builder(self.config, self.graph_output, self.memory_fs)
-        context = memory_builder.run(need_context=True)
+        context = await memory_builder.run(need_context=True)
         
         logger.info("Memory build completed")
         return context

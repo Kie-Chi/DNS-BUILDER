@@ -2,6 +2,8 @@ import yaml
 import logging
 import json
 from typing import Dict, Optional
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from ..factories import ImageFactory
 from ..base import Image
@@ -33,7 +35,7 @@ class Builder:
         self.auto_manager = AutomationManager(fs=fs)
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")
 
-    def run(self, need_context: bool = False) -> Optional[BuildContext]:
+    async def run(self, need_context: bool = False) -> Optional[BuildContext]:
         """Orchestrates the entire build process step by step."""
         logger.info(f"[Builder] Starting build for project '{self.config.name}'...")
         self._setup_workspace()
@@ -83,7 +85,7 @@ class Builder:
 
         # Generate artifacts (Dockerfiles, configs) for each service
         logger.debug("[Builder] Invoking ServiceHandler for artifact generation...")
-        compose_services = self._generate_services(context)
+        compose_services = await self._generate_services(context)
         
         # Execute restrict phase automation
         logger.debug("[Builder] Executing AutomationManager restrict phase...")
@@ -208,23 +210,33 @@ class Builder:
         self.image_cache[image_name] = image_obj
         return image_obj
 
-    def _generate_services(self, context: BuildContext) -> Dict[str, Dict]:
+    async def _generate_services(self, context: BuildContext) -> Dict[str, Dict]:
         """Generates all artifacts for each buildable service."""
         logger.debug("[ServiceHandler] Generating services...")
-        compose_services = {}
+        
         buildable_services = {
             name: conf for name, conf in context.resolved_builds.items()
             if conf.get('build', True)
         }
         logger.info(f"[ServiceHandler] Found {len(buildable_services)} buildable services.")
 
-        for name, conf in buildable_services.items():
-            logger.debug(f"[ServiceHandler] Handling buildable service: '{name}'")
-            if 'image' not in conf:
-                raise ImageDefinitionError(f"Buildable service '{name}' is missing the required 'image' key.")
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor() as executor:
+            tasks = []
+            for name, conf in buildable_services.items():
+                logger.debug(f"[ServiceHandler] Handling buildable service: '{name}'")
+                if 'image' not in conf:
+                    raise ImageDefinitionError(f"Buildable service '{name}' is missing the required 'image' key.")
 
-            handler = ServiceHandler(name, context)
-            compose_services[name] = handler.generate_all()
+                handler = ServiceHandler(name, context)
+                tasks.append(loop.run_in_executor(executor, handler.generate_all))
+            
+            results = await asyncio.gather(*tasks)
+        
+        compose_services = {
+            name: result 
+            for name, result in zip(buildable_services.keys(), results)
+        }
         
         logger.debug("[ServiceHandler] All services generated.")
         return compose_services
