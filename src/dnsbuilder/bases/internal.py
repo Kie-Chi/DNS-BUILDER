@@ -197,11 +197,14 @@ class InternalImage(Image, ABC):
 
     def _apt_mro(self) -> str:
         # Support multiple key aliases for convenience
-        mirror_host = (
+        mirror_host_origin = (
             self.mirror.get("apt_mirror")
             or self.mirror.get("apt")
             or self.mirror.get("apt_host")
         )
+        url = DNSBPath(mirror_host_origin)
+        mirror_host = url.__path__
+        proto = "http" if url.is_http else "https"
         if not mirror_host:
             return ""
         _apt_defined = ["ubuntu", "debian"]
@@ -223,9 +226,9 @@ class InternalImage(Image, ABC):
                 f"sed -i 's|security\\.debian\\.org|{mirror_host}|g' /etc/apt/sources.list; "
                 "else "
                 "codename=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2 || echo bookworm); "
-                f"echo \"deb http://{mirror_host}/debian ${{codename}} main contrib non-free non-free-firmware\" > /etc/apt/sources.list; "
-                f"echo \"deb http://{mirror_host}/debian ${{codename}}-updates main contrib non-free non-free-firmware\" >> /etc/apt/sources.list; "
-                f"echo \"deb http://{mirror_host}/debian-security ${{codename}}-security main contrib non-free non-free-firmware\" >> /etc/apt/sources.list; "
+                f"echo \"deb {proto}://{mirror_host}/debian ${{codename}} main contrib non-free non-free-firmware\" > /etc/apt/sources.list; "
+                f"echo \"deb {proto}://{mirror_host}/debian ${{codename}}-updates main contrib non-free non-free-firmware\" >> /etc/apt/sources.list; "
+                f"echo \"deb {proto}://{mirror_host}/debian-security ${{codename}}-security main contrib non-free non-free-firmware\" >> /etc/apt/sources.list; "
                 "fi"
             )
         return ""
