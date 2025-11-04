@@ -203,7 +203,7 @@ class InternalImage(Image, ABC):
             or self.mirror.get("apt_host")
         )
         url = DNSBPath(mirror_host_origin)
-        mirror_host = url.__path__
+        mirror_host = url.__path__()
         proto = "http" if url.is_http else "https"
         if not mirror_host:
             return ""
