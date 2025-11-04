@@ -143,6 +143,7 @@ class DNSBPath(PurePosixPath):
         if self.protocol != "file":
             return True
         return not self.is_absolute()
+        
 
     @property
     def need_check(self) -> bool:

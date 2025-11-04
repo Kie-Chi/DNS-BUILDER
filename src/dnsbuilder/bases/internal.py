@@ -202,11 +202,11 @@ class InternalImage(Image, ABC):
             or self.mirror.get("apt")
             or self.mirror.get("apt_host")
         )
-        url = DNSBPath(mirror_host_origin)
-        mirror_host = url.__path__()
-        proto = "http" if url.is_http else "https"
-        if not mirror_host:
+        if not mirror_host_origin:
             return ""
+        url = DNSBPath(mirror_host_origin)
+        mirror_host = url.host
+        proto = "http" if url.is_http() else "https"
         _apt_defined = ["ubuntu", "debian"]
         base_os = self.os if self.os in _apt_defined else "debian"
         if base_os == "ubuntu":
