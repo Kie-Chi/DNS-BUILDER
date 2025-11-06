@@ -3,10 +3,17 @@ from typing import List
 from ..datacls.contexts import BuildContext
 from dnslib import RR, SOA, A, NS, DNSLabel, QTYPE, CLASS
 import logging
-
+import hashlib
 from ..exceptions import NetworkDefinitionError
 
 logger = logging.getLogger(__name__)
+
+DEPTHS = {
+    0 : "root-servers",
+    1 : "tld-servers",
+    2 : "sld-servers",
+    # 3 or more is not supported, we just random
+}
 
 
 class ZoneGenerator:
@@ -37,9 +44,10 @@ class ZoneGenerator:
         serial = int(time.time())
 
         # Create default SOA and NS records
-        used_name = self.zone_name if self.zone_name != "." else ""
-        ns_name = f"ns.{used_name}"
-        soa_name = f"admin.{used_name}"
+        depth = self.zone_name.count(".") if self.zone_name != "." else 0
+        used_name = DEPTHS[depth] if depth in DEPTHS else f"{hashlib.sha256(self.zone_name.encode()).hexdigest()[:16]}-servers"
+        ns_name = f"ns.{used_name}.net."
+        soa_name = f"admin.{used_name}.net."
         
         default_records = [
             RR(
