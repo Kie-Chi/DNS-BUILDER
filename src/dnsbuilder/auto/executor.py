@@ -3,9 +3,9 @@ import os
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
-from ..io.fs import create_app_fs, FileSystem
+from ..io.fs import FileSystem
 from ..io.path import DNSBPath
-
+from ..exceptions import DefinitionError
 logger = logging.getLogger(__name__)
 
 
@@ -24,8 +24,9 @@ class ScriptExecutor:
             max_workers = os.cpu_count() or 1
         self.max_workers = max_workers
         
-        # Always use provided filesystem or create default app filesystem
-        self.fs = fs or create_app_fs()
+        if fs is None:
+            raise DefinitionError("FileSystem must be provided to ScriptExecutor")
+        self.fs = fs
     
     def exec_python(self, script_content: str, config: Dict[str, Any], 
                             service_name: Optional[str] = None) -> Any:

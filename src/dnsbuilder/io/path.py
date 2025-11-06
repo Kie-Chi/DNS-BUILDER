@@ -173,6 +173,20 @@ class DNSBPath(PurePosixPath):
     def __path__(self) -> str:
         return super().__str__()
 
+    def resolve(self, base: "DNSBPath") -> "DNSBPath":
+        """
+        Resolve the path relative to the base path.
+        Args:
+            base: The base path to resolve the path relative to.
+        Returns:
+            The resolved path.
+        """
+        if self.protocol != "file":
+            return self
+        if self.is_absolute():
+            return self
+        return base / self
+
     @property
     def __rname__(self) -> str:
         """

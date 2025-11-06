@@ -26,7 +26,7 @@ IMAGE_DEFAULTS = None
 # -------------------------
 
 class InternalImage(Image, ABC):
-    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = None):
         super().__init__(config, fs)
         self.software: Optional[str] = config.get("software")
         self.version: Optional[str] = config.get("version")
@@ -315,7 +315,7 @@ class BindImage(InternalImage):
     Concrete Image class for BIND
     """
 
-    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = None):
         self.py3_deps = []  # will init in hook
         super().__init__(config, fs=fs)
 
@@ -412,7 +412,7 @@ class PythonImage(InternalImage):
     Concrete Image class for Python
     """
 
-    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = None):
         self.pip_deps = []
         super().__init__(config, fs=fs)
 

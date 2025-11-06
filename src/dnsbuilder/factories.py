@@ -5,7 +5,7 @@ from .bases.internal import InternalImage
 from .base import Image, Behavior, Includer
 from .io.fs import FileSystem, AppFileSystem
 from .datacls.volume import Pair
-from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError
+from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError, DefinitionError
 from .registry import behavior_registry, image_registry, includer_registry, initialize_registries
 
 logger = logging.getLogger(__name__)
@@ -22,10 +22,12 @@ class ImageFactory:
     Uses reflection-based registry for dynamic image discovery.
     """
 
-    def __init__(self, images_config: Dict[str, Dict[str, Any]], global_mirror: Dict[str, Any] = None, fs: FileSystem = AppFileSystem()):
+    def __init__(self, images_config: Dict[str, Dict[str, Any]], global_mirror: Dict[str, Any] = None, fs: FileSystem = None):
         self.configs = {name: ({"name": name} | conf) for name, conf in images_config.items()}
         self.resolved_images: Dict[str, InternalImage] = {}
         self.resolving_stack: Set[str] = set()
+        if fs is None:
+            raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
         self.global_mirror = global_mirror or {}
         
@@ -196,7 +198,9 @@ class IncluderFactory:
     Factory Creates the appropriate Includer object based on software type
     """
 
-    def __init__(self, fs: FileSystem = AppFileSystem()):
+    def __init__(self, fs: FileSystem = None):
+        if fs is None:
+            raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
 
     def create(self, confs: Dict[str, Pair], software_type: str) -> Includer:

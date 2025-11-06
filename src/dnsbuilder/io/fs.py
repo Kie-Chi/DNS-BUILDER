@@ -63,6 +63,15 @@ def wrap_io_error(func):
 class FileSystem(ABC):
     """DNSB File System Abstract Base Class"""
 
+    def __init__(self, chroot: DNSBPath = None):
+        """
+        Initialize filesystem with optional chroot.
+        
+        Args:
+            chroot: Root directory for relative path resolution (optional)
+        """
+        self.chroot = chroot
+
     @abstractmethod
     def read_text(self, path: DNSBPath) -> str:
         """Read text from a file"""
@@ -149,6 +158,10 @@ class FileSystem(ABC):
     def absolute(self, path: DNSBPath) -> DNSBPath:
         """Get the absolute path"""
         return NotImplemented
+    
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        """Get the relative path to another path"""
+        return NotImplemented
 
     def stat(self, path: DNSBPath) -> os.stat_result:
         """Get file status"""
@@ -181,17 +194,19 @@ class AppFileSystem(FileSystem):
         like file, resource, http, s3, etc.
     """
 
-    def __init__(self, enable_fallback: bool = False):
+    def __init__(self, enable_fallback: bool = False, chroot: DNSBPath = None):
+        super().__init__(chroot=chroot)
+        logger.debug(f"[AppFS] Initializing with chroot: {chroot}")
         # register default file system handlers
         self._handlers: Dict[str, FileSystem] = {}
-        self.register_handler("file", DiskFileSystem())
-        self.register_handler("temp", HyperMemoryFileSystem())
-        self.register_handler("resource", ResourceFileSystem())
-        self.register_handler("git", GitFileSystem(DiskFileSystem()))
+        self.register_handler("file", DiskFileSystem(chroot=chroot))
+        self.register_handler("temp", HyperMemoryFileSystem(chroot=chroot))
+        self.register_handler("resource", ResourceFileSystem(chroot=chroot))
+        self.register_handler("git", GitFileSystem(DiskFileSystem(chroot=chroot), chroot=chroot))
         
         # fallback mechanism
         self.enable_fallback = enable_fallback
-        self._fallback_handler = DiskFileSystem() if enable_fallback else None
+        self._fallback_handler = DiskFileSystem(chroot=chroot) if enable_fallback else None
 
         
     def register_handler(self, protocol: str, handler: FileSystem):
@@ -262,6 +277,11 @@ class AppFileSystem(FileSystem):
     @wrap_io_error
     def absolute(self, path: DNSBPath) -> DNSBPath:
         return AppFileSystem._delegator("absolute")(self, path)
+    
+    @override
+    @wrap_io_error
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        return AppFileSystem._delegator("relative_to")(self, path, other)
 
     # Std Methods
     @override
@@ -374,14 +394,16 @@ class AppFileSystem(FileSystem):
 class GenericFileSystem(FileSystem, ABC):
     """Generic File System base class for fsspec and morefs implementations"""
 
-    def __init__(self, fs_instance, name=None):
+    def __init__(self, fs_instance, name=None, chroot: DNSBPath = None):
         """
         Initialize with a filesystem instance
         
         Args:
             fs_instance: The underlying filesystem instance (fsspec or morefs)
             name: Optional name for logging purposes
+            chroot: Root directory for relative path resolution (optional)
         """
+        super().__init__(chroot=chroot)
         self.fs = fs_instance
         self.name = name or f"{type(fs_instance).__name__}"
 
@@ -495,9 +517,9 @@ class GenericFileSystem(FileSystem, ABC):
 class FsspecFileSystem(GenericFileSystem):
     """fsspec-based File System"""
 
-    def __init__(self, protocol="file"):
+    def __init__(self, protocol="file", chroot: DNSBPath = None):
         fs_instance = fsspec.filesystem(protocol)
-        super().__init__(fs_instance, name=f"{protocol}FS")
+        super().__init__(fs_instance, name=f"{protocol}FS", chroot=chroot)
         self.protocol = protocol
 
     @override
@@ -541,12 +563,13 @@ class FsspecFileSystem(GenericFileSystem):
 class MorefsFileSystem(GenericFileSystem):
     """morefs-based File System"""
 
-    def __init__(self, fs_type="dict"):
+    def __init__(self, fs_type="dict", chroot: DNSBPath = None):
         """
         Initialize morefs filesystem
 
         Args:
             fs_type: Type of morefs filesystem ("dict" or "mem")
+            chroot: Root directory for relative path resolution (optional)
         """
         if fs_type == "dict":
             fs_instance = DictFS()
@@ -554,7 +577,7 @@ class MorefsFileSystem(GenericFileSystem):
             fs_instance = MemFS()
         else:
             raise ValueError(f"Unsupported morefs type: {fs_type}")
-        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS")
+        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS", chroot=chroot)
         self.fs_type = fs_type
 
     @override
@@ -618,22 +641,57 @@ class MorefsFileSystem(GenericFileSystem):
 class DiskFileSystem(FsspecFileSystem):
     """Local disk file system using fsspec"""
 
-    def __init__(self):
-        super().__init__(protocol="file")
+    def __init__(self, chroot: DNSBPath = None):
+        super().__init__(protocol="file", chroot=chroot)
+        if not self.chroot:
+            self.chroot = DNSBPath(Path.cwd())
+            logger.debug(f"[DiskFS] No chroot provided, using cwd: {self.chroot}")
+        elif not DNSBPath(str(self.chroot)).is_absolute():
+            self.chroot = DNSBPath(Path(str(self.chroot)).absolute())
+            logger.debug(f"[DiskFS] Relative chroot converted to absolute: {self.chroot}")
+        else:
+            logger.debug(f"[DiskFS] Initialized with absolute chroot: {self.chroot}")
+
+    @override
+    def path2str(self, path: DNSBPath) -> str:
+        return str(self.absolute(path))
 
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
-        return DNSBPath(Path(path).absolute())
+        if path.protocol != "file":
+            return path
+        if path.is_absolute():
+            return path
+        
+        resolved = self.chroot / path
+        return DNSBPath(Path(str(resolved)).absolute())
+
+    @override
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        if path.protocol != "file" or other.protocol != "file":
+            raise UnsupportedFeatureError(
+                f"relative_to only supports file protocol, got path={path.protocol}, other={other.protocol}"
+            )
+        abs_path = self.absolute(path)
+        abs_other = self.absolute(other)
+        
+        try:
+            result = Path(str(abs_path)).relative_to(Path(str(abs_other)))
+            return DNSBPath(result)
+        except ValueError as e:
+            raise InvalidPathError(
+                f"'{path}' is not relative to '{other}'"
+            ) from e
 
     @override
     def stat(self, path: DNSBPath) -> os.stat_result:
         """Get file status"""
-        return Path(str(path)).stat()
+        return Path(self.path2str(path)).stat()
 
     @override
     def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
         """Open a file"""
-        return open(str(path), mode, **kwargs)
+        return open(self.path2str(path), mode, **kwargs)
 
 # --------------------
 #
@@ -644,7 +702,7 @@ class DiskFileSystem(FsspecFileSystem):
 class NetworkFileSystem(FsspecFileSystem):
     """Network file system using fsspec"""
 
-    def __init__(self, protocol):
+    def __init__(self, protocol, chroot: DNSBPath = None):
         super().__init__(protocol=protocol)
 
 
@@ -668,6 +726,9 @@ class NetworkFileSystem(FsspecFileSystem):
 
 class ResourceFileSystem(FileSystem):
     """Resource Protocol FileSystem, ReadOnly"""
+
+    def __init__(self, chroot: DNSBPath = None):
+        super().__init__(chroot=chroot)
 
     def _get_resource_traversable(self, path: DNSBPath) -> resources.abc.Traversable:
         """ get Traversable object for resource"""
@@ -715,6 +776,26 @@ class ResourceFileSystem(FileSystem):
             return self._get_resource_traversable(path).is_file()
         except (ModuleNotFoundError, FileNotFoundError):
             return False
+    
+    @override
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        if path.protocol != "resource" or other.protocol != "resource":
+            raise UnsupportedFeatureError(
+                f"relative_to only supports same protocol, got path={path.protocol}, other={other.protocol}"
+            )
+        
+        from pathlib import PurePosixPath
+        try:
+            result = PurePosixPath(path.__path__()).relative_to(PurePosixPath(other.__path__()))
+            return DNSBPath(
+                str(result),
+                protocol="resource",
+                host="",
+                query="",
+                fragment=""
+            )
+        except ValueError as e:
+            raise InvalidPathError(f"'{path}' is not relative to '{other}'") from e
 
     def _raise_read_only(self, path: DNSBPath):
         raise ReadOnlyError(f"Can not write to resource: {path}")
@@ -823,8 +904,8 @@ class MemoryFileSystem(FsspecFileSystem):
     """
     in-memory filesystem using fsspec
     """
-    def __init__(self):
-        super().__init__(protocol="memory")
+    def __init__(self, chroot: DNSBPath = None):
+        super().__init__(protocol="memory", chroot=chroot)
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -834,12 +915,28 @@ class MemoryFileSystem(FsspecFileSystem):
             path_str = '/' + path_str
         return DNSBPath(path_str)
 
+    @override
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        if path.protocol != "file" or other.protocol != "file":
+            raise UnsupportedFeatureError(
+                f"relative_to only supports same protocol, got path={path.protocol}, other={other.protocol}"
+            )
+        
+        abs_path = self.absolute(path)
+        abs_other = self.absolute(other)
+        from pathlib import PurePosixPath
+        try:
+            result = PurePosixPath(str(abs_path)).relative_to(PurePosixPath(str(abs_other)))
+            return DNSBPath(str(result))
+        except ValueError as e:
+            raise InvalidPathError(f"'{path}' is not relative to '{other}'") from e
+
 class HyperMemoryFileSystem(MorefsFileSystem):
     """
     High-performance in-memory filesystem
     """
-    def __init__(self, fs_type="mem"):
-        super().__init__(fs_type=fs_type)
+    def __init__(self, fs_type="mem", chroot: DNSBPath = None):
+        super().__init__(fs_type=fs_type, chroot=chroot)
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -848,6 +945,22 @@ class HyperMemoryFileSystem(MorefsFileSystem):
         if not path_str.startswith('/'):
             path_str = '/' + path_str
         return DNSBPath(path_str)
+    
+    @override
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        if path.protocol != "file" or other.protocol != "file":
+            raise UnsupportedFeatureError(
+                f"relative_to only supports same protocol, got path={path.protocol}, other={other.protocol}"
+            )
+        
+        abs_path = self.absolute(path)
+        abs_other = self.absolute(other)
+        from pathlib import PurePosixPath
+        try:
+            result = PurePosixPath(str(abs_path)).relative_to(PurePosixPath(str(abs_other)))
+            return DNSBPath(str(result))
+        except ValueError as e:
+            raise ValueError(f"'{path}' is not relative to '{other}'") from e
 
 
 # --------------------
@@ -863,20 +976,26 @@ class GitFileSystem(FileSystem):
     and allows reading files from specific branches, tags, or commits.
     """
 
-    def __init__(self, cache_fs: FileSystem, cache_root: str = ".dnsb_cache"):
+    def __init__(self, cache_fs: FileSystem, cache_root: str = ".dnsb_cache", chroot: DNSBPath = None):
+        super().__init__(chroot=chroot)
         self.cache_fs = cache_fs
         self.cache_root = DNSBPath(cache_root)
         self.name = "GitFS"
         self._synced_repos = set()
+        logger.debug(f"[{self.name}] Initialized with cache_root: {self.cache_root}")
+        logger.debug(f"[{self.name}] cache_fs chroot: {getattr(cache_fs, 'chroot', 'N/A')}")
         self._init_cache()
 
     def _init_cache(self):
         """Ensures the cache root directory exists."""
+        abs_cache_root = self.cache_fs.absolute(self.cache_root)
+        logger.debug(f"[{self.name}] cache_root: {self.cache_root} (absolute: {abs_cache_root})")
+        
         if not self.cache_fs.exists(self.cache_root):
-            logger.debug(
-                f"[{self.name}] Creating cache directory at '{self.cache_root}'"
-            )
+            logger.debug(f"[{self.name}] Creating cache directory at '{abs_cache_root}'")
             self.cache_fs.mkdir(self.cache_root, parents=True, exist_ok=True)
+        else:
+            logger.debug(f"[{self.name}] Cache directory already exists at '{abs_cache_root}'")
 
     def _parse_path(self, path: DNSBPath) -> tuple[str, str, str, DNSBPath]:
         """Parses a git URI into its components."""
@@ -916,15 +1035,17 @@ class GitFileSystem(FileSystem):
         else:
             
             logger.debug(f"[{self.name}] Syncing repository for '{cache_key}'...")
-            local_repo_str = str(local_repo_path)
+            local_repo_abs = self.cache_fs.absolute(local_repo_path)
+            local_repo_str = str(local_repo_abs)
+            logger.debug(f"[{self.name}] Local repo path: {local_repo_path} (absolute: {local_repo_abs})")
     
             if not self.cache_fs.exists(local_repo_path):
-                logger.debug(f"[{self.name}] Cloning '{repo_url}' to '{local_repo_path}'...")
+                logger.debug(f"[{self.name}] Cloning '{repo_url}' to '{local_repo_abs}'...")
                 git.Repo.clone_from(repo_url, local_repo_str)
                 repo = git.Repo(local_repo_str)
             else:
                 logger.debug(
-                    f"[{self.name}] Repository '{repo_url}' found in cache. Fetching updates..."
+                    f"[{self.name}] Repository '{repo_url}' found in cache at '{local_repo_abs}'"
                 )
                 repo = git.Repo(local_repo_str)
                 try:
@@ -984,7 +1105,7 @@ class GitFileSystem(FileSystem):
             logger.debug(f"[{self.name}] Sync complete for '{cache_key}'.")
 
 
-        final_path = local_repo_path / path_in_repo
+        final_path = self.cache_fs.absolute(local_repo_path) / path_in_repo
         if not self.cache_fs.exists(final_path):
             raise DNSBPathNotFoundError(f"Path '{path_in_repo}' not found in repository '{repo_url}' at ref '{ref}'.")
             
@@ -1000,6 +1121,22 @@ class GitFileSystem(FileSystem):
         except Exception as e:
             logger.error(f"[{self.name}] Error checking existence for '{path}': {e}")
             return False
+
+    @override
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        if path.protocol != "git" or other.protocol != "git":
+            raise UnsupportedFeatureError(
+                f"relative_to only supports same protocol, got path={path.protocol}, other={other.protocol}"
+            )
+        
+        if path.host != other.host:
+            raise UnsupportedFeatureError(
+                f"relative_to across different git hosts: {path.host} vs {other.host}"
+            )
+        
+        synced_path = self._get_synced_repo_path(path)
+        synced_other = self._get_synced_repo_path(other)
+        return self.cache_fs.relative_to(synced_path, synced_other)
 
     @override
     def is_dir(self, path: DNSBPath) -> bool:
@@ -1131,11 +1268,24 @@ class GitFileSystem(FileSystem):
 #
 # --------------------
 
-def create_app_fs(use_vfs: bool = False, enable_fallback: bool = False) -> "FileSystem" :
+def create_app_fs(
+    use_vfs: bool = False, 
+    enable_fallback: bool = False,
+    chroot: DNSBPath = None
+) -> "FileSystem":
     """
-    Create an AppFileSystem instance with optional VFS and fallback support.
+    Create an AppFileSystem instance with optional VFS, fallback, and chroot support.
+    
+    Args:
+        use_vfs: Whether to use virtual file system for 'file' protocol
+        enable_fallback: Whether to enable fallback mechanism
+        chroot: Root directory for relative path resolution (only for DiskFS)
+        
+    Returns:
+        Configured AppFileSystem instance
     """
-    app_fs = AppFileSystem(enable_fallback=enable_fallback)
+    app_fs = AppFileSystem(enable_fallback=enable_fallback, chroot=chroot)
     if use_vfs:
-        app_fs.register_handler("file", HyperMemoryFileSystem())
+        # VFS 模式使用内存文件系统，传递 chroot 以保持一致性
+        app_fs.register_handler("file", HyperMemoryFileSystem(chroot=chroot))
     return app_fs

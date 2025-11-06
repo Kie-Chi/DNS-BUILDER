@@ -71,7 +71,7 @@ class BuildService:
         artifacts = []
         for item in self.fs.rglob(output_dir, "**"):
             if self.fs.is_file(item):
-                artifacts.append(str(item.relative_to(self.fs.absolute(output_dir))))
+                artifacts.append(self.fs.relative_to(item, output_dir))
         return artifacts
 
     def get_build_artifact_content(self, build_id: str, file_path: str) -> Optional[str]:

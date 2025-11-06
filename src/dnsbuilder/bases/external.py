@@ -23,7 +23,7 @@ class ExternalImage(Image, ABC):
     Class describing a Docker Image from build-conf
     """
 
-    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = None):
         super().__init__(config, fs)
         self.fs = fs
         self.software: Optional[str] = None

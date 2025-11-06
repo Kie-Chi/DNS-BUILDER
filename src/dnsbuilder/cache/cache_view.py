@@ -205,7 +205,7 @@ class ServiceCacheView(CacheView):
         
         for file_path in fs.rglob(directory, "**/*"):
             if fs.is_file(file_path):
-                rel_path = str(file_path.relative_to(fs.absolute(directory)))
+                rel_path = str(fs.relative_to(file_path, directory))
                 
                 # Check if file should be ignored
                 if self._should_ignore_file(rel_path, ignore_patterns):

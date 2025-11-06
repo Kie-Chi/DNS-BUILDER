@@ -9,7 +9,7 @@ from ..datacls.contexts import BuildContext
 from ..config import Config
 from ..io.path import DNSBPath
 from ..io.fs import FileSystem, AppFileSystem, create_app_fs
-
+from ..exceptions import DefinitionError
 logger = logging.getLogger(__name__)
 
 
@@ -23,12 +23,16 @@ class CachedBuilder(Builder):
     real project directory.
     """
     
-    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = AppFileSystem(), cache_dir: DNSBPath = DNSBPath(".dnsb_cache")):
+    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = None, cache_dir: DNSBPath = DNSBPath(".dnsb_cache")):
+        if fs is None:
+            raise DefinitionError("FileSystem is not provided.")
         # Init parent class with real file system
         super().__init__(config, graph_output, fs)
         self.real_fs = fs
         self.cache_manager = CacheManager(fs, cache_dir)
-        self.memory_fs = create_app_fs(use_vfs=True, enable_fallback=True)
+        
+        self.memory_fs = create_app_fs(use_vfs=True, enable_fallback=True, chroot=fs.chroot)
+        
         self.project_cache: Optional[ProjectCacheView] = None
         self.memory_project_cache: Optional[ProjectCacheView] = None
         

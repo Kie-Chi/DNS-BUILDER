@@ -8,7 +8,7 @@ except ImportError:
 from ..bases.behaviors import _get_rname
 from ..io.path import DNSBPath
 from ..io.fs import FileSystem, AppFileSystem
-
+from ..exceptions import DefinitionError
 logger = logging.getLogger(__name__)
 
 class Mapper:
@@ -118,13 +118,15 @@ class GraphGenerator:
     """
     Generates a Graphviz DOT file from network topology data.
     """
-    def __init__(self, topology_data: Dict[str, List[str]], service_ips: Dict[str, str], project_name: str, fs: FileSystem = AppFileSystem()):
+    def __init__(self, topology_data: Dict[str, List[str]], service_ips: Dict[str, str], project_name: str, fs: FileSystem = None):
         if graphviz is None:
             raise ImportError("The 'graphviz' library is required to generate graphs. Please install it (`pip install graphviz`).")
         
         self.topology = topology_data
         self.service_ips = service_ips
         self.project_name = project_name
+        if fs is None:
+            raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
 
     def generate_dot_file(self, output_path: str):

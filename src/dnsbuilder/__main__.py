@@ -44,6 +44,23 @@ async def main():
         action="store_true",
         help="Enable incremental build using cache to speed up builds by only rebuilding changed services."
     )
+    parser.add_argument(
+        "-w",
+        "--workdir",
+        help=(
+            "Working directory for resolving relative paths. "
+            "Use '@config' to use the config file's directory, "
+            "or specify an absolute/relative path. "
+            "Default: current working directory."
+        ),
+        default=None
+    )
+    parser.add_argument(
+        "--log-file",
+        "-f",
+        help="Path to log file. If specified, logs will be written to this file in addition to stderr.",
+        default=None
+    )
     args = parser.parse_args()
 
     module_levels = None
@@ -56,7 +73,7 @@ async def main():
             name, lvl = pair.split('=', 1)
             module_levels[name.strip()] = lvl.strip().upper()
 
-    setup_logger(debug=args.debug, module_levels=module_levels)
+    setup_logger(debug=args.debug, module_levels=module_levels, log_file=args.log_file)
 
     if args.ui:
         uvicorn.run(app, host="0.0.0.0", port=8000)
@@ -65,9 +82,27 @@ async def main():
     if not args.config_file:
         parser.error("the following arguments are required: config_file")
 
+    from pathlib import Path
+    from .io.path import DNSBPath
+    
+    config_path = Path(args.config_file).resolve()
+    config_file_abs = str(config_path)
+    
+    workdir = None
+    if args.workdir == "@config":
+        workdir = DNSBPath(config_path.parent)
+        logging.info(f"Using config directory as workdir: {workdir}")
+    elif args.workdir:
+        workdir_path = Path(args.workdir).resolve()
+        workdir = DNSBPath(workdir_path)
+        logging.info(f"Using custom workdir: {workdir}")
+    else:
+        workdir = DNSBPath(Path.cwd())
+        logging.debug(f"Using default workdir (cwd): {workdir}")
+
     try:
-        cli_fs = create_app_fs(use_vfs=args.vfs)
-        config = Config(args.config_file, cli_fs)
+        cli_fs = create_app_fs(use_vfs=args.vfs, chroot=workdir)
+        config = Config(config_file_abs, cli_fs)
         
         # Choose builder based on incremental flag
         if args.incremental:

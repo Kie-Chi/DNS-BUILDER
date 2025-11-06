@@ -12,9 +12,14 @@ except ImportError:
 from .. import constants
 
 
-def setup_logger(debug: bool = False, module_levels: dict | None = None):
+def setup_logger(debug: bool = False, module_levels: dict | None = None, log_file: str | None = None):
     """
     Configures the root logger for the application with colored output.
+    
+    Args:
+        debug: Enable debug logging level
+        module_levels: Per-module log levels
+        log_file: Optional path to log file. If provided, logs will be written to this file.
     """
     logger = logging.getLogger()
     level = logging.DEBUG if debug else logging.INFO
@@ -30,12 +35,13 @@ def setup_logger(debug: bool = False, module_levels: dict | None = None):
     # Respect NO_COLOR env var (https://no-color.org/)
     use_colors = sys.stdout.isatty() and colorlog and not os.environ.get("NO_COLOR")
 
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setLevel(logging.NOTSET)
+    # Console handler (stderr)
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(logging.NOTSET)
 
     if use_colors:
         # Define the format with color codes
-        formatter = colorlog.ColoredFormatter(
+        console_formatter = colorlog.ColoredFormatter(
             '%(log_color)s[%(levelname).4s]%(reset)s %(cyan)s%(name)s%(reset)s: %(message)s',
             log_colors={
                 'DEBUG': 'cyan',
@@ -49,10 +55,26 @@ def setup_logger(debug: bool = False, module_levels: dict | None = None):
         )
     else:
         # Basic formatter for non-color environments
-        formatter = logging.Formatter('[%(levelname).4s] %(name)s: %(message)s')
+        console_formatter = logging.Formatter('[%(levelname).4s] %(name)s: %(message)s')
 
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
+    
+    # File handler (if log_file is specified)
+    if log_file:
+        try:
+            file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+            file_handler.setLevel(logging.NOTSET)
+            # File logs don't need colors, use detailed format
+            file_formatter = logging.Formatter(
+                '%(asctime)s [%(levelname).4s] %(name)s: %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            file_handler.setFormatter(file_formatter)
+            logger.addHandler(file_handler)
+            logging.info(f"Logging to file: {log_file}")
+        except Exception as e:
+            logging.error(f"Failed to create log file handler for '{log_file}': {e}")
 
     # Apply per-module levels from env or argument
     _apply_module_levels(module_levels)

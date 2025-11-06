@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 class ConfigGenerationTrace:
     """Trace configuration generation process for debugging and analysis"""
     service_name: str
+    fs: FileSystem
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     stages: List[Dict[str, Any]] = field(default_factory=list)
     decisions: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
-    fs: FileSystem = field(default_factory=create_app_fs)
     
     def add_stage(self, stage_name: str, description: str, details: Dict[str, Any] = None):
         """Add processing stage record"""
@@ -93,7 +93,7 @@ class ServiceHandler:
         self.build_conf = context.resolved_builds[service_name]
         
         # Initialize configuration generation tracer
-        self.trace = ConfigGenerationTrace(service_name, fs=context.fs)
+        self.trace = ConfigGenerationTrace(service_name=service_name, fs=context.fs)
         self.trace.add_stage("initialization", "ServiceHandler initialization started")
 
         self.image_name = self.build_conf.get('image', "")

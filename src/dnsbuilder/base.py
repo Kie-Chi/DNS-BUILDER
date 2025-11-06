@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .datacls.contexts import BuildContext
 from .io.path import DNSBPath
 from .io.fs import FileSystem, AppFileSystem
-from .exceptions import UnsupportedFeatureError
+from .exceptions import UnsupportedFeatureError, DefinitionError
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,11 @@ class Image(ABC):
     Abstract class describing a Docker Image
     """
 
-    def __init__(self, config: Dict[str, Any], fs: FileSystem = AppFileSystem()):
+    def __init__(self, config: Dict[str, Any], fs: FileSystem = None):
         self.name: str = config.get("name")
         self.ref: Optional[str] = config.get("ref")
+        if fs is None:
+            raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
 
     def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -100,7 +102,9 @@ class Includer(ABC):
     Abstract Class describe the `include config` line used in software config-file
     """
 
-    def __init__(self, confs: Dict[str, Pair] = {}, fs: FileSystem = AppFileSystem()):
+    def __init__(self, confs: Dict[str, Pair] = {}, fs: FileSystem = None):
+        if fs is None:
+            raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
         self.confs = confs
         self.contain()

@@ -18,16 +18,18 @@ from .. import constants
 from ..config import Config
 from ..io.path import DNSBPath
 from ..io.fs import FileSystem, AppFileSystem
-from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError
+from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError, DefinitionError
 from ..auto import AutomationManager
 
 logger = logging.getLogger(__name__)
 
 class Builder:
 
-    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = AppFileSystem()):
+    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = None):
         self.config = config
         self.graph_output = graph_output
+        if fs is None:
+            raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
         self.output_dir = DNSBPath("output") / self.config.name
         self.predefined_builds = self._load_predefined_builds()
