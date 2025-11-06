@@ -185,7 +185,7 @@ class InternalImage(Image, ABC):
         # Mirror injections (optional)
         apt_mirror_setup = self.apt_mro()
         pip_mirror_setup = self.pip_mro()
-        npm_mirror_setup = self.npm_mro()
+        npm_registry_setup = self.npm_mro()
         return {
             "name": self.name,
             "version": self.version,
@@ -194,7 +194,7 @@ class InternalImage(Image, ABC):
             "util_packages": util_packages or "''",
             "apt_mirror_setup": apt_mirror_setup,
             "pip_mirror_setup": pip_mirror_setup,
-            "npm_mirror_setup": npm_mirror_setup,
+            "npm_registry_setup": npm_registry_setup,
         }
 
     def apt_mro(self) -> str:
