@@ -100,7 +100,18 @@ class ConfigModel(BaseModel):
     builds: Dict[str, BuildModel]
     include: Optional[Union[str, List[str]]] = None
     auto: Optional[AutomationModel] = Field(default_factory=AutomationModel)
+    mirror: Dict[str, Any] = Field(default_factory=dict)
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode='after')
+    def validate_mirror(self) -> 'ConfigModel':
+        """Ensure mirror is a dictionary"""
+        for key in self.mirror.keys():
+            if any(key in aliases for aliases in constants.MIRRORS.values()):
+                continue
+            raise ConfigValidationError(f"Invalid mirror key: {key}, must be one of {constants.MIRRORS.values()}.")
+        
+        return self
 
     @model_validator(mode='after')
     def validate_image_keys_constraints(self) -> 'ConfigModel':
@@ -230,3 +241,7 @@ class Config:
     @property
     def builds_config(self) -> Dict[str, Any]: 
         return {name: build.model_dump(exclude_none=True) for name, build in self.model.builds.items()}
+
+    @property
+    def mirror(self) -> Dict[str, Any]:
+        return self.model.mirror if self.model.mirror else {}

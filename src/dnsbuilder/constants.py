@@ -152,6 +152,13 @@ DEFAULT_NETWORK_NAME = "app_net"
 DEFAULT_DEVICE_NAME = "bridge"
 
 # --- Reserved Keys in Build Configs ---
-RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', "mixins", "mounts", "files", "auto", "extra_conf"}
+RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', 'mixins', 'mounts', 'files', 'auto', 'extra_conf', 'mirror'}
 
-RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include', 'auto'}
+RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include', 'auto', 'mirror'}
+
+# -- Config constants ---
+MIRRORS = { 
+    'apt': ['apt_mirror', 'apt', 'apt_host'], 
+    'pip': ['pip_index_url', 'pip_index', 'pip'], 
+    'npm': ['npm_registry', 'npm', 'registry'], 
+}

@@ -22,11 +22,12 @@ class ImageFactory:
     Uses reflection-based registry for dynamic image discovery.
     """
 
-    def __init__(self, images_config: Dict[str, Dict[str, Any]], fs: FileSystem = AppFileSystem()):
+    def __init__(self, images_config: Dict[str, Dict[str, Any]], global_mirror: Dict[str, Any] = None, fs: FileSystem = AppFileSystem()):
         self.configs = {name: ({"name": name} | conf) for name, conf in images_config.items()}
         self.resolved_images: Dict[str, InternalImage] = {}
         self.resolving_stack: Set[str] = set()
         self.fs = fs
+        self.global_mirror = global_mirror or {}
         
         # Initialize registries if not already done
         if not image_registry._images:
@@ -65,6 +66,14 @@ class ImageFactory:
             config = {"name": name, "software": sw, "version": version}
 
         if not ref:
+            # Base image (root of inheritance chain), inject global mirror here
+            if self.global_mirror:
+                from .utils.merge import deep_merge
+                config_mirror = config.get("mirror", {})
+                # Global mirror has lowest priority, overridden by config's mirror
+                merged_mirror = deep_merge(self.global_mirror, config_mirror)
+                config = {**config, "mirror": merged_mirror}
+            
             logger.debug(f"Image '{name}' is a base. Instantiating.")
             final_image = self._instantiate_from_config(config)
         else:

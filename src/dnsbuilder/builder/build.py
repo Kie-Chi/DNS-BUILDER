@@ -108,7 +108,11 @@ class Builder:
     def _initialize_context(self) -> BuildContext:
         """Creates the initial build context and resolves images defined in the config."""
         logger.debug("[Builder] Initializing context...")
-        image_factory = ImageFactory(self.config.images_config, self.fs)
+        image_factory = ImageFactory(
+            self.config.images_config, 
+            global_mirror=self.config.mirror,
+            fs=self.fs
+        )
         resolved_images = image_factory.create_all()
         self.image_cache.update(resolved_images) # Cache the explicitly defined images
         

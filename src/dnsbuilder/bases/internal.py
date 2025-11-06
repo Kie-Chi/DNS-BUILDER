@@ -12,6 +12,7 @@ from ..io.path import DNSBPath
 from ..io.fs import FileSystem, AppFileSystem
 from ..exceptions import ImageDefinitionError
 from ..utils.merge import deep_merge
+from .. import constants
 
 logger = logging.getLogger(__name__)
 
@@ -182,9 +183,9 @@ class InternalImage(Image, ABC):
         dep_packages = " ".join(self.dependency)
         util_packages = " ".join(self.util)
         # Mirror injections (optional)
-        apt_mirror_setup = self._apt_mro()
-        pip_mirror_setup = self._pip_mro()
-
+        apt_mirror_setup = self.apt_mro()
+        pip_mirror_setup = self.pip_mro()
+        npm_mirror_setup = self.npm_mro()
         return {
             "name": self.name,
             "version": self.version,
@@ -193,15 +194,16 @@ class InternalImage(Image, ABC):
             "util_packages": util_packages or "''",
             "apt_mirror_setup": apt_mirror_setup,
             "pip_mirror_setup": pip_mirror_setup,
+            "npm_mirror_setup": npm_mirror_setup,
         }
 
-    def _apt_mro(self) -> str:
+    def apt_mro(self) -> str:
         # Support multiple key aliases for convenience
-        mirror_host_origin = (
-            self.mirror.get("apt_mirror")
-            or self.mirror.get("apt")
-            or self.mirror.get("apt_host")
-        )
+        mirror_host_origin = ""
+        for key in constants.MIRRORS["apt"]:
+            if key in self.mirror:
+                mirror_host_origin = self.mirror[key]
+                break
         if not mirror_host_origin:
             return ""
         url = DNSBPath(mirror_host_origin)
@@ -236,16 +238,26 @@ class InternalImage(Image, ABC):
             )
         return ""
 
-    def _pip_mro(self) -> str:
-        index_url = (
-            self.mirror.get("pip_index_url")
-            or self.mirror.get("pip_index")
-            or self.mirror.get("pip")
-        )
-        if not index_url:
-            return ""
-        # Use pip config to persist across pip calls
-        return f"RUN pip config set global.index-url {index_url} || true"
+    def pip_mro(self) -> str:
+        index_url = ""
+        for key in constants.MIRRORS["pip"]:
+            if key in self.mirror:
+                index_url = self.mirror[key]
+                break
+        if index_url:
+            # Use pip config to persist across pip calls
+            return f"RUN pip config set global.index-url {index_url} || true"
+        return ""
+
+    def npm_mro(self) -> str:
+        registry = ""
+        for key in constants.MIRRORS["npm"]:
+            if key in self.mirror:
+                registry = self.mirror[key]
+                break
+        if registry:
+            return f"RUN npm config set registry {registry}"
+        return ""
 
     def write(self, directory: DNSBPath):
         if not self.software or not self.version:
@@ -388,18 +400,6 @@ class JudasImage(InternalImage):
         """
         self.os = "node"
 
-    @override
-    def _get_template_vars(self) -> Dict[str, Any]:
-        base_vars = super()._get_template_vars()
-        npm_registry = (
-            self.mirror.get("npm_registry")
-            or self.mirror.get("npm")
-            or self.mirror.get("registry")
-        )
-        base_vars["npm_registry_setup"] = (
-            f"RUN npm config set registry {npm_registry}" if npm_registry else ""
-        )
-        return base_vars
 
 # -------------------------
 #
