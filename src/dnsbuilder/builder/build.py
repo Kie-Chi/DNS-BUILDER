@@ -279,11 +279,12 @@ class Builder:
             raise BuildError(f"Failed to load or parse template file: {e}")
 
     def _setup_workspace(self):
-        if self.fs.exists(self.output_dir): 
-            logger.debug(f"[Builder] Output directory '{self.output_dir}' exists. Cleaning it up.")
-            self.fs.rmtree(self.output_dir)
-        self.fs.mkdir(self.output_dir, parents=True)
-        logger.debug(f"[Builder] Workspace initialized at '{self.output_dir}'.")
+        with self.fs.fallback(enable=False):
+            if self.fs.exists(self.output_dir): 
+                logger.debug(f"[Builder] Output directory '{self.output_dir}' exists. Cleaning it up.")
+                self.fs.rmtree(self.output_dir)
+            self.fs.mkdir(self.output_dir, parents=True)
+            logger.debug(f"[Builder] Workspace initialized at '{self.output_dir}'.")
     
     def _write_compose_file(self, compose_config: Dict):
         file_path = self.output_dir / constants.DOCKER_COMPOSE_FILENAME

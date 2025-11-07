@@ -11,13 +11,14 @@ import git
 import hashlib
 from ..utils import override
 from .path import DNSBPath, Path
-from .decorators import wrap_io_error, fb_check, auto, read_only
+from .decorators import wrap_io_error, fb_check, auto, read_only, signal
 from ..exceptions import (
     ProtocolError,
     InvalidPathError,
     UnsupportedFeatureError,
     ReadOnlyError,
     DNSBPathNotFoundError,
+    SignalPathNotFound
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,27 @@ logger = logging.getLogger(__name__)
 # Abstract FileSystem
 #
 # --------------------
+
+class _FallbackContext:
+    """Context manager for temporarily changing fallback behavior."""
+    
+    def __init__(self, fs, enable: bool):
+        self.fs = fs
+        self.enable = enable
+        self.original_state = None
+        self.has_fallback_support = hasattr(fs, 'enable_fallback')
+    
+    def __enter__(self):
+        if self.has_fallback_support:
+            self.original_state = self.fs.enable_fallback
+            self.fs.enable_fallback = self.enable
+        return self.fs
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.has_fallback_support:
+            self.fs.enable_fallback = self.original_state
+        return False
+
 
 class FileSystem(ABC):
     """DNSB File System Abstract Base Class"""
@@ -148,6 +170,11 @@ class FileSystem(ABC):
     def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
         """Open a file"""
         return NotImplemented
+
+    # Fallback methods
+    def fallback(self, enable: bool = True):
+        """Temporarily change fallback behavior"""
+        return _FallbackContext(self, enable)
     
 
 # --------------------------------------------------------
@@ -190,16 +217,15 @@ class AppFileSystem(FileSystem):
         
         # fallback mechanism
         self.enable_fallback = enable_fallback
-        self._fallback_handler = DiskFileSystem(chroot=chroot) if enable_fallback else None
+        self._fallback_handler = DiskFileSystem(chroot=chroot)
         
         # fallback statistics
-        if enable_fallback:
-            self._fallback_stats = {
-                'count': 0,
-                'paths': set(),
-                'operations': {}
-            }
-    
+        self._fallback_stats = {
+            'count': 0,
+            'paths': set(),
+            'operations': {}
+        }
+        
     def _record_fallback(self, path: DNSBPath, method_name: str):
         """Record fallback usage statistics."""
         if hasattr(self, '_fallback_stats'):
@@ -207,6 +233,13 @@ class AppFileSystem(FileSystem):
             self._fallback_stats['paths'].add(str(path))
             self._fallback_stats['operations'][method_name] = \
                 self._fallback_stats['operations'].get(method_name, 0) + 1
+    
+    @override
+    def fallback(self, enable: bool = True):
+        """
+        Temporarily change fallback behavior.
+        """
+        return _FallbackContext(self, enable)
         
     def register_handler(self, protocol: str, handler: FileSystem):
         """Register a file system handler for a specific protocol."""
@@ -362,14 +395,17 @@ class GenericFileSystem(FileSystem, ABC):
         self.fs.cp(self.path2str(src), self.path2str(dst), recursive=True)
 
     @override
+    @signal(SignalPathNotFound)
     def exists(self, path: DNSBPath) -> bool:
         return self.fs.exists(self.path2str(path))
 
     @override
+    @signal(SignalPathNotFound)
     def is_dir(self, path: DNSBPath) -> bool:
         return self.fs.isdir(self.path2str(path))
 
     @override
+    @signal(SignalPathNotFound)
     def is_file(self, path: DNSBPath) -> bool:
         return self.fs.isfile(self.path2str(path))
 

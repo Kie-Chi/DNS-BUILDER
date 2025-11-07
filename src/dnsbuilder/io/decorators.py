@@ -11,6 +11,14 @@ import functools
 import logging
 from typing import Tuple, Type
 
+from ..exceptions import (
+    DNSBPathExistsError,
+    DNSBPathNotFoundError,
+    DNSBNotAFileError,
+    DNSBNotADirectoryError,
+    Signal,
+    SignalPathNotFound
+)
 logger = logging.getLogger(__name__)
 
 
@@ -22,12 +30,6 @@ def wrap_io_error(func):
     into DNSBuilder-specific exception types for consistent error handling.
 
     """
-    from ..exceptions import (
-        DNSBPathExistsError,
-        DNSBPathNotFoundError,
-        DNSBNotAFileError,
-        DNSBNotADirectoryError
-    )
     
     def wrapper(*args, **kwargs):
         try:
@@ -40,11 +42,31 @@ def wrap_io_error(func):
             raise DNSBNotAFileError(e) from e
         except NotADirectoryError as e:
             raise DNSBNotADirectoryError(e) from e
+        except Signal as e:
+            # Signal should be ignored by the caller
+            pass
         except Exception as e:
             raise e
     
     return wrapper
 
+def signal(sig: Signal):
+    """
+    Decorator to raise a Signal when a path is not found.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, path, *args, **kwargs):
+            try:
+                res = func(self, path, *args, **kwargs)
+            except Exception as e:
+                raise e
+            if not res:
+                logger.debug(f"Signal {sig.__name__} triggered for path: {path}")
+                raise sig(f"Signal {sig.__name__} triggered for path: {path}")
+            return res
+        return wrapper
+    return decorator
 
 def fallback(errors: Tuple[Type[Exception], ...] = (FileNotFoundError, KeyError)):
     """
@@ -114,7 +136,7 @@ def fallback(errors: Tuple[Type[Exception], ...] = (FileNotFoundError, KeyError)
 fb_read = fallback(errors=(FileNotFoundError, KeyError))
 
 # Check operations: same as read (exists, is_file, is_dir)
-fb_check = fallback(errors=(FileNotFoundError, KeyError))
+fb_check = fallback(errors=(FileNotFoundError, KeyError, SignalPathNotFound))
 
 
 def _infer_fb(method_name: str) -> str:

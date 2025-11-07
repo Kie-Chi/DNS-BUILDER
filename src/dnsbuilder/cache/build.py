@@ -2,13 +2,14 @@ import logging
 from typing import Dict, Optional
 import asyncio
 
-from .build import Builder
-from ..cache import CacheManager, ProjectCacheView, ServiceCacheView
+from ..builder import Builder
+from .manager import CacheManager
+from .view import ProjectCacheView, ServiceCacheView
 from .. import constants
 from ..datacls import BuildContext
 from ..config import Config
 from ..io import FileSystem, DNSBPath, create_app_fs
-from ..exceptions import DefinitionError
+from ..exceptions import DefinitionError, UnknownError
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +31,7 @@ class CachedBuilder(Builder):
         self.real_fs = fs
         self.cache_manager = CacheManager(fs, cache_dir)
         
-        self.memory_fs = create_app_fs(use_vfs=True, enable_fallback=True, chroot=fs.chroot)
+        self.memory_fs = create_app_fs(use_vfs=True, chroot=fs.chroot)
         
         self.project_cache: Optional[ProjectCacheView] = None
         self.memory_project_cache: Optional[ProjectCacheView] = None
@@ -46,8 +47,9 @@ class CachedBuilder(Builder):
         cache_consistent = self._check_cache_consistency()
         
         # Step 3: build in memory
-        context = await self._build_in_memory()
-        
+        with self.memory_fs.fallback(enable=True):
+            context = await self._build_in_memory()
+
         # Step 4: generate memory cache view from build result
         self._generate_memory_cache_view(context)
         

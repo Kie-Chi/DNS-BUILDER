@@ -290,11 +290,13 @@ class ServiceHandler:
             temp_uri = DNSBPath(f"temp:/{content_hash}{extension}")
             
             # Handle collision (very unlikely with SHA256)
+            # Check temp:// files without fallback - they only exist in memory
             counter = 0
-            while self.context.fs.exists(temp_uri):
-                counter += 1
-                collision_hash = hashlib.sha256(f"{self.service_name}:{container_path}:{content}:{counter}".encode()).hexdigest()[:24]
-                temp_uri = DNSBPath(f"temp:/{collision_hash}{extension}")
+            with self.context.fs.fallback(enable=False):
+                while self.context.fs.exists(temp_uri):
+                    counter += 1
+                    collision_hash = hashlib.sha256(f"{self.service_name}:{container_path}:{content}:{counter}".encode()).hexdigest()[:24]
+                    temp_uri = DNSBPath(f"temp:/{collision_hash}{extension}")
 
             self.context.fs.write_text(temp_uri, content)
             volume_str = f"{str(temp_uri)}:{container_path}"
@@ -310,11 +312,13 @@ class ServiceHandler:
         
         content_hash = hashlib.sha256(f"{self.service_name}:extra_conf:{extra_conf}".encode()).hexdigest()[:24]
         temp_uri = DNSBPath(f"temp:/{content_hash}.conf")
+        # Check temp:// files without fallback - they only exist in memory
         counter = 0
-        while self.context.fs.exists(temp_uri):
-            counter += 1
-            collision_hash = hashlib.sha256(f"{self.service_name}:extra_conf:{extra_conf}:{counter}".encode()).hexdigest()[:24]
-            temp_uri = DNSBPath(f"temp:/{collision_hash}.conf")
+        with self.context.fs.fallback(enable=False):
+            while self.context.fs.exists(temp_uri):
+                counter += 1
+                collision_hash = hashlib.sha256(f"{self.service_name}:extra_conf:{extra_conf}:{counter}".encode()).hexdigest()[:24]
+                temp_uri = DNSBPath(f"temp:/{collision_hash}.conf")
         self.context.fs.write_text(temp_uri, extra_conf)
         container_path = f"/usr/local/etc/extra_{self.service_name}.conf"
         volume_str = f"{str(temp_uri)}:{container_path}"
@@ -330,6 +334,7 @@ class ServiceHandler:
             host_path = volume.src
             container_path = volume.dst
             if host_path.need_check:
+                # need fallback
                 if not self.context.fs.exists(host_path):
                     if not host_path.is_absolute():
                         raise VolumeError(f"Volume relative source path does not exist: '{host_path}'")
@@ -347,8 +352,10 @@ class ServiceHandler:
                 target_path = None
                 def gen_target_path(filename: DNSBPath) -> DNSBPath:
                     target_path = self.contents_dir / filename
-                    if self.context.fs.exists(target_path):
-                        target_path = self.contents_dir / f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
+                    # Check target_path without fallback - it only exists in memory/output dir
+                    with self.context.fs.fallback(enable=False):
+                        if self.context.fs.exists(target_path):
+                            target_path = self.contents_dir / f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
                     return target_path
 
                 if self.context.fs.is_dir(host_path):

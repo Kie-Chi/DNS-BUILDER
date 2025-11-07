@@ -17,9 +17,11 @@ from .view import (
     DEFAULT_IGNORE_PATTERNS
 )
 from .manager import CacheManager
+from .build import CachedBuilder
 
 __all__ = [
     'CacheView',
+    'CachedBuilder',
     'FileCacheView',
     'ServiceCacheView',
     'ProjectCacheView',

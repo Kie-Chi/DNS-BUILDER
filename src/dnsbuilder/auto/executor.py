@@ -64,7 +64,7 @@ class ScriptExecutor:
                     'service_name': service_name,
                     'result': None, 
                     'fs': self.fs,  # Pass FileSystem object for flexible file operations
-                    'workdir': str(self.fs.chroot) if self.fs and self.fs.chroot else None,  # Pass workdir path
+                    'workdir': self.fs.chroot,  # Pass workdir path
                     '__name__': '__main__'
                 }
                 with self.fs.open(temp_script_path, 'r') as f:

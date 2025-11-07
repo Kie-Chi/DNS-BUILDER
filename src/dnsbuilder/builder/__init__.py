@@ -2,7 +2,6 @@
 DNS Builder Builder Module
 
 - Builder: Standard build process
-- CachedBuilder: Incremental build with caching
 - ServiceHandler: Individual service artifact generation
 - NetworkManager: IP address allocation
 - Resolver: Build configuration resolution
@@ -21,12 +20,12 @@ Usage:
 """
 
 from .build import Builder
-from .cached_builder import CachedBuilder
 from .service import ServiceHandler
 from .net import NetworkManager
 from .resolve import Resolver
 from .substitute import VariableSubstitutor
 from .map import Mapper, GraphGenerator
+from ..cache import CachedBuilder
 
 __all__ = [
     'Builder',
