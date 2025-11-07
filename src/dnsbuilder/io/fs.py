@@ -429,10 +429,12 @@ class GenericFileSystem(FileSystem, ABC):
         self.fs.rm(self.path2str(path))
 
     @override
+    @signal(SignalPathNotFound)
     def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
         return [DNSBPath(p) for p in self.fs.glob(self.path2str(path / pattern))]
 
     @override
+    @signal(SignalPathNotFound)
     def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
         return [DNSBPath(p) for p in self.fs.glob(self.path2str(path / f"**/{pattern}"))]
 
