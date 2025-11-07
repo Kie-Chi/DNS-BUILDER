@@ -11,7 +11,7 @@ import git
 import hashlib
 from ..utils import override
 from .path import DNSBPath, Path
-from .decorators import wrap_io_error, fb_check, auto
+from .decorators import wrap_io_error, fb_check, auto, read_only
 from ..exceptions import (
     ProtocolError,
     InvalidPathError,
@@ -622,8 +622,11 @@ class NetworkFileSystem(FsspecFileSystem):
 #
 # --------------------
 
+@read_only()
 class ResourceFileSystem(FileSystem):
-    """Resource Protocol FileSystem, ReadOnly"""
+    """
+    Resource Protocol FileSystem (Read-Only)
+    """
 
     def __init__(self, chroot: DNSBPath = None):
         super().__init__(chroot=chroot)
@@ -695,41 +698,6 @@ class ResourceFileSystem(FileSystem):
         except ValueError as e:
             raise InvalidPathError(f"'{path}' is not relative to '{other}'") from e
 
-    def _raise_read_only(self, path: DNSBPath):
-        raise ReadOnlyError(f"Can not write to resource: {path}")
-
-    @override
-    def write_text(self, path: DNSBPath, content: str, encoding: str = "utf-8"):
-        self._raise_read_only(path)
-
-    @override
-    def write_bytes(self, path: DNSBPath, content: bytes):
-        self._raise_read_only(path)
-
-    @override
-    def append_text(self, path: DNSBPath, content: str, encoding: str = "utf-8"):
-        self._raise_read_only(path)
-
-    @override
-    def append_bytes(self, path: DNSBPath, content: bytes):
-        self._raise_read_only(path)
-
-    @override
-    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
-        self._raise_read_only(path)
-
-    @override
-    def rmtree(self, path: DNSBPath):
-        self._raise_read_only(path)
-
-    @override
-    def copy(self, src: DNSBPath, dst: DNSBPath):
-        self._raise_read_only(dst)  # Can't copy *to* a resource
-
-    @override
-    def copytree(self, src: DNSBPath, dst: DNSBPath):
-        self._raise_read_only(dst)
-
     @override
     def stat(self, path: DNSBPath) -> os.stat_result:
         """Return immutable stat information for resource files."""
@@ -763,9 +731,9 @@ class ResourceFileSystem(FileSystem):
 
     @override
     def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
-        """Open a file - not supported for read-only"""
+        """Open a file - only read modes supported"""
         if 'w' in mode or 'a' in mode or '+' in mode:
-            self._raise_read_only(path)
+            raise ReadOnlyError(f"Cannot write to read-only filesystem: open with mode '{mode}' not allowed")
         logger.debug(f"[ResourceFS] Opening resource: {path} with mode '{mode}'")        
         return self._get_resource_traversable(path).open(mode, **kwargs)
 
