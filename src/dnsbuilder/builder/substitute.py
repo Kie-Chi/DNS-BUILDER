@@ -4,10 +4,10 @@ import re
 import os
 from typing import Dict, Any
 from functools import wraps
+
+from ..abstractions import Image, InternalImage
 from ..config import Config
 from .. import constants
-from ..base import Image
-from ..bases.internal import InternalImage
 from ..exceptions import BuildError, ReferenceNotFoundError
 
 logger = logging.getLogger(__name__)

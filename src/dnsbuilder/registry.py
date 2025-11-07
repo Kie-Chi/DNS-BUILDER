@@ -1,13 +1,22 @@
+"""
+DNS Builder Registries
+
+This module contains registry classes for dynamic class discovery and registration.
+
+Dependencies:
+- protocols: For Protocol type hints
+- abstractions: For abstract base classes used in discovery
+"""
+
 import inspect
 import importlib
 from typing import Dict, Type, Tuple, Set, Optional
 import logging
 import re
 
-
 from . import constants
-from .base import Behavior, Includer
-from .bases.internal import InternalImage
+from .protocols import BehaviorProtocol, ImageProtocol, IncluderProtocol
+from .abstractions import Behavior, Includer, InternalImage
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +28,11 @@ class BehaviorRegistry:
     """
     
     def __init__(self):
-        self._behaviors: Dict[Tuple[str, str], Type[Behavior]] = {}
+        self._behaviors: Dict[Tuple[str, str], Type[BehaviorProtocol]] = {}
         self._software_types: Set[str] = set()
         self._behavior_types: Set[str] = set()
         
-    def register_behavior(self, software: str, behavior_type: str, behavior_class: Type[Behavior]):
+    def register_behavior(self, software: str, behavior_type: str, behavior_class: Type[BehaviorProtocol]):
         """
         Manually register a behavior class.
         
@@ -38,7 +47,7 @@ class BehaviorRegistry:
         self._behavior_types.add(behavior_type)
         logger.debug(f"Registered behavior: {software}.{behavior_type} -> {behavior_class.__name__}")
     
-    def get_behavior_class(self, software: str, behavior_type: str) -> Optional[Type[Behavior]]:
+    def get_behavior_class(self, software: str, behavior_type: str) -> Optional[Type[BehaviorProtocol]]:
         """
         Get a behavior class by software and behavior type.
         
@@ -139,9 +148,9 @@ class ImageRegistry:
     """
     
     def __init__(self):
-        self._images: Dict[str, Type[InternalImage]] = {}
+        self._images: Dict[str, Type[ImageProtocol]] = {}
         
-    def register_image(self, software: str, image_class: Type[InternalImage]):
+    def register_image(self, software: str, image_class: Type[ImageProtocol]):
         """
         Register an image class for a software type.
         
@@ -152,7 +161,7 @@ class ImageRegistry:
         self._images[software] = image_class
         logger.debug(f"Registered image: {software} -> {image_class.__name__}")
     
-    def get_image_class(self, software: str) -> Optional[Type[InternalImage]]:
+    def get_image_class(self, software: str) -> Optional[Type[ImageProtocol]]:
         """
         Get an image class by software type.
         
@@ -219,10 +228,10 @@ class IncluderRegistry:
     """
     
     def __init__(self):
-        self._includers: Dict[str, Type[Includer]] = {}
+        self._includers: Dict[str, Type[IncluderProtocol]] = {}
         self._software_types: Set[str] = set()
         
-    def register_includer(self, software: str, includer_class: Type[Includer]):
+    def register_includer(self, software: str, includer_class: Type[IncluderProtocol]):
         """
         Manually register an includer class.
         
@@ -234,7 +243,7 @@ class IncluderRegistry:
         self._software_types.add(software)
         logger.debug(f"Registered includer: {software} -> {includer_class.__name__}")
     
-    def get_includer_class(self, software: str) -> Optional[Type[Includer]]:
+    def get_includer_class(self, software: str) -> Optional[Type[IncluderProtocol]]:
         """
         Get an includer class by software type.
         

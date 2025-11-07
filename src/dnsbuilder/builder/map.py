@@ -5,11 +5,13 @@ try:
     import graphviz
 except ImportError:
     graphviz = None
-from ..bases.behaviors import _get_rname
-from ..io.path import DNSBPath
-from ..io.fs import FileSystem, AppFileSystem
+from ..abstractions import MasterBehavior
+from ..io import DNSBPath, FileSystem
 from ..exceptions import DefinitionError
 logger = logging.getLogger(__name__)
+
+# Alias for MasterBehavior.get_rname
+get_rname = MasterBehavior.get_rname
 
 class Mapper:
     """
@@ -82,7 +84,7 @@ class Mapper:
                         pass # It's not an IP, assume it's a service name
 
                     if not is_ip and target not in defined_services:
-                        target = _get_rname(target, record)
+                        target = get_rname(target, record)
                         logger.warning(
                             f"Service '{service_name}' has a behavior targeting an "
                             f"undefined service or invalid name: '{target}'"

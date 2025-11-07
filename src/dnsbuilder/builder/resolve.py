@@ -1,10 +1,9 @@
 import logging
 from typing import Dict, Any
 
-
+from ..abstractions import Image
 from .. import constants
 from ..config import Config
-from ..base import Image
 from ..utils.merge import deep_merge
 from ..exceptions import (
     BuildDefinitionError,

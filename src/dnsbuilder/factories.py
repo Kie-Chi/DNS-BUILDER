@@ -1,10 +1,21 @@
+"""
+DNS Builder Factories
+
+This module contains factory classes for creating Images, Behaviors, and Includers.
+
+Dependencies:
+- protocols: For type annotations (ImageProtocol, etc.)
+- abstractions: For isinstance checks and base functionality
+- registry: For dynamic class discovery
+"""
+
 from typing import Dict, Set, Tuple, List, Any
 import logging
 
-from .bases.internal import InternalImage
-from .base import Image, Behavior, Includer
-from .io.fs import FileSystem, AppFileSystem
-from .datacls.volume import Pair
+from .protocols import ImageProtocol, BehaviorProtocol, IncluderProtocol
+from .abstractions import InternalImage
+from .io import FileSystem
+from .datacls import Pair
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError, DefinitionError
 from .registry import behavior_registry, image_registry, includer_registry, initialize_registries
 
@@ -37,7 +48,7 @@ class ImageFactory:
             
         logger.debug("ImageFactory initialized with reflection-based registry.")
 
-    def create_all(self) -> Dict[str, Image]:
+    def create_all(self) -> Dict[str, ImageProtocol]:
         """Creates all defined images, resolving their references."""
         logger.info("Resolving and creating all defined images...")
         all_image_names = set(self.configs.keys())
@@ -47,7 +58,7 @@ class ImageFactory:
         logger.info(f"All {len(self.resolved_images)} images created successfully.")
         return self.resolved_images
 
-    def _resolve(self, name: str) -> InternalImage:
+    def _resolve(self, name: str) -> ImageProtocol:
         """Recursively resolves an image and its parents, returning the final object."""
         if name in self.resolved_images:
             return self.resolved_images[name]
@@ -89,7 +100,7 @@ class ImageFactory:
         logger.debug(f"Successfully resolved and cached image '{name}'.")
         return final_image
 
-    def _instantiate_from_config(self, config: Dict[str, Any]) -> InternalImage:
+    def _instantiate_from_config(self, config: Dict[str, Any]) -> ImageProtocol:
         """Helper to create a concrete Image instance from a resolved config."""
         software_type = config.get("software")
         if not software_type:
@@ -160,7 +171,7 @@ class BehaviorFactory:
         targets = [t.strip() for t in args_str.split(",")]
         return (behavior_type, [zone, targets])
  
-    def create(self, line: str, software_type: str) -> Behavior:
+    def create(self, line: str, software_type: str) -> BehaviorProtocol:
         """
         Parses a behavior line and returns the correct Behavior instance
         Args:
@@ -203,7 +214,7 @@ class IncluderFactory:
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
 
-    def create(self, confs: Dict[str, Pair], software_type: str) -> Includer:
+    def create(self, confs: Dict[str, Pair], software_type: str) -> IncluderProtocol:
         includer_class = includer_registry.get_includer_class(software_type)
 
         if not includer_class:

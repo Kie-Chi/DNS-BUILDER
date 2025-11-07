@@ -5,10 +5,10 @@ from typing import Dict, Optional
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+from ..abstractions import Image
 from ..factories import ImageFactory
-from ..base import Image
-from ..bases.external import SelfDefinedImage, DockerImage
-from ..datacls.contexts import BuildContext
+from ..bases import SelfDefinedImage, DockerImage
+from ..datacls import BuildContext
 from .map import Mapper, GraphGenerator
 from .substitute import VariableSubstitutor
 from .resolve import Resolver
@@ -16,8 +16,7 @@ from .net import NetworkManager
 from .service import ServiceHandler
 from .. import constants
 from ..config import Config
-from ..io.path import DNSBPath
-from ..io.fs import FileSystem, AppFileSystem
+from ..io import DNSBPath, FileSystem
 from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError, DefinitionError
 from ..auto import AutomationManager
 

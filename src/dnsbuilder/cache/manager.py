@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pydantic.networks import IPv4Network
 
-from .cache_view import ProjectCacheView, ServiceCacheView, FileCacheView
+from .view import ProjectCacheView, ServiceCacheView, FileCacheView
 from ..io.path import DNSBPath
 from ..io.fs import FileSystem
 

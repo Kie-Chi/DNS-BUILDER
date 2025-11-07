@@ -1,8 +1,6 @@
 """
 DNS Builder Cache Module
 
-This module provides caching functionality for DNS Builder projects to enable
-incremental builds and improve build performance.
 
 The cache system consists of three main components:
 - FileCacheView: Caches metadata for individual files
@@ -11,14 +9,14 @@ The cache system consists of three main components:
 - CacheManager: Manages cache storage, loading, and consistency checking
 """
 
-from .cache_view import (
+from .view import (
     CacheView,
     FileCacheView,
     ServiceCacheView,
     ProjectCacheView,
     DEFAULT_IGNORE_PATTERNS
 )
-from .cache_manager import CacheManager
+from .manager import CacheManager
 
 __all__ = [
     'CacheView',

@@ -1,20 +1,20 @@
 import argparse
 import logging
+import traceback
+import asyncio
+import uvicorn
+
 from .config import Config
-from .builder.build import Builder
-from .builder.cached_builder import CachedBuilder
-from .utils.logger import setup_logger
-from .io.fs import create_app_fs
+from .builder import Builder, CachedBuilder
+from .utils import setup_logger
+from .io import create_app_fs, DNSBPath, Path
 from .exceptions import (
     DNSBuilderError,
     ConfigurationError,
     DefinitionError,
     BuildError,
 )
-import traceback
-import uvicorn
 from .api.main import app
-import asyncio
 
 
 async def main():
@@ -81,9 +81,6 @@ async def main():
 
     if not args.config_file:
         parser.error("the following arguments are required: config_file")
-
-    from pathlib import Path
-    from .io.path import DNSBPath
     
     config_path = Path(args.config_file).resolve()
     config_file_abs = str(config_path)
