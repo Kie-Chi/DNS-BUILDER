@@ -166,3 +166,13 @@ class UnboundMasterBehavior(MasterBehavior):
 
     def generate_config_line(self, zone_name: str, file_path: str) -> str:
         return f'auth-zone:\n\tname: "{zone_name}"\n\tzonefile: "{file_path}"'
+
+
+# Dynamically generate __all__
+from ..utils.reflection import gen_exports
+
+__all__ = gen_exports(
+    ns=globals(),
+    base_path='dnsbuilder.bases.behaviors',
+    patterns=['Behavior']
+)

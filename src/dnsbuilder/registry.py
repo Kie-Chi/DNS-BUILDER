@@ -8,15 +8,13 @@ Dependencies:
 - abstractions: For abstract base classes used in discovery
 """
 
-import inspect
-import importlib
-from typing import Dict, Type, Tuple, Set, Optional
+from typing import Dict, Type, Set, Optional, Tuple
 import logging
-import re
 
 from . import constants
 from .protocols import BehaviorProtocol, ImageProtocol, IncluderProtocol
 from .abstractions import Behavior, Includer, InternalImage
+from .utils.reflection import discover_classes, extract_bhv_info, extract_img_info, extract_inc_info
 
 logger = logging.getLogger(__name__)
 
@@ -87,58 +85,15 @@ class BehaviorRegistry:
         Args:
             package_name: Package to scan for behavior classes
         """
-        try:
-            module = importlib.import_module(package_name)
-            
-            # Get all classes from the module
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                if (obj != Behavior and 
-                    issubclass(obj, Behavior) and 
-                    not inspect.isabstract(obj)):
-                    
-                    # Extract software and behavior type from class name
-                    software, behavior_type = self._extract_behavior_info(name)
-                    if software and behavior_type:
-                        self.register_behavior(software, behavior_type, obj)
-                        
-        except ImportError as e:
-            logger.warning(f"Could not import {package_name}: {e}")
-    
-    def _extract_behavior_info(self, class_name: str) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Extract software and behavior type from class name.
-        Args:
-            class_name: Name of the behavior class
-            
-        Returns:
-            Tuple of (software, behavior_type) or (None, None) if not parseable
-        """
-        if not class_name.endswith('Behavior'):
-            return None, None
-            
-        # Remove 'Behavior' suffix
-        base_name = class_name[:-8]        
-        for behavior_type in sorted(constants.BEHAVIOR_TYPES, key=len, reverse=True):
-            if base_name.endswith(behavior_type):
-                software_part = base_name[:-len(behavior_type)]
-                if software_part:  # Ensure we have a software part
-                    software = software_part.lower()
-                    behavior_type_lower = behavior_type.lower()
-                    return software, behavior_type_lower
+        # Use the generic discover_classes utility
+        discovered = discover_classes(package_name, Behavior, exclude_abstract=True, exclude_base=True)
         
-        boundaries = [m.start() + 1 for m in re.finditer(r'[a-z][A-Z]', base_name)]
-        
-        # Try each boundary as a potential split point
-        for boundary in reversed(boundaries):  # Try longer software names first
-            software_part = base_name[:boundary]
-            behavior_part = base_name[boundary:]
-            
-            if software_part and behavior_part:
-                software = software_part.lower()
-                behavior_type = behavior_part.lower()
-                return software, behavior_type
-                
-        return None, None
+        # Register each discovered behavior
+        for name, obj in discovered.items():
+            # Extract software and behavior type from class name
+            software, behavior_type = extract_bhv_info(name, constants.BEHAVIOR_TYPES)
+            if software and behavior_type:
+                self.register_behavior(software, behavior_type, obj)
 
 
 class ImageRegistry:
@@ -184,41 +139,15 @@ class ImageRegistry:
         Args:
             package_name: Package to scan for image classes
         """
-        try:
-            module = importlib.import_module(package_name)
-            
-            # Get all classes from the module
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                if (obj != InternalImage and 
-                    issubclass(obj, InternalImage) and 
-                    not inspect.isabstract(obj)):
-                    
-                    # Extract software type from class name
-                    software = self._extract_software_info(name)
-                    if software:
-                        self.register_image(software, obj)
-                        
-        except ImportError as e:
-            logger.warning(f"Could not import {package_name}: {e}")
-    
-    def _extract_software_info(self, class_name: str) -> Optional[str]:
-        """
-        Extract software type from class name.
-
-        Args:
-            class_name: Name of the image class
-            
-        Returns:
-            Software type or None if not parseable
-        """
-        if not class_name.endswith('Image'):
-            return None
-            
-        # Remove 'Image' suffix
-        base_name = class_name[:-5]
+        # Use the generic discover_classes utility
+        discovered = discover_classes(package_name, InternalImage, exclude_abstract=True, exclude_base=True)
         
-        # Convert to lowercase
-        return base_name.lower()
+        # Register each discovered image
+        for name, obj in discovered.items():
+            # Extract software type from class name
+            software = extract_img_info(name)
+            if software:
+                self.register_image(software, obj)
 
 
 class IncluderRegistry:
@@ -271,45 +200,15 @@ class IncluderRegistry:
         """
         logger.debug("Auto-discovering includer classes...")
         
-        # Import the includers module to ensure classes are loaded
-        try:
-            includers_module = importlib.import_module('dnsbuilder.bases.includers')
-            
-            # Find all classes in the module
-            for name, obj in inspect.getmembers(includers_module, inspect.isclass):
-                # Skip the base class itself
-                if obj is Includer:
-                    continue
-                    
-                # Check if it's a subclass of Includer
-                if issubclass(obj, Includer):
-                    software_type = self._extract_software_info(name)
-                    if software_type:
-                        self.register_includer(software_type, obj)
-                        logger.debug(f"Auto-discovered includer: {name} -> {software_type}")
-                        
-        except ImportError as e:
-            logger.warning(f"Could not import includers module: {e}")
-    
-    def _extract_software_info(self, class_name: str) -> Optional[str]:
-        """
-        Extract software type from class name using naming convention.
-        Expected format: <Software>Includer (e.g., BindIncluder -> bind)
+        # Use the generic discover_classes utility
+        discovered = discover_classes('dnsbuilder.bases.includers', Includer, exclude_abstract=True, exclude_base=True)
         
-        Args:
-            class_name: Name of the includer class
-            
-        Returns:
-            Software type or None if not parseable
-        """
-        if not class_name.endswith('Includer'):
-            return None
-            
-        # Remove 'Includer' suffix
-        base_name = class_name[:-8]
-        
-        # Convert to lowercase
-        return base_name.lower()
+        # Register each discovered includer
+        for name, obj in discovered.items():
+            software_type = extract_inc_info(name)
+            if software_type:
+                self.register_includer(software_type, obj)
+                logger.debug(f"Auto-discovered includer: {name} -> {software_type}")
 
 
 # Global registries

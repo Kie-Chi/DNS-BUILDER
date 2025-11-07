@@ -16,20 +16,16 @@ import json
 import re
 import hashlib
 
-from .datacls.artifacts import BehaviorArtifact, VolumeArtifact
-from .datacls.volume import Pair
-from .io.path import DNSBPath
-from .io.fs import FileSystem
+from .datacls import BehaviorArtifact, Pair
+from .io import DNSBPath, FileSystem
 from .exceptions import (
     UnsupportedFeatureError,
     DefinitionError,
     ImageDefinitionError,
     BehaviorError,
-    DNSBPathNotFoundError,
 )
-from .rules.rule import Rule
-from .rules.version import Version
-from .utils.merge import deep_merge
+from .rules import Rule, Version
+from .utils import deep_merge
 from . import constants
 
 if TYPE_CHECKING:

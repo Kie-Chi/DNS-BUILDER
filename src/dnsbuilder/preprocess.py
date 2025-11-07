@@ -3,9 +3,8 @@ import yaml
 from typing import Dict, Any, List, Union
 from jinja2 import Environment
 
-from .io.path import DNSBPath
-from .io.fs import FileSystem
-from .utils.merge import deep_merge
+from .io import FileSystem, DNSBPath
+from .utils import deep_merge
 from .exceptions import (
     ConfigFileMissingError,
     ConfigParsingError,

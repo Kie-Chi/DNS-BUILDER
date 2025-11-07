@@ -9,7 +9,7 @@ from morefs.memory import MemFS
 from importlib import resources
 import git
 import hashlib
-from ..utils.typing_compat import override
+from ..utils import override
 from .path import DNSBPath, Path
 from ..exceptions import (
     ProtocolError,

@@ -56,7 +56,6 @@ __all__ = [
     'Includer',
     'InternalImage',
     'ExternalImage',
-    'MasterBehavior',
     # Registry
     'initialize_registries',
     # Config

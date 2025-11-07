@@ -3,8 +3,7 @@ import os
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
-from ..io.fs import FileSystem
-from ..io.path import DNSBPath
+from ..io import DNSBPath, FileSystem
 from ..exceptions import DefinitionError
 logger = logging.getLogger(__name__)
 

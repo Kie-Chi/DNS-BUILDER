@@ -6,17 +6,13 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from ..bases.internal import InternalImage
-from ..bases.external import SelfDefinedImage
-from ..datacls.contexts import BuildContext
-from ..datacls.artifacts import BehaviorArtifact
-from ..datacls.volume import Pair, Volume
-from ..bases.behaviors import MasterBehavior
+from ..abstractions import InternalImage, MasterBehavior
+from ..bases import SelfDefinedImage
+from ..datacls import BuildContext, BehaviorArtifact, Pair, Volume
 from .zone import ZoneGenerator
 from .. import constants
-from ..io.path import DNSBPath
-from ..io.fs import FileSystem, create_app_fs
-from ..exceptions import BuildError, VolumeError, BehaviorError, BuildDefinitionError
+from ..io import DNSBPath, FileSystem
+from ..exceptions import BuildError, BehaviorError, VolumeError, BuildDefinitionError
 
 logger = logging.getLogger(__name__)
 

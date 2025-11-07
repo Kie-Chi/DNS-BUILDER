@@ -1,9 +1,10 @@
 import time
 from typing import List
-from ..datacls.contexts import BuildContext
 from dnslib import RR, SOA, A, NS, DNSLabel, QTYPE, CLASS
 import logging
 import hashlib
+
+from ..datacls import BuildContext
 from ..exceptions import NetworkDefinitionError
 
 logger = logging.getLogger(__name__)

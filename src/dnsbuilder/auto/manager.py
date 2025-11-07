@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Union
 import os
 
 from .executor import ScriptExecutor
-from ..io.fs import FileSystem
+from ..io import FileSystem
 from ..exceptions import UnsupportedFeatureError
 
 logger = logging.getLogger(__name__)

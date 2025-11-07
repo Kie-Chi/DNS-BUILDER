@@ -4,7 +4,7 @@ from typing import Dict, Any
 from ..abstractions import Image
 from .. import constants
 from ..config import Config
-from ..utils.merge import deep_merge
+from ..utils import deep_merge
 from ..exceptions import (
     BuildDefinitionError,
     ReferenceNotFoundError,

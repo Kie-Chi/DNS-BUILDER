@@ -5,8 +5,7 @@ from typing import Dict, List, Optional, Any
 import fnmatch
 
 from pydantic import BaseModel, Field
-from ..io.path import DNSBPath
-from ..io.fs import FileSystem
+from ..io import DNSBPath, FileSystem
 from ..exceptions import DNSBPathNotFoundError, DNSBNotADirectoryError
 import logging
 

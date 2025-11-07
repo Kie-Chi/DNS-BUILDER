@@ -5,7 +5,7 @@ from pathlib import PurePosixPath, PureWindowsPath, PurePath, PosixPath, Windows
 from urllib.parse import urlparse
 from .. import constants
 from ..exceptions import InvalidPathError
-from ..utils.typing_compat import override
+from ..utils import override
 
 # just ignore these lines
 os_type = 'nt' if type(Path()) is WindowsPath else 'posix'

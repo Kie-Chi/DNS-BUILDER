@@ -5,10 +5,9 @@ import asyncio
 from .build import Builder
 from ..cache import CacheManager, ProjectCacheView, ServiceCacheView
 from .. import constants
-from ..datacls.contexts import BuildContext
+from ..datacls import BuildContext
 from ..config import Config
-from ..io.path import DNSBPath
-from ..io.fs import FileSystem, AppFileSystem, create_app_fs
+from ..io import FileSystem, DNSBPath, create_app_fs
 from ..exceptions import DefinitionError
 logger = logging.getLogger(__name__)
 

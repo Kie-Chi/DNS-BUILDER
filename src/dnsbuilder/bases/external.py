@@ -91,3 +91,13 @@ class SelfDefinedImage(ExternalImage):
         dockerfile = directory / "Dockerfile"
         self.fs.copy(self.path, dockerfile)
         pass
+
+
+# Dynamically generate __all__
+from ..utils.reflection import gen_exports
+
+__all__ = gen_exports(
+    ns=globals(),
+    base_path='dnsbuilder.bases.external',
+    patterns=['Image']
+)

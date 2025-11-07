@@ -6,8 +6,7 @@ from pydantic.networks import IPv4Network
 
 from .preprocess import Preprocessor
 from . import constants
-from .io.path import DNSBPath
-from .io.fs import FileSystem, AppFileSystem
+from .io import DNSBPath, FileSystem
 from .exceptions import (
     CircularDependencyError,
     ImageDefinitionError,

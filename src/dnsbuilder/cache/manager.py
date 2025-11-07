@@ -6,8 +6,7 @@ from datetime import datetime
 from pydantic.networks import IPv4Network
 
 from .view import ProjectCacheView, ServiceCacheView, FileCacheView
-from ..io.path import DNSBPath
-from ..io.fs import FileSystem
+from ..io import DNSBPath, FileSystem
 
 logger = logging.getLogger(__name__)
 
