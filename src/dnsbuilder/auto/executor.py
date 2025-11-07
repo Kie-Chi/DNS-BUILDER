@@ -40,6 +40,13 @@ class ScriptExecutor:
         Returns:
             For setup/modify scripts: Modified configuration
             For restrict scripts: The 'result' variable set by the script, or None if not set
+            
+        Available variables in script:
+            config: Configuration dictionary
+            service_name: Service name (None for global scripts)
+            result: Result variable for restrict scripts
+            fs: FileSystem object for file operations
+            workdir: Working directory path (chroot) as string
         """
         try:
             if self.fs:
@@ -56,6 +63,8 @@ class ScriptExecutor:
                     'config': config,
                     'service_name': service_name,
                     'result': None, 
+                    'fs': self.fs,  # Pass FileSystem object for flexible file operations
+                    'workdir': str(self.fs.chroot) if self.fs and self.fs.chroot else None,  # Pass workdir path
                     '__name__': '__main__'
                 }
                 with self.fs.open(temp_script_path, 'r') as f:
@@ -72,6 +81,8 @@ class ScriptExecutor:
                     'config': config,
                     'service_name': service_name,
                     'result': None,  # Initialize result variable for restrict scripts
+                    'fs': self.fs,
+                    'workdir': str(self.fs.chroot) if self.fs and self.fs.chroot else None,  # Pass workdir path
                     '__name__': '__main__'
                 }
                 with open(script_path, 'r') as f:
