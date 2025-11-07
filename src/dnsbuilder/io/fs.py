@@ -11,38 +11,16 @@ import git
 import hashlib
 from ..utils import override
 from .path import DNSBPath, Path
+from .decorators import wrap_io_error, fb_check, auto
 from ..exceptions import (
     ProtocolError,
     InvalidPathError,
     UnsupportedFeatureError,
     ReadOnlyError,
-    DNSBPathExistsError,
     DNSBPathNotFoundError,
-    DNSBNotAFileError,
-    DNSBNotADirectoryError,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def wrap_io_error(func):
-    """Decorator to wrap IO errors into DNS-Builder exceptions."""
-
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except FileExistsError as e:
-            raise DNSBPathExistsError(e) from e
-        except FileNotFoundError as e:
-            raise DNSBPathNotFoundError(e) from e
-        except IsADirectoryError as e:
-            raise DNSBNotAFileError(e) from e
-        except NotADirectoryError as e:
-            raise DNSBNotADirectoryError(e) from e
-        except Exception as e:
-            raise e
-
-    return wrapper
 
 # --------------------------------------------------------
 #
@@ -188,10 +166,16 @@ class FileSystem(ABC):
 #
 # --------------------
 
+FB_OVERRIDES = {
+    # no fallback for none operations
+}
+
+@auto(fallback_overrides=FB_OVERRIDES)
 class AppFileSystem(FileSystem):
     """
-        support a lot kind of file system, 
-        like file, resource, http, s3, etc.
+    Multi-protocol file system dispatcher.
+    
+    This class automatically delegates all FileSystem methods to protocol-specific handlers.
     """
 
     def __init__(self, enable_fallback: bool = False, chroot: DNSBPath = None):
@@ -207,7 +191,22 @@ class AppFileSystem(FileSystem):
         # fallback mechanism
         self.enable_fallback = enable_fallback
         self._fallback_handler = DiskFileSystem(chroot=chroot) if enable_fallback else None
-
+        
+        # fallback statistics
+        if enable_fallback:
+            self._fallback_stats = {
+                'count': 0,
+                'paths': set(),
+                'operations': {}
+            }
+    
+    def _record_fallback(self, path: DNSBPath, method_name: str):
+        """Record fallback usage statistics."""
+        if hasattr(self, '_fallback_stats'):
+            self._fallback_stats['count'] += 1
+            self._fallback_stats['paths'].add(str(path))
+            self._fallback_stats['operations'][method_name] = \
+                self._fallback_stats['operations'].get(method_name, 0) + 1
         
     def register_handler(self, protocol: str, handler: FileSystem):
         """Register a file system handler for a specific protocol."""
@@ -220,26 +219,18 @@ class AppFileSystem(FileSystem):
 
     @classmethod
     def _delegator(cls, method_name: str):
+        """        
+        Delegate the method to the appropriate handler.
+        """
         def decorator(self, path: DNSBPath, *args, **kwargs):
             handler = self._get_handler(path)
             method = getattr(handler, method_name, None)
             if method is None:
-                raise NotImplementedError(f"FileSystem handler for protocol '{path.protocol}' does not support '{method_name}'")
-            
-            # Try primary handler first
-            try:
-                return method(path, *args, **kwargs)
-            except Exception as e:
-                if self.enable_fallback and path.protocol == "file":
-                    logger.warning(f"Primary handler failed for {path}, trying fallback: {e}")
-                    fallback_method = getattr(self._fallback_handler, method_name, None)
-                    if fallback_method:
-                        try:
-                            return fallback_method(path, *args, **kwargs)
-                        except Exception as fallback_e:
-                            logger.error(f"Fallback handler also failed for {path}: {fallback_e}")
-                            raise e  # Raise original exception
-                raise e
+                raise NotImplementedError(
+                    f"FileSystem handler for protocol '{path.protocol}' "
+                    f"does not support '{method_name}'"
+                )
+            return method(path, *args, **kwargs)
         return decorator
 
     def _get_handler(self, path: DNSBPath) -> 'FileSystem':
@@ -252,77 +243,10 @@ class AppFileSystem(FileSystem):
             )
         return handler
 
-    @override
-    @wrap_io_error
-    def listdir(self, path: DNSBPath) -> List[DNSBPath]:
-        return AppFileSystem._delegator("listdir")(self, path)
-
-    # Not-Std Methods
-    @override
-    @wrap_io_error
-    def remove(self, path: DNSBPath):
-        return AppFileSystem._delegator("remove")(self, path)
-
-    @override
-    @wrap_io_error
-    def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
-        return AppFileSystem._delegator("glob")(self, path, pattern)
-
-    @override
-    @wrap_io_error
-    def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
-        return AppFileSystem._delegator("rglob")(self, path, pattern)
-
-    @override
-    @wrap_io_error
-    def absolute(self, path: DNSBPath) -> DNSBPath:
-        return AppFileSystem._delegator("absolute")(self, path)
     
     @override
     @wrap_io_error
-    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
-        return AppFileSystem._delegator("relative_to")(self, path, other)
-
-    # Std Methods
-    @override
-    @wrap_io_error
-    def read_text(self, path: DNSBPath) -> str:
-        return AppFileSystem._delegator("read_text")(self, path)
-
-    @override
-    @wrap_io_error
-    def write_text(self, path: DNSBPath, content: str):
-        return AppFileSystem._delegator("write_text")(self, path, content)
-    
-    @override
-    @wrap_io_error
-    def append_text(self, path: DNSBPath, content: str):
-        return AppFileSystem._delegator("append_text")(self, path, content)
-
-    @override
-    def exists(self, path: DNSBPath) -> bool:
-        return AppFileSystem._delegator("exists")(self, path)
-
-    @override
-    def is_dir(self, path: DNSBPath) -> bool:
-        return AppFileSystem._delegator("is_dir")(self, path)
-
-    @override
-    def is_file(self, path: DNSBPath) -> bool:
-        return AppFileSystem._delegator("is_file")(self, path)      
-
-    @override
-    @wrap_io_error
-    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
-        return AppFileSystem._delegator("mkdir")(self, path, parents=parents, exist_ok=exist_ok)
-
-    @override
-    @wrap_io_error
-    def rmtree(self, path: DNSBPath):
-        return AppFileSystem._delegator("rmtree")(self, path)
-
-    @override
-    @wrap_io_error
+    @fb_check
     def copy(self, src: DNSBPath, dst: DNSBPath):
         src_handler = self._get_handler(src)
         dst_handler = self._get_handler(dst)
@@ -336,36 +260,10 @@ class AppFileSystem(FileSystem):
         )
         content = src_handler.read_bytes(src)
         dst_handler.write_bytes(dst, content)
-
-    @override
-    @wrap_io_error
-    def append_bytes(self, path: DNSBPath, content: bytes):
-        return AppFileSystem._delegator("append_bytes")(self, path, content)
     
     @override
     @wrap_io_error
-    def read_bytes(self, path: DNSBPath) -> bytes:
-        return AppFileSystem._delegator("read_bytes")(self, path)
-
-    @override
-    @wrap_io_error
-    def write_bytes(self, path: DNSBPath, content: bytes):
-        return AppFileSystem._delegator("write_bytes")(self, path, content)
-
-    @override
-    @wrap_io_error
-    def stat(self, path: DNSBPath) -> os.stat_result:
-        """Get file status"""
-        return self._get_handler(path).stat(path)
-
-    @override
-    @wrap_io_error
-    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
-        """Open a file"""
-        return AppFileSystem._delegator("open")(self, path, mode, **kwargs)
-
-    @override
-    @wrap_io_error
+    @fb_check
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         src_handler = self._get_handler(src)
         dst_handler = self._get_handler(dst)
@@ -1277,15 +1175,15 @@ def create_app_fs(
     Create an AppFileSystem instance with optional VFS, fallback, and chroot support.
     
     Args:
-        use_vfs: Whether to use virtual file system for 'file' protocol
-        enable_fallback: Whether to enable fallback mechanism
-        chroot: Root directory for relative path resolution (only for DiskFS)
+        use_vfs: Whether to use virtual file system for 'file' protocol.
+                If True, file:// uses HyperMemoryFileSystem instead of DiskFileSystem.
+        enable_fallback: Whether to enable fallback mechanism for read operations.
+        chroot: Root directory for relative path resolution.
         
     Returns:
         Configured AppFileSystem instance
     """
     app_fs = AppFileSystem(enable_fallback=enable_fallback, chroot=chroot)
     if use_vfs:
-        # VFS 模式使用内存文件系统，传递 chroot 以保持一致性
         app_fs.register_handler("file", HyperMemoryFileSystem(chroot=chroot))
     return app_fs

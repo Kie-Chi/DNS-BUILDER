@@ -108,6 +108,18 @@ class CachedBuilder(Builder):
         memory_builder = Builder(self.config, self.graph_output, self.memory_fs)
         context = await memory_builder.run(need_context=True)
         
+        if hasattr(self.memory_fs, '_fallback_stats'):
+            stats = self.memory_fs._fallback_stats
+            if stats['count'] > 0:
+                logger.info(
+                    f"Memory build used disk fallback {stats['count']} times "
+                    f"for {len(stats['paths'])} unique files"
+                )
+                logger.debug(f"Fallback operations breakdown: {stats['operations']}")
+                # Log individual fallback paths at debug level
+                for path in sorted(stats['paths']):
+                    logger.debug(f"  - Read from disk via fallback: {path}")
+        
         logger.info("Memory build completed")
         return context
     
