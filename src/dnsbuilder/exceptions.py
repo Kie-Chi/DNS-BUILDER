@@ -148,7 +148,9 @@ class UnknownError(UnsupportedFeatureError):
 # --- 6. Special Signal Codes, Should be ignored by the caller ---
 class Signal(DNSBuilderError):
     """Raised when a special signal is encountered."""
-    pass
+    def __init__(self, message: str, value=None):
+        super().__init__(message)
+        self.value = value
 
 class SignalPathNotFound(Signal):
     """Raised when a path is not found, may be found in fallback"""

@@ -3,6 +3,7 @@ import logging
 import traceback
 import asyncio
 import uvicorn
+from typing import Tuple
 
 from .config import Config
 from .builder import Builder, CachedBuilder
@@ -16,8 +17,45 @@ from .exceptions import (
 )
 from .api.main import app
 
+async def get_paths(args: argparse.Namespace) -> Tuple[DNSBPath]:
+    dnsb_path = DNSBPath(args.config_file)
+    if dnsb_path.is_absolute():
+        abs_cfg = str(dnsb_path)
+    else:
+        dnsb_path = DNSBPath(Path(args.config_file).resolve())
+        abs_cfg = str(dnsb_path)
+    
+    workdir = None
+    if args.workdir == "@config":
+        workdir = dnsb_path.parent if dnsb_path.protocol == "file" else DNSBPath(Path.cwd())
+        logging.info(f"Using config directory as workdir: {workdir}")
+    elif args.workdir:
+        workdir_path = Path(args.workdir).resolve()
+        workdir = DNSBPath(workdir_path)
+        logging.info(f"Using custom workdir: {workdir}")
+    elif args.workdir == "@cwd":
+        workdir = DNSBPath(Path.cwd())
+        logging.info(f"Using current working directory as workdir: {workdir}")
+    # Now default workdir is cwdgit://github.com/Kie-Chi/DNS.git?ref=remote-tsuking#tsuking.yml
+    else:
+        workdir = DNSBPath(Path.cwd())
+        logging.debug(f"Using default workdir (cwd): {workdir}")
+    return (abs_cfg, workdir)
 
-async def main():
+async def set_logger(args: argparse.Namespace):
+    module_levels = None
+    if args.log_levels:
+        module_levels = {}
+        for pair in args.log_levels.split(','):
+            pair = pair.strip()
+            if not pair or '=' not in pair:
+                continue
+            name, lvl = pair.split('=', 1)
+            module_levels[name.strip()] = lvl.strip().upper()
+
+    setup_logger(debug=args.debug, module_levels=module_levels, log_file=args.log_file)
+    
+async def parse_args() -> Tuple[argparse.Namespace, argparse.ArgumentParser]:
     parser = argparse.ArgumentParser(description="DNS Builder CLI")
     parser.add_argument("config_file", nargs='?', default=None, help="Path to the config.yml file.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
@@ -61,45 +99,33 @@ async def main():
         help="Path to log file. If specified, logs will be written to this file in addition to stderr.",
         default=None
     )
-    args = parser.parse_args()
+    return parser.parse_args(), parser
 
-    module_levels = None
-    if args.log_levels:
-        module_levels = {}
-        for pair in args.log_levels.split(','):
-            pair = pair.strip()
-            if not pair or '=' not in pair:
-                continue
-            name, lvl = pair.split('=', 1)
-            module_levels[name.strip()] = lvl.strip().upper()
+async def check_args(args: argparse.Namespace, parser: argparse.ArgumentParser):
+    if not args.config_file:
+        parser.error("the following arguments are required: config_file")
 
-    setup_logger(debug=args.debug, module_levels=module_levels, log_file=args.log_file)
-
+async def main():
+    # Parse arguments
+    args, parser = await parse_args()
+    
+    # Set logger
+    await set_logger(args)
+    
+    # Start web UI
     if args.ui:
         uvicorn.run(app, host="0.0.0.0", port=8000)
         return
 
-    if not args.config_file:
-        parser.error("the following arguments are required: config_file")
+    # Check 
+    await check_args(args, parser)
     
-    config_path = Path(args.config_file).resolve()
-    config_file_abs = str(config_path)
-    
-    workdir = None
-    if args.workdir == "@config":
-        workdir = DNSBPath(config_path.parent)
-        logging.info(f"Using config directory as workdir: {workdir}")
-    elif args.workdir:
-        workdir_path = Path(args.workdir).resolve()
-        workdir = DNSBPath(workdir_path)
-        logging.info(f"Using custom workdir: {workdir}")
-    else:
-        workdir = DNSBPath(Path.cwd())
-        logging.debug(f"Using default workdir (cwd): {workdir}")
-
+    # Start build
+    abs_cfg, workdir = await get_paths(args)
     try:
+    
         cli_fs = create_app_fs(use_vfs=args.vfs, chroot=workdir)
-        config = Config(config_file_abs, cli_fs)
+        config = Config(abs_cfg, cli_fs)
         
         # Choose builder based on incremental flag
         if args.incremental:

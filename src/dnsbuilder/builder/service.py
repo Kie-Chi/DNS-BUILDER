@@ -358,14 +358,15 @@ class ServiceHandler:
                             target_path = self.contents_dir / f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
                     return target_path
 
-                if self.context.fs.is_dir(host_path):
-                    filename = host_path.__rname__.split(".")[0]
-                    target_path = gen_target_path(filename)
-                    self.context.fs.copytree(host_path, target_path)
-                else:
-                    filename = host_path.__rname__
-                    target_path = gen_target_path(filename)
-                    self.context.fs.copy(host_path, target_path)
+                with self.context.fs.fallback(enable=False):
+                    if self.context.fs.is_dir(host_path):
+                        filename = host_path.__rname__.split(".")[0]
+                        target_path = gen_target_path(filename)
+                        self.context.fs.copytree(host_path, target_path)
+                    else:
+                        filename = host_path.__rname__
+                        target_path = gen_target_path(filename)
+                        self.context.fs.copy(host_path, target_path)
                 suffixes = DNSBPath(container_path).suffixes
                 if (len(suffixes) >= 1 and suffixes[-1] == '.conf') or (len(suffixes) >= 2 and suffixes[-2] == '.conf'):
                     blk = suffixes[-1].strip(".") if (len(suffixes) >= 2 and suffixes[-2] == '.conf') else 'global'

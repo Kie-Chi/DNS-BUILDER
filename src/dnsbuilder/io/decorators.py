@@ -9,7 +9,7 @@ File system decorators for error handling and fallback mechanisms.
 
 import functools
 import logging
-from typing import Tuple, Type
+from typing import Tuple, Type, List
 
 from ..exceptions import (
     DNSBPathExistsError,
@@ -22,7 +22,7 @@ from ..exceptions import (
 logger = logging.getLogger(__name__)
 
 
-def wrap_io_error(func):
+def wrap_io_error(func, ignores: Tuple[Type[Exception], ...] = (Signal,)):
     """
     Decorator to wrap IO errors into DNS-Builder exceptions.
     
@@ -42,10 +42,15 @@ def wrap_io_error(func):
             raise DNSBNotAFileError(e) from e
         except NotADirectoryError as e:
             raise DNSBNotADirectoryError(e) from e
-        except Signal as e:
-            # Signal should be ignored by the caller
-            pass
         except Exception as e:
+            if isinstance(e, ignores):
+                # Signal exceptions carry the original return value
+                val = getattr(e, 'value', None)
+                if val is not None:
+                    logger.debug(f"Returning Value from {type(e).__name__} in wrap_io_error")
+                    return val
+                logger.debug(f"Returning None from {type(e).__name__} in wrap_io_error")
+                return None
             raise e
     
     return wrapper
@@ -62,8 +67,15 @@ def signal(sig: Signal):
             except Exception as e:
                 raise e
             if not res:
-                logger.debug(f"Signal {sig.__name__} triggered for path: {path}")
-                raise sig(f"Signal {sig.__name__} triggered for path: {path}")
+                # Check if fallback is enabled
+                # The enable_fallback state is synced from AppFileSystem to handler
+                enable_fallback = getattr(self, 'enable_fallback', True)
+                
+                if enable_fallback:
+                    logger.debug(f"Signal {sig.__name__} triggered for path: {path}")
+                    raise sig(f"Signal {sig.__name__} triggered for path: {path}", value=res)
+                else:
+                    logger.debug(f"Signal {sig.__name__} suppressed (fallback disabled) for path: {path}")
             return res
         return wrapper
     return decorator

@@ -15,6 +15,7 @@ from .decorators import wrap_io_error, fb_check, auto, read_only, signal
 from ..exceptions import (
     ProtocolError,
     InvalidPathError,
+    Signal,
     UnsupportedFeatureError,
     ReadOnlyError,
     DNSBPathNotFoundError,
@@ -880,6 +881,13 @@ class GitFileSystem(FileSystem):
     and allows reading files from specific branches, tags, or commits.
     """
 
+    _IGNORE_ERRNOS = (
+        DNSBPathNotFoundError,
+        InvalidPathError,
+        ValueError,
+        Signal,
+    )
+
     def __init__(self, cache_fs: FileSystem, cache_root: str = ".dnsb_cache", chroot: DNSBPath = None):
         super().__init__(chroot=chroot)
         self.cache_fs = cache_fs
@@ -1020,7 +1028,7 @@ class GitFileSystem(FileSystem):
         try:
             full_path = self._get_synced_repo_path(path)
             return self.cache_fs.exists(full_path)
-        except (DNSBPathNotFoundError, InvalidPathError, ValueError):
+        except GitFileSystem._IGNORE_ERRNOS:
             return False
         except Exception as e:
             logger.error(f"[{self.name}] Error checking existence for '{path}': {e}")
@@ -1047,7 +1055,7 @@ class GitFileSystem(FileSystem):
         try:
             full_path = self._get_synced_repo_path(path)
             return self.cache_fs.is_dir(full_path)
-        except (DNSBPathNotFoundError, InvalidPathError, ValueError):
+        except GitFileSystem._IGNORE_ERRNOS:
             return False
         except Exception as e:
             logger.error(f"[{self.name}] Error in is_dir for '{path}': {e}")
@@ -1058,7 +1066,7 @@ class GitFileSystem(FileSystem):
         try:
             full_path = self._get_synced_repo_path(path)
             return self.cache_fs.is_file(full_path)
-        except (DNSBPathNotFoundError, InvalidPathError, ValueError):
+        except GitFileSystem._IGNORE_ERRNOS:
             return False
         except Exception as e:
             logger.error(f"[{self.name}] Error in is_file for '{path}': {e}")
