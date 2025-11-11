@@ -299,17 +299,22 @@ class AppFileSystem(FileSystem):
     @wrap_io_error
     @fb_check
     def copytree(self, src: DNSBPath, dst: DNSBPath):
+        logger.debug(f"[AppFS] copytree: {src} -> {dst}")
         src_handler = self._get_handler(src)
         dst_handler = self._get_handler(dst)
+        logger.debug(f"[AppFS] src_handler={src_handler.__class__.__name__}, dst_handler={dst_handler.__class__.__name__}")
+        
         if src_handler is dst_handler and isinstance(src_handler, DiskFileSystem):
+            logger.debug(f"[AppFS] Using same-handler copytree (DiskFileSystem)")
             src_handler.copytree(src, dst)
             return
 
-        
         if isinstance(src_handler, GitFileSystem):
+            logger.debug(f"[AppFS] Using GitFileSystem.copy2fs")
             src_handler.copy2fs(src, dst, dst_handler)
             return
         if isinstance(src_handler, ResourceFileSystem):
+            logger.debug(f"[AppFS] Using ResourceFileSystem.copy2fs")
             src_handler.copy2fs(src, dst, dst_handler)
             return
 
@@ -326,7 +331,7 @@ class AppFileSystem(FileSystem):
 class GenericFileSystem(FileSystem, ABC):
     """Generic File System base class for fsspec and morefs implementations"""
 
-    def __init__(self, fs_instance, name=None, chroot: DNSBPath = None):
+    def __init__(self, fs_instance, name=None, chroot: DNSBPath = None, enable_fallback: bool = False):
         """
         Initialize with a filesystem instance
         
@@ -338,6 +343,7 @@ class GenericFileSystem(FileSystem, ABC):
         super().__init__(chroot=chroot)
         self.fs = fs_instance
         self.name = name or f"{type(fs_instance).__name__}"
+        self.enable_fallback = enable_fallback
 
     @abstractmethod
     def path2str(self, path: DNSBPath) -> str:
@@ -454,9 +460,9 @@ class GenericFileSystem(FileSystem, ABC):
 class FsspecFileSystem(GenericFileSystem):
     """fsspec-based File System"""
 
-    def __init__(self, protocol="file", chroot: DNSBPath = None):
+    def __init__(self, protocol="file", chroot: DNSBPath = None, enable_fallback: bool = False):
         fs_instance = fsspec.filesystem(protocol)
-        super().__init__(fs_instance, name=f"{protocol}FS", chroot=chroot)
+        super().__init__(fs_instance, name=f"{protocol}FS", chroot=chroot, enable_fallback=enable_fallback)
         self.protocol = protocol
 
     @override
@@ -500,7 +506,7 @@ class FsspecFileSystem(GenericFileSystem):
 class MorefsFileSystem(GenericFileSystem):
     """morefs-based File System"""
 
-    def __init__(self, fs_type="dict", chroot: DNSBPath = None):
+    def __init__(self, fs_type="dict", chroot: DNSBPath = None, enable_fallback: bool = False):
         """
         Initialize morefs filesystem
 
@@ -514,7 +520,7 @@ class MorefsFileSystem(GenericFileSystem):
             fs_instance = MemFS()
         else:
             raise ValueError(f"Unsupported morefs type: {fs_type}")
-        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS", chroot=chroot)
+        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS", chroot=chroot, enable_fallback=enable_fallback)
         self.fs_type = fs_type
 
     @override
@@ -578,8 +584,8 @@ class MorefsFileSystem(GenericFileSystem):
 class DiskFileSystem(FsspecFileSystem):
     """Local disk file system using fsspec"""
 
-    def __init__(self, chroot: DNSBPath = None):
-        super().__init__(protocol="file", chroot=chroot)
+    def __init__(self, chroot: DNSBPath = None, enable_fallback: bool = False):
+        super().__init__(protocol="file", chroot=chroot, enable_fallback=enable_fallback)
         if not self.chroot:
             self.chroot = DNSBPath(Path.cwd())
             logger.debug(f"[DiskFS] No chroot provided, using cwd: {self.chroot}")
@@ -639,8 +645,8 @@ class DiskFileSystem(FsspecFileSystem):
 class NetworkFileSystem(FsspecFileSystem):
     """Network file system using fsspec"""
 
-    def __init__(self, protocol, chroot: DNSBPath = None):
-        super().__init__(protocol=protocol)
+    def __init__(self, protocol, chroot: DNSBPath = None, enable_fallback: bool = False):
+        super().__init__(protocol=protocol, chroot=chroot, enable_fallback=enable_fallback)
 
 
 # --------------------------------------------------------
@@ -809,8 +815,8 @@ class MemoryFileSystem(FsspecFileSystem):
     """
     in-memory filesystem using fsspec
     """
-    def __init__(self, chroot: DNSBPath = None):
-        super().__init__(protocol="memory", chroot=chroot)
+    def __init__(self, chroot: DNSBPath = None, enable_fallback: bool = False):
+        super().__init__(protocol="memory", chroot=chroot, enable_fallback=enable_fallback)
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -840,8 +846,8 @@ class HyperMemoryFileSystem(MorefsFileSystem):
     """
     High-performance in-memory filesystem
     """
-    def __init__(self, fs_type="mem", chroot: DNSBPath = None):
-        super().__init__(fs_type=fs_type, chroot=chroot)
+    def __init__(self, fs_type="mem", chroot: DNSBPath = None, enable_fallback: bool = False):
+        super().__init__(fs_type=fs_type, chroot=chroot, enable_fallback=enable_fallback)
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -874,6 +880,7 @@ class HyperMemoryFileSystem(MorefsFileSystem):
 #
 # --------------------
 
+@read_only()
 class GitFileSystem(FileSystem):
     """
     A read-only filesystem for accessing files from Git repositories.
@@ -1083,41 +1090,6 @@ class GitFileSystem(FileSystem):
         full_path = self._get_synced_repo_path(path)
         logger.debug(f"[{self.name}] Reading bytes from cached git path: {full_path}")
         return self.cache_fs.read_bytes(full_path)
-
-    def _raise_read_only(self, path: DNSBPath):
-        raise ReadOnlyError(f"Git filesystem is read-only. Cannot write to '{path}'.")
-
-    @override
-    def write_text(self, path: DNSBPath, content: str):
-        self._raise_read_only(path)
-
-    @override
-    def write_bytes(self, path: DNSBPath, content: bytes):
-        self._raise_read_only(path)
-
-    @override
-    def append_text(self, path: DNSBPath, content: str):
-        self._raise_read_only(path)
-
-    @override
-    def append_bytes(self, path: DNSBPath, content: bytes):
-        self._raise_read_only(path)
-
-    @override
-    def copy(self, src: DNSBPath, dst: DNSBPath):
-        self._raise_read_only(dst)
-
-    @override
-    def copytree(self, src: DNSBPath, dst: DNSBPath):
-        self._raise_read_only(dst)
-
-    @override
-    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
-        self._raise_read_only(path)
-
-    @override
-    def rmtree(self, path: DNSBPath):
-        self._raise_read_only(path)
 
     @override
     def stat(self, path: DNSBPath) -> os.stat_result:

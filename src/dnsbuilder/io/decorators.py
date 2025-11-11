@@ -47,7 +47,7 @@ def wrap_io_error(func, ignores: Tuple[Type[Exception], ...] = (Signal,)):
                 # Signal exceptions carry the original return value
                 val = getattr(e, 'value', None)
                 if val is not None:
-                    logger.debug(f"Returning Value from {type(e).__name__} in wrap_io_error")
+                    logger.debug(f"Returning {val} from {type(e).__name__} in wrap_io_error")
                     return val
                 logger.debug(f"Returning None from {type(e).__name__} in wrap_io_error")
                 return None
