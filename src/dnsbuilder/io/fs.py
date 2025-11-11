@@ -9,6 +9,7 @@ from morefs.memory import MemFS
 from importlib import resources
 import git
 import hashlib
+import threading
 from ..utils import override
 from .path import DNSBPath, Path
 from .decorators import wrap_io_error, fb_check, auto, read_only, signal
@@ -901,6 +902,8 @@ class GitFileSystem(FileSystem):
         self.cache_root = DNSBPath(cache_root)
         self.name = "GitFS"
         self._synced_repos = set()
+        self._repo_locks: Dict[str, threading.Lock] = {}
+        self._locks_lock = threading.Lock()
         logger.debug(f"[{self.name}] Initialized with cache_root: {self.cache_root}")
         logger.debug(f"[{self.name}] cache_fs chroot: {getattr(cache_fs, 'chroot', 'N/A')}")
         self._init_cache()
@@ -939,95 +942,108 @@ class GitFileSystem(FileSystem):
 
         return repo_url, ref, path_in_repo, local_repo_path
 
+    def _get_repo_lock(self, repo_url: str) -> threading.Lock:
+        """
+        Get or create a lock for the given repository URL.
+        Thread-safe method to manage per-repository locks.
+        """
+        with self._locks_lock:
+            if repo_url not in self._repo_locks:
+                self._repo_locks[repo_url] = threading.Lock()
+                logger.debug(f"[{self.name}] Created lock for repository: {repo_url}")
+            return self._repo_locks[repo_url]
+    
+    def _get_local_repo(self, repo_url: str, local_repo_path: DNSBPath) -> git.Repo:
+        """Clone repository if not exists, otherwise fetch updates."""
+        local_repo_abs = self.cache_fs.absolute(local_repo_path)
+        local_repo_str = str(local_repo_abs)
+        logger.debug(f"[{self.name}] Local repo path: {local_repo_path} (absolute: {local_repo_abs})")
+        
+        if not self.cache_fs.exists(local_repo_path):
+            logger.debug(f"[{self.name}] Cloning '{repo_url}' to '{local_repo_abs}'...")
+            git.Repo.clone_from(repo_url, local_repo_str)
+        else:
+            logger.debug(f"[{self.name}] Repository '{repo_url}' found in cache at '{local_repo_abs}'")
+        
+        repo = git.Repo(local_repo_str)
+        
+        # Try to fetch updates for existing repos
+        if self.cache_fs.exists(local_repo_path):
+            try:
+                repo.remotes.origin.fetch()
+            except git.exc.GitCommandError as e:
+                logger.warning(f"[{self.name}] Failed to fetch updates for '{repo_url}': {e}. Using cached version.")
+        
+        return repo
+    
+    def _should_pull(self, repo: git.Repo, ref: str) -> tuple[bool, str | None]:
+        """Determine if ref should be pulled and return (should_pull, branch_name)."""
+        if ref == 'HEAD':
+            try:
+                return True, repo.active_branch.name
+            except TypeError:
+                logger.debug(f"[{self.name}] HEAD is detached, no pull needed")
+                return False, None
+        elif ref in repo.heads:
+            return True, ref
+        else:
+            logger.debug(f"[{self.name}] Ref '{ref}' is a tag or commit hash, no pull needed")
+            return False, None
+    
+    def _checkout_and_pull(self, repo: git.Repo, ref: str, repo_url: str):
+        """Checkout ref and pull if it's a branch."""
+        logger.debug(f"[{self.name}] Checking out ref '{ref}' for '{repo_url}'...")
+        
+        try:
+            repo.git.checkout(ref)
+            should_pull, branch_name = self._should_pull(repo, ref)
+            
+            if should_pull and branch_name:
+                logger.debug(f"[{self.name}] Pulling latest changes for branch '{branch_name}'...")
+                try:
+                    repo.remotes.origin.pull()
+                except git.exc.GitCommandError as e:
+                    logger.warning(f"[{self.name}] Failed to pull branch '{branch_name}': {e}. Using cached state.")
+        
+        except git.exc.GitCommandError as e:
+            logger.warning(f"[{self.name}] Failed to checkout ref '{ref}': {e}. Falling back to local HEAD.")
+            try:
+                head_commit = repo.head.commit.hexsha
+                repo.git.checkout(head_commit)
+                logger.debug(f"[{self.name}] Fallback checkout to HEAD commit '{head_commit}' succeeded.")
+            except Exception as e2:
+                logger.error(f"[{self.name}] Fallback checkout to local HEAD failed: {e2}")
+                raise DNSBPathNotFoundError(
+                    f"Ref '{ref}' not found and fallback to HEAD failed in repository '{repo_url}': {e}"
+                ) from e
+
     def _get_synced_repo_path(self, path: DNSBPath) -> DNSBPath:
         """
         Ensures the repository is cloned/updated and at the correct ref.
         Returns the absolute path to the requested file within the cache.
         """
         repo_url, ref, path_in_repo, local_repo_path = self._parse_path(path)
-
-        # Create a unique key for this repo and ref for this run
         cache_key = f"{repo_url}@{ref}"
         
-        if cache_key in self._synced_repos:
-            logger.debug(f"[{self.name}] '{cache_key}' already synced in this run. Using local cache.")
-        else:
-            
-            logger.debug(f"[{self.name}] Syncing repository for '{cache_key}'...")
-            local_repo_abs = self.cache_fs.absolute(local_repo_path)
-            local_repo_str = str(local_repo_abs)
-            logger.debug(f"[{self.name}] Local repo path: {local_repo_path} (absolute: {local_repo_abs})")
-    
-            if not self.cache_fs.exists(local_repo_path):
-                logger.debug(f"[{self.name}] Cloning '{repo_url}' to '{local_repo_abs}'...")
-                git.Repo.clone_from(repo_url, local_repo_str)
-                repo = git.Repo(local_repo_str)
-            else:
-                logger.debug(
-                    f"[{self.name}] Repository '{repo_url}' found in cache at '{local_repo_abs}'"
-                )
-                repo = git.Repo(local_repo_str)
-                try:
-                    repo.remotes.origin.fetch()
-                except git.exc.GitCommandError as e:
-                    logger.warning(
-                        f"[{self.name}] Failed to fetch updates for '{repo_url}': {e}. Using cached version."
-                    )
-    
-            logger.debug(f"[{self.name}] Checking out ref '{ref}' for '{repo_url}'...")
-            try:
-                repo.git.checkout(ref)
-                should_pull = False
-                current_branch = None
-                if ref == 'HEAD':
-                    try:
-                        current_branch = repo.active_branch.name
-                        should_pull = True
-                        logger.debug(f"[{self.name}] HEAD points to branch '{current_branch}'")
-                    except TypeError:
-                        logger.debug(f"[{self.name}] HEAD is detached, no pull needed")
-                        should_pull = False
-                elif ref in repo.heads:
-                    current_branch = ref
-                    should_pull = True
+        if cache_key not in self._synced_repos:
+            repo_lock = self._get_repo_lock(repo_url)
+            with repo_lock:
+                if cache_key not in self._synced_repos:
+                    logger.debug(f"[{self.name}] Syncing repository for '{cache_key}'...")
+                    repo = self._get_local_repo(repo_url, local_repo_path)
+                    self._checkout_and_pull(repo, ref, repo_url)
+                    self._synced_repos.add(cache_key)
+                    logger.debug(f"[{self.name}] Sync complete for '{cache_key}'.")
                 else:
-                    logger.debug(f"[{self.name}] Ref '{ref}' is a tag or commit hash, no pull needed")
-                    should_pull = False
-                if should_pull and current_branch:
-                    logger.debug(f"[{self.name}] Pulling latest changes for branch '{current_branch}'...")
-                    try:
-                        repo.remotes.origin.pull()
-                    except git.exc.GitCommandError as e:
-                        logger.warning(
-                            f"[{self.name}] Failed to pull branch '{current_branch}' for '{repo_url}': {e}. Using cached branch state."
-                        )
-
-            except git.exc.GitCommandError as e:
-                logger.warning(
-                    f"[{self.name}] Failed to checkout ref '{ref}' for '{repo_url}': {e}. Falling back to local HEAD."
-                )
-                # Try fallback to current HEAD commit (local cache)
-                try:
-                    head_commit = repo.head.commit.hexsha
-                    repo.git.checkout(head_commit)
-                    logger.debug(f"[{self.name}] Fallback checkout to HEAD commit '{head_commit}' succeeded.")
-                except Exception as e2:
-                    logger.error(
-                        f"[{self.name}] Fallback checkout to local HEAD failed: {e2}"
-                    )
-                    raise DNSBPathNotFoundError(
-                        f"Ref '{ref}' not found and fallback to HEAD failed in repository '{repo_url}': {e}"
-                    ) from e
-            
-            # Mark this repo+ref as synced for this run
-            self._synced_repos.add(cache_key)
-            logger.debug(f"[{self.name}] Sync complete for '{cache_key}'.")
-
+                    logger.debug(f"[{self.name}] '{cache_key}' was synced by another thread.")
+        else:
+            logger.debug(f"[{self.name}] '{cache_key}' already synced in this run.")
 
         final_path = self.cache_fs.absolute(local_repo_path) / path_in_repo
         if not self.cache_fs.exists(final_path):
-            raise DNSBPathNotFoundError(f"Path '{path_in_repo}' not found in repository '{repo_url}' at ref '{ref}'.")
-            
+            raise DNSBPathNotFoundError(
+                f"Path '{path_in_repo}' not found in repository '{repo_url}' at ref '{ref}'."
+            )
         return final_path
 
     @override
