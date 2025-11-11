@@ -6,6 +6,9 @@ FROM {base_image}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install chsrc if mirror config uses 'auto'
+{chsrc_install_setup}
+
 # Optional mirror setup
 {apt_mirror_setup}
 {pip_mirror_setup}

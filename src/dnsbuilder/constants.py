@@ -162,3 +162,7 @@ MIRRORS = {
     'pip': ['pip_index_url', 'pip_index', 'pip'], 
     'npm': ['npm_registry', 'npm', 'registry'], 
 }
+
+# --- supported os ---
+SUPPORTED_OS = ["ubuntu", "debian"]
+DEFAULT_OS = "debian"

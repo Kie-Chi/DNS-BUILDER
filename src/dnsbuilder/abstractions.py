@@ -344,6 +344,8 @@ class InternalImage(Image, ABC):
         """Provides a dictionary of variables for formatting the Dockerfile template."""
         dep_packages = " ".join(self.dependency)
         util_packages = " ".join(self.util)
+        # chsrc installation (if any mirror uses 'auto')
+        chsrc_install_setup = self._chsrc_install()
         # Mirror injections (optional)
         apt_mirror_setup = self.apt_mro()
         pip_mirror_setup = self.pip_mro()
@@ -354,29 +356,79 @@ class InternalImage(Image, ABC):
             "base_image": self.base_image,
             "dep_packages": dep_packages,
             "util_packages": util_packages or "''",
+            "chsrc_install_setup": chsrc_install_setup,
             "apt_mirror_setup": apt_mirror_setup,
             "pip_mirror_setup": pip_mirror_setup,
             "npm_registry_setup": npm_registry_setup,
         }
 
+    def _needs_chsrc(self) -> bool:
+        """Check if any mirror configuration uses 'auto' (requires chsrc)"""
+        if not self.mirror:
+            return False
+        
+        # Check all supported mirror types for 'auto' value
+        for mirror_type in constants.MIRRORS.keys():
+            for key in constants.MIRRORS.get(mirror_type, []):
+                if self.mirror.get(key) == "auto":
+                    return True
+        return False
+    
+    def _chsrc_install(self) -> str:
+        """Generate chsrc installation commands if needed"""
+        if not self._needs_chsrc():
+            return ""
+        
+        # Determine architecture based on base image
+        arch = "x64"
+        
+        install_cmd = (
+            "# Install chsrc for automatic mirror source switching\n"
+            "RUN set -eux; \\\n"
+            "    if command -v wget >/dev/null 2>&1; then \\\n"
+            f"        wget -O /tmp/chsrc https://gitee.com/RubyMetric/chsrc/releases/download/pre/chsrc-{arch}-linux; \\\n"
+            "    elif command -v curl >/dev/null 2>&1; then \\\n"
+            f"        curl -L https://gitee.com/RubyMetric/chsrc/releases/download/pre/chsrc-{arch}-linux -o /tmp/chsrc; \\\n"
+            "    else \\\n"
+            "        # Temporarily use a fast mirror to install curl\n"
+            "        sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true; \\\n"
+            "        sed -i 's|archive.ubuntu.com|mirrors.ustc.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true; \\\n"
+            "        apt-get update && apt-get install -y --no-install-recommends curl && \\\n"
+            f"        curl -L https://gitee.com/RubyMetric/chsrc/releases/download/pre/chsrc-{arch}-linux -o /tmp/chsrc && \\\n"
+            "        rm -rf /var/lib/apt/lists/*; \\\n"
+            "    fi && \\\n"
+            "    chmod +x /tmp/chsrc"
+        )
+        
+        logger.debug(f"[{self.name}] chsrc installation will be added to Dockerfile")
+        return install_cmd
+
     def apt_mro(self) -> str:
         """Generate APT mirror configuration"""
         # Support multiple key aliases for convenience
-        mirror_host_origin = ""
+        mirror_value = ""
         for key in constants.MIRRORS["apt"]:
             if key in self.mirror:
-                mirror_host_origin = self.mirror[key]
+                mirror_value = self.mirror[key]
                 break
-        if not mirror_host_origin:
+        
+        if not mirror_value:
             return ""
-        url = DNSBPath(mirror_host_origin)
+        
+        if mirror_value == "auto":
+            _apt_defined = constants.SUPPORTED_OS
+            base_os = self.os if self.os in _apt_defined else constants.DEFAULT_OS
+            return f"RUN /tmp/chsrc set {base_os} first || true"
+        
+        # Manual mode - use specified mirror URL
+        url = DNSBPath(mirror_value)
         mirror_host = url.host or url.__path__()
         if not mirror_host:
-            logger.warning(f"[{self.name}] Invalid apt mirror host: {mirror_host_origin}")
+            logger.warning(f"[{self.name}] Invalid apt mirror host: {mirror_value}")
             return ""
         proto = "http" if url.is_http() else "https"
-        _apt_defined = ["ubuntu", "debian"]
-        base_os = self.os if self.os in _apt_defined else "debian"
+        _apt_defined = constants.SUPPORTED_OS
+        base_os = self.os if self.os in _apt_defined else constants.DEFAULT_OS
         if base_os == "ubuntu":
             # Properly escape dots in sed patterns
             return (
@@ -403,26 +455,39 @@ class InternalImage(Image, ABC):
 
     def pip_mro(self) -> str:
         """Generate pip mirror configuration"""
-        index_url = ""
+        mirror_value = ""
         for key in constants.MIRRORS["pip"]:
             if key in self.mirror:
-                index_url = self.mirror[key]
+                mirror_value = self.mirror[key]
                 break
-        if index_url:
-            # Use pip config to persist across pip calls
-            return f"RUN pip config set global.index-url {index_url} || true"
-        return ""
+        
+        if not mirror_value:
+            return ""
+        
+        # Handle 'auto' mode - use chsrc first
+        if mirror_value == "auto":
+            return "RUN /tmp/chsrc set pip first || true"
+        
+        # Manual mode - use specified index URL
+        return f"RUN pip config set global.index-url {mirror_value} || true"
 
     def npm_mro(self) -> str:
         """Generate npm mirror configuration"""
-        registry = ""
+        mirror_value = ""
         for key in constants.MIRRORS["npm"]:
             if key in self.mirror:
-                registry = self.mirror[key]
+                mirror_value = self.mirror[key]
                 break
-        if registry:
-            return f"RUN npm config set registry {registry}"
-        return ""
+        
+        if not mirror_value:
+            return ""
+        
+        # Handle 'auto' mode - use chsrc first
+        if mirror_value == "auto":
+            return "RUN /tmp/chsrc set npm first || true"
+        
+        # Manual mode - use specified registry URL
+        return f"RUN npm config set registry {mirror_value} || true"
 
     def write(self, directory: DNSBPath):
         """Write Dockerfile to the specified directory"""
