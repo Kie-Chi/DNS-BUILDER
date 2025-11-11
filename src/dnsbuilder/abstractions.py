@@ -16,7 +16,7 @@ import json
 import re
 import hashlib
 
-from .datacls import BehaviorArtifact, Pair
+from .datacls import BehaviorArtifact, Pair, Package, PkgInstaller
 from .io import DNSBPath, FileSystem
 from .exceptions import (
     UnsupportedFeatureError,
@@ -191,11 +191,9 @@ class InternalImage(Image, ABC):
         self.version: Optional[str] = config.get("version")
         self.util: List[str] = config.get("util", [])
         self.dependency: List[str] = config.get("dependency", [])
-        # Optional mirror configuration for package managers
         self.mirror: Dict[str, Any] = config.get("mirror", {})
         self.os, self.os_version = str(config.get("from", ":")).split(":")
 
-        self.base_image = f"{self.os}:{self.os_version}"
         self.default_deps = set()
         self.default_utils = set()
 
@@ -203,13 +201,19 @@ class InternalImage(Image, ABC):
             self._load_defaults()
             self._generate_deps_from_rules()
         self._post_init_hook()
+        # os, version is finally determined here, you should not change it anymore
+        self.base_image = f"{self.os}:{self.os_version}"
+        # never change os, version anymore
 
-        # Final merge of default, rule-based, and user-defined dependencies
         self.dependency = sorted(list(self.default_deps.union(set(self.dependency))))
         self.util = sorted(list(self.default_utils.union(set(self.util))))
 
+        self._parse_packages()
+
         logger.debug(f"[{self.name}] Final merged dependencies: {self.dependency}")
         logger.debug(f"[{self.name}] Final merged utilities: {self.util}")
+        logger.debug(f"[{self.name}] Parsed dep packages: {self.dep_pkgs}")
+        logger.debug(f"[{self.name}] Parsed util packages: {self.util_pkgs}")
 
     @abstractmethod
     def _post_init_hook(self):
@@ -325,6 +329,15 @@ class InternalImage(Image, ABC):
                 f"[{self.name}] Failed to determine OS version from rules for version '{self.version}'."
             )
 
+    def _parse_packages(self):
+        """
+        Parse merged packages into Package objects for installation.
+        Uses set to deduplicate packages that may appear in different formats.
+        """
+        self.installer = PkgInstaller(self.os)
+        self.dep_pkgs = sorted(list(set(self.installer.parse(self.dependency))), key=str)
+        self.util_pkgs = sorted(list(set(self.installer.parse(self.util))), key=str)
+
     def _generate_dockerfile_content(self) -> str:
         """
         Loads the appropriate Dockerfile template and formats it with instance variables.
@@ -342,8 +355,8 @@ class InternalImage(Image, ABC):
 
     def _get_template_vars(self) -> Dict[str, Any]:
         """Provides a dictionary of variables for formatting the Dockerfile template."""
-        dep_packages = " ".join(self.dependency)
-        util_packages = " ".join(self.util)
+        dep_packages = self.installer.gen_cmds(self.dep_pkgs, "build")
+        util_packages = self.installer.gen_cmds(self.util_pkgs, "runtime")
         # chsrc installation (if any mirror uses 'auto')
         chsrc_install_setup = self._chsrc_install()
         # Mirror injections (optional)
@@ -355,7 +368,7 @@ class InternalImage(Image, ABC):
             "version": self.version,
             "base_image": self.base_image,
             "dep_packages": dep_packages,
-            "util_packages": util_packages or "''",
+            "util_packages": util_packages,
             "chsrc_install_setup": chsrc_install_setup,
             "apt_mirror_setup": apt_mirror_setup,
             "pip_mirror_setup": pip_mirror_setup,
@@ -394,7 +407,7 @@ class InternalImage(Image, ABC):
             "        sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true; \\\n"
             "        sed -i 's|archive.ubuntu.com|mirrors.ustc.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true; \\\n"
             "        apt-get update && apt-get install -y --no-install-recommends curl && \\\n"
-            f"        curl -L https://gitee.com/RubyMetric/chsrc/releases/download/pre/chsrc-{arch}-linux -o /tmp/chsrc && \\\n"
+            f"        curl -k https://gitee.com/RubyMetric/chsrc/releases/download/pre/chsrc-{arch}-linux -o /tmp/chsrc && \\\n"
             "        rm -rf /var/lib/apt/lists/*; \\\n"
             "    fi && \\\n"
             "    chmod +x /tmp/chsrc"
@@ -517,8 +530,8 @@ class InternalImage(Image, ABC):
             "from": f"{self.os}:{self.os_version}",
             "software": self.software,
             "version": self.version,
-            "dependency": copy.deepcopy(self.dependency),
-            "util": copy.deepcopy(self.util),
+            "dependency": [str(pkg) for pkg in self.dep_pkgs],
+            "util": [str(pkg) for pkg in self.util_pkgs],
             "mirror": copy.deepcopy(self.mirror)
         }
         merged.update(parent_values)

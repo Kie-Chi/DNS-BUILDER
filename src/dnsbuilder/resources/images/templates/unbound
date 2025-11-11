@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # --- STAGE 1: Install Build Dependencies ---
 # These packages are required to compile the software. They change infrequently.
-RUN apt-get update && apt-get install -y --no-install-recommends {dep_packages}
+{dep_packages}
 
 # --- STAGE 2: Download and Compile Source ---
 WORKDIR /usr/src
@@ -43,8 +43,7 @@ RUN touch /usr/local/etc/unbound.conf && \
 
 # --- STAGE 4: Install Runtime Utilities ---
 # Install utils for user
-RUN apt-get update && apt-get install -y --no-install-recommends {util_packages} && \
-    rm -rf /var/lib/apt/lists/*
+{util_packages}
 
 # Expose standard DNS ports
 EXPOSE 53/tcp

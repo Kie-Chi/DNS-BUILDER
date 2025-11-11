@@ -163,6 +163,123 @@ MIRRORS = {
     'npm': ['npm_registry', 'npm', 'registry'], 
 }
 
-# --- supported os ---
+# --- Supported os ---
 SUPPORTED_OS = ["ubuntu", "debian"]
 DEFAULT_OS = "debian"
+
+DEFAULT_PM = "apt"
+
+# --- Package name patterns ---
+PKG_NAMES = [
+    # Python packages: python3-xxx, python-xxx, pip-xxx, pip3-xxx, py3-xxx, py-xxx
+    (r"^(python3|pip3|py3)-(.+)$", "pip3", 2),
+    (r"^(python|pip|py)-(.+)$", "pip", 2),
+    
+    # Node/NPM packages: node-xxx, npm-xxx
+    (r"^(node|npm)-(.+)$", "npm", 2),
+    
+    # Ruby packages: ruby-xxx, gem-xxx
+    (r"^(ruby|gem)-(.+)$", "gem", 2),
+    
+    # Rust packages: rust-xxx, cargo-xxx
+    (r"^(rust|cargo)-(.+)$", "cargo", 2),
+    
+    # Go packages: go-xxx, golang-xxx
+    (r"^(go|golang)-(.+)$", "go", 2),
+]
+
+BASE_PACKAGE_MANAGERS = {
+    "apt": {
+        "supported_os": ["ubuntu", "debian", "python"],
+        "check_cmd": "command -v apt-get >/dev/null 2>&1",
+        "install_cmd": "apt-get update && apt-get install -y --no-install-recommends {packages}",
+        "cleanup_cmd": "rm -rf /var/lib/apt/lists/*",
+    },
+    "dnf": {
+        "supported_os": ["fedora", "rhel", "centos"],
+        "check_cmd": "command -v dnf >/dev/null 2>&1",
+        "install_cmd": "dnf install -y {packages}",
+        "cleanup_cmd": "dnf clean all",
+    },
+    "yum": {
+        "supported_os": ["centos", "rhel", "amazonlinux"],
+        "check_cmd": "command -v yum >/dev/null 2>&1",
+        "install_cmd": "yum install -y {packages}",
+        "cleanup_cmd": "yum clean all",
+    },
+    "apk": {
+        "supported_os": ["alpine"],
+        "check_cmd": "command -v apk >/dev/null 2>&1",
+        "install_cmd": "apk add --no-cache {packages}",
+        "cleanup_cmd": "",
+    },
+}
+
+SOFT_PACKAGE_MANAGERS = {
+    "pip": {
+        "check_cmd": "command -v pip >/dev/null 2>&1",
+        "install_cmd": "pip install --no-cache-dir {packages}",
+        "cleanup_cmd": "",
+        "base_requirements": {
+            "apt": ["python3", "python3-pip"],
+            "dnf": ["python3", "python3-pip"],
+            "yum": ["python3", "python3-pip"],
+            "apk": ["python3", "py3-pip"],
+        }
+    },
+    "pip3": {
+        "check_cmd": "command -v pip3 >/dev/null 2>&1",
+        "install_cmd": "pip3 install --no-cache-dir {packages}",
+        "cleanup_cmd": "",
+        "base_requirements": {
+            "apt": ["python3", "python3-pip"],
+            "dnf": ["python3", "python3-pip"],
+            "yum": ["python3", "python3-pip"],
+            "apk": ["python3", "py3-pip"],
+        }
+    },
+    "npm": {
+        "check_cmd": "command -v npm >/dev/null 2>&1",
+        "install_cmd": "npm install -g {packages}",
+        "cleanup_cmd": "npm cache clean --force",
+        "base_requirements": {
+            "apt": ["nodejs", "npm"],
+            "dnf": ["nodejs", "npm"],
+            "yum": ["nodejs", "npm"],
+            "apk": ["nodejs", "npm"],
+        }
+    },
+    "cargo": {
+        "check_cmd": "command -v cargo >/dev/null 2>&1",
+        "install_cmd": "cargo install {packages}",
+        "cleanup_cmd": "",
+        "base_requirements": {
+            "apt": ["cargo", "rustc"],
+            "dnf": ["cargo", "rust"],
+            "yum": ["cargo", "rust"],
+            "apk": ["cargo", "rust"],
+        }
+    },
+    "go": {
+        "check_cmd": "command -v go >/dev/null 2>&1",
+        "install_cmd": "go install {packages}",
+        "cleanup_cmd": "",
+        "base_requirements": {
+            "apt": ["golang-go"],
+            "dnf": ["golang"],
+            "yum": ["golang"],
+            "apk": ["go"],
+        }
+    },
+    "gem": {
+        "check_cmd": "command -v gem >/dev/null 2>&1",
+        "install_cmd": "gem install {packages}",
+        "cleanup_cmd": "",
+        "base_requirements": {
+            "apt": ["ruby", "ruby-dev"],
+            "dnf": ["ruby", "ruby-devel"],
+            "yum": ["ruby", "ruby-devel"],
+            "apk": ["ruby", "ruby-dev"],
+        }
+    },
+}

@@ -36,10 +36,10 @@ async def get_paths(args: argparse.Namespace) -> Tuple[DNSBPath]:
     elif args.workdir == "@cwd":
         workdir = DNSBPath(Path.cwd())
         logging.info(f"Using current working directory as workdir: {workdir}")
-    # Now default workdir is cwdgit://github.com/Kie-Chi/DNS.git?ref=remote-tsuking#tsuking.yml
+    # Now default workdir is cwd
     else:
         workdir = DNSBPath(Path.cwd())
-        logging.debug(f"Using default workdir (cwd): {workdir}")
+        logging.debug(f"Using default workdir: {workdir}")
     return (abs_cfg, workdir)
 
 async def set_logger(args: argparse.Namespace):

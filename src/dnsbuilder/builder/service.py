@@ -352,7 +352,6 @@ class ServiceHandler:
                 target_path = None
                 def gen_target_path(filename: DNSBPath) -> DNSBPath:
                     target_path = self.contents_dir / filename
-                    # Check target_path without fallback - it only exists in memory/output dir
                     with self.context.fs.fallback(enable=False):
                         if self.context.fs.exists(target_path):
                             target_path = self.contents_dir / f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"

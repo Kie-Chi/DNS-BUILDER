@@ -15,12 +15,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # --- STAGE 1: Install Python Dependencies via Pip ---
 # These packages are specified in the 'util' list with a 'python3-' prefix.
-{pip_packages}
+# Nothing at all
 
 # --- STAGE 2: Install Runtime Utilities ---
 # Install utils for user
-RUN apt-get update && apt-get install -y --no-install-recommends {util_packages} && \
-    rm -rf /var/lib/apt/lists/*
+{util_packages}
 
 # Set up the working directory
 WORKDIR /usr/local/etc

@@ -8,17 +8,17 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install chsrc if mirror config uses 'auto'
 {chsrc_install_setup}
 
-# Optional mirror setup
-{apt_mirror_setup}
-{pip_mirror_setup}
-
-# Update sources for archived Debian "Buster"
+# NOTE: Debian Buster reached EOL in Aug 2022. Switch to archive before mirror setup
 RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
     sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
     sed -i '/buster-updates/d' /etc/apt/sources.list
 
+# Mirror setup (disabled for Buster - archives not on most mirrors)
+# {apt_mirror_setup}
+{pip_mirror_setup}
+
 # Install dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends {dep_packages}
+{dep_packages}
 
 # Clone the JudasDNS repository from GitHub
 RUN git clone https://github.com/mandatoryprogrammer/JudasDNS.git /usr/src/judasdns
@@ -31,7 +31,7 @@ WORKDIR /usr/src/judasdns
 RUN npm install
 
 # Install utils
-RUN apt-get update && apt-get install -y --no-install-recommends {util_packages}
+{util_packages}
 
 # Expose the default DNS port
 EXPOSE 53/udp

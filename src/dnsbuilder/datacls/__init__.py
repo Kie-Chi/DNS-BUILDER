@@ -14,6 +14,7 @@ Data classes:
 from .contexts import BuildContext
 from .artifacts import BehaviorArtifact, VolumeArtifact
 from .volume import Volume, Pair
+from .pack import Package, PkgInstaller
 
 __all__ = [
     # Contexts
@@ -24,5 +25,8 @@ __all__ = [
     # Volume
     'Volume',
     'Pair',
+    # Package
+    'Package',
+    'PkgInstaller',
 ]
 
