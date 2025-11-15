@@ -367,22 +367,23 @@ class ServiceHandler:
                         target_path = gen_target_path(filename)
                         self.context.fs.copy(host_path, target_path)
                 suffixes = DNSBPath(container_path).suffixes
+                dcr_path = f"./{self.service_name}/contents/{filename}"
                 if (len(suffixes) >= 1 and suffixes[-1] == '.conf') or (len(suffixes) >= 2 and suffixes[-2] == '.conf'):
                     blk = suffixes[-1].strip(".") if (len(suffixes) >= 2 and suffixes[-2] == '.conf') else 'global'
                     _blks = constants.DNS_SOFTWARE_BLOCKS.get(self.image_obj.software, set())
                     if blk in _blks:
                         if not pairs.get(blk, None):
-                            pairs[blk] = Pair(src=target_path, dst=container_path)
+                            pairs[blk] = Pair(src=target_path, dst=container_path, dcr=dcr_path)
                             logger.debug(f"Identified '{filename}' as the main `{blk}` configuration file.")
                         else:
                             if self.context.fs.read_text(pairs[blk].src).find(str(container_path)) != -1:
                                 logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
                             else:
-                                _nd_iclds.append(Pair(src=target_path, dst=container_path))
+                                _nd_iclds.append(Pair(src=target_path, dst=container_path, dcr=dcr_path))
                     else:
                         logger.warning(f"Configuration file '{filename}' is not in a recognized block for '{self.image_obj.software}', skipping.")
             
-                final_volume_str = f"./{self.service_name}/contents/{filename}:{container_path}"
+                final_volume_str = f"{dcr_path}:{container_path}"
                 if volume.mode:
                     final_volume_str += f":{volume.mode}"
                 self.processed_volumes.append(final_volume_str)
@@ -391,7 +392,10 @@ class ServiceHandler:
             includer = self.context.includer_factory.create(pairs, self.image_obj.software)
             for _icld in _nd_iclds:
                 logger.debug(f"Found additional config file '{_icld.src}', will attempt to include it in the main `{blk}` config.")
-                includer.include(_icld)
+                p = includer.include(_icld)
+                if p:
+                    logger.debug(f"Help Copy to Another directory: {p.dcr}:{p.dst}")
+                    self.processed_volumes.append(f"{p.dcr}:{p.dst}")
         return pairs
 
     def _generate_artifacts_from_behaviors(
@@ -446,7 +450,7 @@ class ServiceHandler:
         # 2. Generate zone file and config line for each aggregated zone
         for zone, records in records_by_zone.items():
             generator = ZoneGenerator(self.context, zone, self.service_name, records)
-            zone_content = generator.generate_zone_file()
+            zone_content = generator.generate()
 
             filename = f"db.{zone}" if zone != "." else "db.root"
             filepath = gen_vol_dir / filename
@@ -520,8 +524,9 @@ class ServiceHandler:
         container_conf_path = (
             f"/usr/local/etc/zones/{constants.GENERATED_ZONES_FILENAME}"
         )
+        dcr_path = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_FILENAME}"
         self.processed_volumes.append(
-            f"./{self.service_name}/contents/{constants.GENERATED_ZONES_FILENAME}:{container_conf_path}"
+            f"{dcr_path}:{container_conf_path}"
         )
 
         includer = self.context.includer_factory.create(
@@ -530,9 +535,15 @@ class ServiceHandler:
         # Create a Pair for the generated zones config
         generated_zones_pair = Pair(
             src=gen_zones_path, 
-            dst=container_conf_path
+            dst=container_conf_path,
+            dcr=dcr_path
         )
-        includer.include(generated_zones_pair)
+        p = includer.include(generated_zones_pair)
+        if p:
+            logger.debug(f"Help Copy to Another directory: {p.dcr}:{p.dst}")
+            self.processed_volumes.append(
+                f"{p.dcr}:{p.dst}"
+            )
         logger.debug(
             f"Appended include directive for '{container_conf_path}' to '{main_conf.dst}'."
         )

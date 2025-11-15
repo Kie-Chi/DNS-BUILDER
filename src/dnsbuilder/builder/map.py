@@ -23,7 +23,7 @@ class Mapper:
         self.service_ips = service_ips
         self.topology: Dict[str, Set[str]] = {}
 
-    def map_topology(self) -> Dict[str, List[str]]:
+    def mapt(self) -> Dict[str, List[str]]:
         """
         Parses all service behaviors to build and log the dependency graph.
         """
@@ -131,7 +131,7 @@ class GraphGenerator:
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
 
-    def generate_dot_file(self, output_path: str):
+    def generate(self, output_path: str):
         """
         Creates and saves the DOT graph file.
         """

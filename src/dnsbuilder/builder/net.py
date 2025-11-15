@@ -19,7 +19,7 @@ class NetworkManager:
         self.service_ips: Dict[str, str] = {}
         self.subnet = subnet_str
 
-    def plan_network(self, resolved_builds: Dict) -> Dict[str, str]:
+    def plan(self, resolved_builds: Dict) -> Dict[str, str]:
         """Allocates an IP for each service, validating any static assignments."""
         logger.info(f"Planning network for subnet {self.network}...")
         for service_name, build_conf in resolved_builds.items():
@@ -51,7 +51,7 @@ class NetworkManager:
         logger.debug(f"Final allocated IPs: {self.service_ips}")
         return self.service_ips
     
-    def get_compose_network_block(self) -> Dict:
+    def compose(self) -> Dict:
         """Generates the 'networks' block for the docker-compose.yml file."""
         return {
             constants.DEFAULT_NETWORK_NAME: {

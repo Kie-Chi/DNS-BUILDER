@@ -19,10 +19,10 @@ class Resolver:
     """
     Resolves the complete, flattened build configuration for each service
     """
-    def __init__(self, config: Config, images: Dict[str, Image], predefined_builds: Dict):
+    def __init__(self, config: Config, images: Dict[str, Image], pr_blds: Dict):
         self.config = config
         self.images = images
-        self.predefined_builds = predefined_builds
+        self.pr_blds = pr_blds
         self.resolved_builds: Dict[str, Dict] = {}
         self.resolving_stack: set = set()
 
@@ -71,17 +71,17 @@ class Resolver:
                 
                 predefined_ref = f"{software_type}:{role}"
                 logger.debug(f"[Resolver] Interpreted '{ref}' as standard build '{predefined_ref}'.")
-                if software_type not in self.predefined_builds or role not in self.predefined_builds.get(software_type, {}):
+                if software_type not in self.pr_blds or role not in self.pr_blds.get(software_type, {}):
                     raise ReferenceNotFoundError(f"Unknown predefined build for '{predefined_ref}'.")
                 
-                parent_conf = self.predefined_builds[software_type][role]
+                parent_conf = self.pr_blds[software_type][role]
                 logger.debug(f"[Resolver] Loaded parent config from predefined build '{predefined_ref}'.")
 
             elif ':' in ref:
                 software_type, role = ref.split(':', 1)
-                if software_type not in self.predefined_builds or role not in self.predefined_builds.get(software_type, {}):
+                if software_type not in self.pr_blds or role not in self.pr_blds.get(software_type, {}):
                     raise ReferenceNotFoundError(f"Unknown predefined build: '{ref}'.")
-                parent_conf = self.predefined_builds[software_type][role]
+                parent_conf = self.pr_blds[software_type][role]
                 logger.debug(f"[Resolver] Loaded parent config from predefined build '{ref}'.")
             else:
                 logger.debug(f"[Resolver] Following reference to user-defined build '{ref}'...")
@@ -95,7 +95,7 @@ class Resolver:
             for mixin_ref in mixins:
                 if mixin_ref.startswith(constants.STD_BUILD_PREFIX):
                     mixin_name = mixin_ref.split(':', 1)[1]
-                    mixin_conf = self.predefined_builds.get('_std', {}).get(mixin_name)
+                    mixin_conf = self.pr_blds.get('_std', {}).get(mixin_name)
                     if not mixin_conf:
                         raise ReferenceNotFoundError(f"Unknown standard mixin '{mixin_ref}' for service '{service_name}'.")
                     

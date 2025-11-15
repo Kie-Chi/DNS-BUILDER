@@ -33,7 +33,7 @@ class ZoneGenerator:
         self.service_name = service_name.rstrip(".") + "."
         self.records = records
 
-    def generate_zone_file(self) -> str:
+    def generate(self) -> str:
         """
         Creates the full zone file content, including SOA and NS records.
         """

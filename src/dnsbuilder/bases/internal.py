@@ -63,6 +63,24 @@ class UnboundImage(InternalImage):
 
 # ------------------------
 #
+#   PDNS RECURSOR IMAGE
+#
+# ------------------------
+class PdnsRecursorImage(InternalImage):
+    """
+    Concrete Image class for PowerDNS Recursor
+    """
+
+    @override
+    def _post_init_hook(self):
+        """
+        Nothing to do for PowerDNS Recursor
+        """
+        pass  # PowerDNS Recursor has nothing to do
+
+
+# ------------------------
+#
 #   JUDAS IMAGE
 #
 # ------------------------

@@ -54,7 +54,7 @@ class VariableSubstitutor:
         self.service_ips = service_ips
         self.resolved_builds = resolved_builds
 
-    def _normalize_key_aliases(self, key: str) -> str:
+    def _norm(self, key: str) -> str:
         """Normalize key by applying alias mapping on dot-separated parts."""
         parts = key.split('.')
         changed = False
@@ -78,15 +78,15 @@ class VariableSubstitutor:
         substituted_builds = {}
         for service_name, service_conf in resolved_builds.items():
             # Build the variable map specific to this service
-            var_map = self._build_variable_map(service_name, service_conf)
+            var_map = self._map(service_name, service_conf)
             # Perform substitution on this service's config using its map
-            substituted_builds[service_name] = self._recursive_substitute(service_conf, var_map)
+            substituted_builds[service_name] = self._recursive(service_conf, var_map)
             logger.debug(f"Variable substitution complete for service '{service_name}'.")
         
         logger.info("All variables substituted.")
         return substituted_builds
 
-    def _build_variable_map(self, service_name: str, service_conf: Dict) -> Dict[str, str]:
+    def _map(self, service_name: str, service_conf: Dict) -> Dict[str, str]:
         """Constructs the dictionary of available variables for a given service."""
         var_map = {
             # Service-level
@@ -113,7 +113,7 @@ class VariableSubstitutor:
 
     @lenient_resolver
     @no_required
-    def _resolve_env_variable(self, key: str) -> str:
+    def _resolve_env(self, key: str) -> str:
         """Resolve environment variables with optional default values."""
         parts = key[4:].split(':', 1)  # Remove 'env.' prefix
         env_var_name = parts[0]
@@ -130,7 +130,7 @@ class VariableSubstitutor:
 
     @lenient_resolver
     @no_required
-    def _resolve_service_ip(self, key: str, fallback: str = None) -> str:
+    def _resolve_ip(self, key: str, fallback: str = None) -> str:
         """Resolve service IP addresses."""
         service_to_find = key[9:-3]  # Remove 'services.' prefix and '.ip' suffix
         ip = self.service_ips.get(service_to_find)
@@ -147,7 +147,7 @@ class VariableSubstitutor:
 
     @lenient_resolver
     @no_required
-    def _resolve_service_image_property(self, key: str, fallback: str = None) -> str:
+    def _resolve_img(self, key: str, fallback: str = None) -> str:
         """Resolve service image properties using getattr."""
         parts = key.split(".")
         if len(parts) < 4 or parts[0] != "services" or parts[2] != "image":
@@ -183,7 +183,7 @@ class VariableSubstitutor:
 
     @lenient_resolver
     @no_required
-    def _resolve_build_conf_property(self, key: str, var_map: Dict[str, str], fallback: str = None) -> str:
+    def _resolve_prop(self, key: str, var_map: Dict[str, str], fallback: str = None) -> str:
         """
         Resolves a value from a build configuration using a dot-separated path.
         Can resolve from the current service's build_conf or another service's.
@@ -233,7 +233,7 @@ class VariableSubstitutor:
 
         # Environment variables
         if key.startswith("env."):
-            return self._resolve_env_variable(key)
+            return self._resolve_env(key)
 
         # Extract generic fallback from non-env keys: `${some.path:default}`
         core_key = key
@@ -242,15 +242,15 @@ class VariableSubstitutor:
             core_key, fallback = key.split(":", 1)
 
         # Normalize aliases on core_key (dot-separated)
-        core_key = self._normalize_key_aliases(core_key)
+        core_key = self._norm(core_key)
 
         # Service IP addresses
         if core_key.startswith("services.") and core_key.endswith(".ip"):
-            return self._resolve_service_ip(core_key, fallback=fallback)
+            return self._resolve_ip(core_key, fallback=fallback)
 
         # Service image properties
         if core_key.startswith("services.") and ".image." in core_key:
-            return self._resolve_service_image_property(core_key, fallback=fallback)
+            return self._resolve_img(core_key, fallback=fallback)
 
         # Local variables from var_map
         if core_key in var_map:
@@ -259,7 +259,7 @@ class VariableSubstitutor:
             return resolved
 
         # Try to resolve from build_conf as a path
-        value = self._resolve_build_conf_property(core_key, var_map, fallback=fallback)
+        value = self._resolve_prop(core_key, var_map, fallback=fallback)
         if value is not None:
             return value
 
@@ -270,7 +270,7 @@ class VariableSubstitutor:
         logger.warning(f"Could not resolve variable '${{{core_key}}}' for service '{var_map.get('name', 'unknown')}'. Returning string 'none'.")
         return "none"
 
-    def _recursive_substitute(self, item: Any, var_map: Dict[str, str]) -> Any:
+    def _recursive(self, item: Any, var_map: Dict[str, str]) -> Any:
         """
         Recursively substitutes variables.
         """
@@ -281,7 +281,7 @@ class VariableSubstitutor:
             # Replace all innermost `${...}` occurrences in a single pass.
             pattern = re.compile(r"\$\{([^{}]+)\}")
 
-            def expand_innermost_pass(text: str) -> str:
+            def expand_inner(text: str) -> str:
                 def _repl(m: re.Match) -> str:
                     key = m.group(1)
                     resolved = self._resolve_variable(key, var_map)
@@ -290,7 +290,7 @@ class VariableSubstitutor:
                 return pattern.sub(_repl, text)
 
             for _ in range(10):  # allow deeper nesting safely
-                new_string = expand_innermost_pass(substituted_string)
+                new_string = expand_inner(substituted_string)
                 if new_string == substituted_string:
                     break
                 substituted_string = new_string
@@ -300,8 +300,8 @@ class VariableSubstitutor:
             return substituted_string
 
         elif isinstance(item, list):
-            return [self._recursive_substitute(sub_item, var_map) for sub_item in item]
+            return [self._recursive(sub_item, var_map) for sub_item in item]
         elif isinstance(item, dict):
-            return {key: self._recursive_substitute(value, var_map) for key, value in item.items()}
+            return {key: self._recursive(value, var_map) for key, value in item.items()}
         else:
             return item
