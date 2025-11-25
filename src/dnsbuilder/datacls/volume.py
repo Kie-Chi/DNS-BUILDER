@@ -5,8 +5,15 @@ from ..io.path import DNSBPath, is_path_valid
 from ..exceptions import VolumeError
 
 class Pair(NamedTuple):
-    src: DNSBPath
-    dst: str
+    """
+        Class Pair to describe a volume pair
+        src: absolute path in content dir
+        dst: relative path in container
+        dcr: relative path in docker container
+    """
+    src: DNSBPath # absolute path in content dir
+    dst: str # relative path in container
+    dcr: str | None = None # relative path in docker container
 
 """
     Class Volume to resolve volumes like src:dst:mode

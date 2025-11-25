@@ -1,6 +1,7 @@
 import inspect
 import importlib
 import re
+from .util import to_snake, to_pascal
 from typing import Dict, Set, Optional, Any, Tuple, List, Type
 from abc import ABC
 import logging
@@ -79,11 +80,12 @@ def extract_bhv_info(cls_name: str, bhv_types: List[str]) -> Tuple[Optional[str]
         if base_name.endswith(behavior_type):
             software_part = base_name[:-len(behavior_type)]
             if software_part:  # Ensure we have a software part
-                software = software_part.lower()
+                software = to_snake(software_part)
                 behavior_type_lower = behavior_type.lower()
                 return software, behavior_type_lower
     
     # Fallback: find camelCase boundaries
+    logger.warning(f"Failed to extract software and behavior type from {cls_name}")
     boundaries = [m.start() + 1 for m in re.finditer(r'[a-z][A-Z]', base_name)]
     
     # Try each boundary as a potential split point
@@ -92,7 +94,7 @@ def extract_bhv_info(cls_name: str, bhv_types: List[str]) -> Tuple[Optional[str]
         behavior_part = base_name[boundary:]
         
         if software_part and behavior_part:
-            software = software_part.lower()
+            software = to_snake(software_part)
             behavior_type = behavior_part.lower()
             return software, behavior_type
     
@@ -116,7 +118,7 @@ def extract_img_info(cls_name: str) -> Optional[str]:
     base_name = cls_name[:-5]
     
     # Convert to lowercase
-    return base_name.lower() if base_name else None
+    return to_snake(base_name) if base_name else None
 
 
 def extract_inc_info(cls_name: str) -> Optional[str]:
@@ -136,7 +138,7 @@ def extract_inc_info(cls_name: str) -> Optional[str]:
     base_name = cls_name[:-8]
     
     # Convert to lowercase
-    return base_name.lower() if base_name else None
+    return to_snake(base_name) if base_name else None
 
 
 def gen_exports(
@@ -200,7 +202,7 @@ def get_available_behaviors() -> Dict[str, Set[str]]:
     """
     behavior_registry, _, _ = _get_registries()
     result = {}
-    for software in behavior_registry.get_supported_software():
+    for software in behavior_registry.get_supports():
         result[software] = behavior_registry.get_supported_behaviors(software)
     return result
 
@@ -213,7 +215,7 @@ def get_available_images() -> Set[str]:
         Set of supported software types for images
     """
     _, image_registry, _ = _get_registries()
-    return image_registry.get_supported_software()
+    return image_registry.get_supports()
 
 
 def validate_behavior_support(software: str, behavior_type: str) -> bool:
@@ -228,7 +230,7 @@ def validate_behavior_support(software: str, behavior_type: str) -> bool:
         True if supported, False otherwise
     """
     behavior_registry, _, _ = _get_registries()
-    return behavior_registry.get_behavior_class(software, behavior_type) is not None
+    return behavior_registry.get(software, behavior_type) is not None
 
 
 def validate_image_support(software: str) -> bool:
@@ -242,10 +244,10 @@ def validate_image_support(software: str) -> bool:
         True if supported, False otherwise
     """
     _, image_registry, _ = _get_registries()
-    return image_registry.get_image_class(software) is not None
+    return image_registry.get(software) is not None
 
 
-def get_behavior_class_info(software: str, behavior_type: str) -> Optional[Dict[str, Any]]:
+def behavior_info(software: str, behavior_type: str) -> Optional[Dict[str, Any]]:
     """
     Get detailed information about a behavior class.
     
@@ -257,7 +259,7 @@ def get_behavior_class_info(software: str, behavior_type: str) -> Optional[Dict[
         Dictionary with class information or None if not found
     """
     behavior_registry, _, _ = _get_registries()
-    behavior_class = behavior_registry.get_behavior_class(software, behavior_type)
+    behavior_class = behavior_registry.get(software, behavior_type)
     if not behavior_class:
         return None
         
@@ -270,7 +272,7 @@ def get_behavior_class_info(software: str, behavior_type: str) -> Optional[Dict[
     }
 
 
-def get_image_class_info(software: str) -> Optional[Dict[str, Any]]:
+def image_info(software: str) -> Optional[Dict[str, Any]]:
     """
     Get detailed information about an image class.
     
@@ -281,7 +283,7 @@ def get_image_class_info(software: str) -> Optional[Dict[str, Any]]:
         Dictionary with class information or None if not found
     """
     _, image_registry, _ = _get_registries()
-    image_class = image_registry.get_image_class(software)
+    image_class = image_registry.get(software)
     if not image_class:
         return None
         
@@ -306,7 +308,7 @@ def discover_custom_behaviors(package_path: str) -> int:
     """
     behavior_registry, _, _ = _get_registries()
     initial_count = len(behavior_registry._behaviors)
-    behavior_registry.auto_discover_behaviors(package_path)
+    behavior_registry.discover_behaviors(package_path)
     return len(behavior_registry._behaviors) - initial_count
 
 
@@ -322,7 +324,7 @@ def discover_custom_images(package_path: str) -> int:
     """
     _, image_registry, _ = _get_registries()
     initial_count = len(image_registry._images)
-    image_registry.auto_discover_images(package_path)
+    image_registry.discover_images(package_path)
     return len(image_registry._images) - initial_count
 
 
@@ -334,12 +336,12 @@ def print_registry_status():
     logger.debug(f"Images registered: {len(image_registry._images)}")
     
     logger.debug("\nSupported software types:")
-    for software in sorted(behavior_registry.get_supported_software()):
+    for software in sorted(behavior_registry.get_supports()):
         behaviors = behavior_registry.get_supported_behaviors(software)
         logger.debug(f"  {software}: {sorted(behaviors)}")
     
     logger.debug("\nSupported image types:")
-    for software in sorted(image_registry.get_supported_software()):
+    for software in sorted(image_registry.get_supports()):
         logger.debug(f"  {software}")
 
 
@@ -356,6 +358,6 @@ def get_framework_capabilities() -> Dict[str, Any]:
         'images': list(get_available_images()),
         'total_behavior_implementations': len(behavior_registry._behaviors),
         'total_image_implementations': len(image_registry._images),
-        'supported_software_types': list(behavior_registry.get_supported_software()),
-        'all_behavior_types': list(behavior_registry.get_all_behavior_types())
+        'supported_software_types': list(behavior_registry.get_supports()),
+        'all_behavior_types': list(behavior_registry.get_all_behaviors())
     }

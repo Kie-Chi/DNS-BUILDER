@@ -25,7 +25,7 @@ class AutomationManager:
             max_workers = os.cpu_count() or 1
         self.max_workers = max_workers
     
-    def execute_setup_phase(self, config: Dict[str, Any]) -> None:
+    def setup(self, config: Dict[str, Any]) -> None:
         """
         Execute the setup phase.
         
@@ -114,7 +114,7 @@ class AutomationManager:
 
         logger.info(f"[Auto@{self.max_workers}] Setup phase completed")
     
-    def execute_modify_phase(self, config: Dict[str, Any]) -> None:
+    def modify(self, config: Dict[str, Any]) -> None:
         """
         Execute the modify phase.
 
@@ -207,7 +207,7 @@ class AutomationManager:
 
         logger.info(f"[Auto@{self.max_workers}] Modify phase completed")
     
-    def execute_restrict_phase(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
+    def restrict(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
         """
         Execute the restrict phase.
         

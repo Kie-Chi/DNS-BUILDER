@@ -10,7 +10,7 @@ Dependencies:
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, Tuple, TypeVar, Generic, Type, TYPE_CHECKING
 import logging
 import json
 import re
@@ -141,16 +141,14 @@ class Includer(ABC):
         raise UnsupportedFeatureError(f"unsupported block format: {pair.dst}")
 
     @abstractmethod
-    def include(self, pair: Pair):
+    def include(self, pair: Pair) -> Optional[Any]:
         """
         write `include config_line` line into conf
 
         Args:
-            confs (Dict[str, DNSBPath]): main configuration file paths
-                If dict, keys are block names and values are paths.
             pair (Pair): volume pair to include
         Returns:
-            None
+            Optional[Pair]: the pair to include, if changed
         """
         pass
 
@@ -159,9 +157,6 @@ class Includer(ABC):
         """
         contain block-main config in global-main config
         
-        Args:
-            confs (Dict[str, DNSBPath]): main configuration file paths
-                If dict, keys are block names and values are paths.
         Returns:
             None
         """
@@ -589,7 +584,7 @@ class ExternalImage(Image, ABC):
         
         placeholder_pattern = r'\$\{([^\}]+)\}'
         matches = re.findall(placeholder_pattern, self.name)
-        supported_software = image_registry.get_supported_software()
+        supported_software = image_registry.get_supports()
         
         if matches:
             placeholder_content = matches[0].strip()
@@ -640,7 +635,7 @@ class ExternalImage(Image, ABC):
         # Import registry lazily to avoid circular dependency
         from .registry import image_registry
         
-        supported_software = image_registry.get_supported_software()
+        supported_software = image_registry.get_supports()
         name_lower = name.lower()
         for software in supported_software:
             if software in constants.RECOGNIZED_PATTERNS:

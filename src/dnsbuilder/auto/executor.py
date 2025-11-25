@@ -3,7 +3,7 @@ import os
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
-from ..io import DNSBPath, FileSystem
+from ..io import DNSBPath, FileSystem, Path
 from ..exceptions import DefinitionError
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class ScriptExecutor:
                     'service_name': service_name,
                     'result': None,  # Initialize result variable for restrict scripts
                     'fs': self.fs,
-                    'workdir': str(self.fs.chroot) if self.fs and self.fs.chroot else None,  # Pass workdir path
+                    'workdir': str(self.fs.chroot) if self.fs and self.fs.chroot else Path.cwd(),  # Pass workdir path
                     '__name__': '__main__'
                 }
                 with open(script_path, 'r') as f:

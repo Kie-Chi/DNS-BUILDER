@@ -88,7 +88,7 @@ class IncluderProtocol(Protocol):
     for different DNS software.
     """
     
-    def include(self, pair: Any) -> None:
+    def include(self, pair: Any) -> Optional[Any]:
         """
         Write include directive for a configuration file.
         
@@ -184,11 +184,11 @@ class BehaviorRegistryProtocol(Protocol):
     Registries manage discovery and registration of behavior implementations.
     """
     
-    def register_behavior(self, software: str, behavior_type: str, behavior_class: Any) -> None:
+    def register(self, software: str, behavior_type: str, behavior_class: Any) -> None:
         """Register a behavior class."""
         ...
     
-    def get_behavior_class(self, software: str, behavior_type: str) -> Optional[Any]:
+    def behavior(self, software: str, behavior_type: str) -> Optional[Any]:
         """Get a behavior class by software and type."""
         ...
 
@@ -201,11 +201,11 @@ class ImageRegistryProtocol(Protocol):
     Registries manage discovery and registration of image implementations.
     """
     
-    def register_image(self, software: str, image_class: Any) -> None:
+    def register(self, software: str, image_class: Any) -> None:
         """Register an image class."""
         ...
     
-    def get_image_class(self, software: str) -> Optional[Any]:
+    def image(self, software: str) -> Optional[Any]:
         """Get an image class by software type."""
         ...
 
@@ -218,11 +218,11 @@ class IncluderRegistryProtocol(Protocol):
     Registries manage discovery and registration of includer implementations.
     """
     
-    def register_includer(self, software: str, includer_class: Any) -> None:
+    def register(self, software: str, includer_class: Any) -> None:
         """Register an includer class."""
         ...
     
-    def get_includer_class(self, software: str) -> Optional[Any]:
+    def includer(self, software: str) -> Optional[Any]:
         """Get an includer class by software type."""
         ...
 

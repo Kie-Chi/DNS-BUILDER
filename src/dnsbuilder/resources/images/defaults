@@ -30,6 +30,29 @@
             "tmux"
         ]
     },
+    "pdns_recursor": {
+        "default_deps": [
+            "build-essential",
+            "g++",
+            "pkg-config",
+            "wget",
+            "libboost-context-dev",
+            "libboost-dev",
+            "libboost-filesystem-dev",
+            "libboost-serialization-dev",
+            "libboost-system-dev",
+            "libboost-test-dev",
+            "libboost-thread-dev",
+            "libluajit-5.1-dev",
+            "libssl-dev"
+        ],
+        "default_utils": [
+            "vim",
+            "dnsutils",
+            "tcpdump",
+            "tmux"
+        ]
+    },
     "python": {
         "default_deps": [],
         "default_utils": [

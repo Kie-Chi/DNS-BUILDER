@@ -49,16 +49,13 @@ KNOWN_TOP_MODULES = {
 # --- Filenames and Paths ---
 GENERATED_ZONES_FILENAME = "generated_zones.conf"
 GENERATED_ZONES_SUBDIR = "zones"
+INCLUDE_SUBDIR = "includes"
 DOCKERFILE_NAME = "Dockerfile"
 DOCKER_COMPOSE_FILENAME = "docker-compose.yml"
 
 # --- Prefixes ---
 RESOURCE_PREFIX = "resource:"
 STD_BUILD_PREFIX = "std:"
-
-# --- Software Configuration ---
-SOFTWARE_BIND = "bind"
-SOFTWARE_UNBOUND = "unbound"
 
 # DNS Software Top-level Block Definitions
 DNS_SOFTWARE_BLOCKS = {
@@ -86,17 +83,24 @@ DNS_SOFTWARE_BLOCKS = {
         "view",             # View configuration
         "python",           # Python module configuration
         "dynlib",           # Dynamic library configuration
+    },
+    "pdns_recursor": {
+        "global",           # PowerDNS Recursor only has global configuration
     }
 }
 
 RECOGNIZED_PATTERNS = {
     "bind": [
-        r"\bbind\b",  # exact word match
-        r"\bisc-bind\b",  # ISC BIND
-        r"\bnamed\b",  # BIND daemon name
+        r"\bbind(?![a-zA-Z])",  # exact word match
+        r"\bisc-bind(?![a-zA-Z])",  # ISC BIND
+        r"\bnamed(?![a-zA-Z])",  # BIND daemon name
     ],
     "unbound": [
-        r"\bunbound\b"  # exact word match
+        r"\bunbound(?![a-zA-Z])"  # exact word match
+    ],
+    "pdns_recursor": [
+        r"\bpdns[_-]?recursor(?![a-zA-Z])",  # pdns_recursor or pdns-recursor
+        r"\bpowerdns[_-]?recursor(?![a-zA-Z])",  # powerdns_recursor or powerdns-recursor
     ],
 }
 

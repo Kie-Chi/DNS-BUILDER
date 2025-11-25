@@ -43,7 +43,7 @@ class ImageFactory:
         self.global_mirror = global_mirror or {}
         
         # Initialize registries if not already done
-        if not image_registry._images:
+        if not image_registry.registry:
             initialize_registries()
             
         logger.debug("ImageFactory initialized with reflection-based registry.")
@@ -108,9 +108,9 @@ class ImageFactory:
                 f"Cannot instantiate image '{config['name']}': missing 'software' type for an internal image."
             )
 
-        image_class = image_registry.get_image_class(software_type)
+        image_class = image_registry.image(software_type)
         if not image_class:
-            supported_software = image_registry.get_supported_software()
+            supported_software = image_registry.get_supports()
             raise ImageDefinitionError(
                 f"Image '{config['name']}' has an unknown 'software' type: {software_type}. "
                 f"Supported types: {sorted(supported_software)}"
@@ -136,7 +136,7 @@ class BehaviorFactory:
     """
     def __init__(self):
         # Initialize registries if not already done
-        if not behavior_registry._behaviors:
+        if not behavior_registry.registry:
             initialize_registries()
         
         logger.debug("BehaviorFactory initialized with reflection-based registry.")
@@ -183,11 +183,11 @@ class BehaviorFactory:
         """
         behavior_type, args = self._parse_behavior(line)
 
-        behavior_class = behavior_registry.get_behavior_class(software_type, behavior_type)
+        behavior_class = behavior_registry.behavior(software_type, behavior_type)
 
         if not behavior_class:
-            supported_behaviors = behavior_registry.get_supported_behaviors(software_type)
-            supported_software = behavior_registry.get_supported_software()
+            supported_behaviors = behavior_registry.get_all_behaviors(software_type)
+            supported_software = behavior_registry.get_supports()
             raise UnsupportedFeatureError(
                 f"Behavior '{behavior_type}' is not supported for software '{software_type}'. "
                 f"Supported behaviors for {software_type}: {sorted(supported_behaviors)}. "
@@ -210,15 +210,17 @@ class IncluderFactory:
     """
 
     def __init__(self, fs: FileSystem = None):
+        if not includer_registry.registry:
+            initialize_registries()
         if fs is None:
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
 
     def create(self, confs: Dict[str, Pair], software_type: str) -> IncluderProtocol:
-        includer_class = includer_registry.get_includer_class(software_type)
+        includer_class = includer_registry.includer(software_type)
 
         if not includer_class:
-            supported_software = includer_registry.get_supported_software()
+            supported_software = includer_registry.get_supports()
             raise ImageDefinitionError(
                 f"Includer for software '{software_type}' is not supported. "
                 f"Supported software types: {sorted(supported_software)}"

@@ -22,10 +22,10 @@ def get_image_template():
 def get_build_service_template():
     pass
 
-@router.get("/resources/predefined_builds", response_model=List[str])
+@router.get("/resources/pr_blds", response_model=List[str])
 def get_predefined_build_templates():
     pass
 
-@router.get("/resources/predefined_builds/{template_name}", response_model=PredefinedBuildTemplate)
+@router.get("/resources/pr_blds/{template_name}", response_model=PredefinedBuildTemplate)
 def get_predefined_build_template(template_name: str):
     pass

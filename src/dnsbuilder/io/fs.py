@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, IO
+from dataclasses import dataclass
+from typing import Dict, List, IO, NamedTuple
 from datetime import datetime, timezone
 import logging
 import os
@@ -44,28 +45,28 @@ logger = logging.getLogger(__name__)
 class _FallbackContext:
     """Context manager for temporarily changing fallback behavior."""
     
-    def __init__(self, fs, enable: bool):
+    def __init__(self, fs: "FileSystem", enable: bool):
         self.fs = fs
         self.enable = enable
         self.original_state = None
-        self.has_fallback_support = hasattr(fs, 'enable_fallback')
     
     def __enter__(self):
-        if self.has_fallback_support:
-            self.original_state = self.fs.enable_fallback
-            self.fs.enable_fallback = self.enable
+        self.original_state = self.fs._fallback.enable
+        self.fs._fallback.enable = self.enable
         return self.fs
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.has_fallback_support:
-            self.fs.enable_fallback = self.original_state
+        self.fs._fallback.enable = self.original_state
         return False
 
+@dataclass
+class _Fallback:
+    enable: bool = False
 
 class FileSystem(ABC):
     """DNSB File System Abstract Base Class"""
 
-    def __init__(self, chroot: DNSBPath = None):
+    def __init__(self, chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
         """
         Initialize filesystem with optional chroot.
         
@@ -73,6 +74,7 @@ class FileSystem(ABC):
             chroot: Root directory for relative path resolution (optional)
         """
         self.chroot = chroot
+        self._fallback = fallback
 
     @abstractmethod
     def read_text(self, path: DNSBPath) -> str:
@@ -139,6 +141,12 @@ class FileSystem(ABC):
         """Remove a directory recursively"""
         pass
 
+    # Special methods
+    # Fallback methods
+    def fallback(self, enable: bool = True):
+        """Temporarily change fallback behavior"""
+        return _FallbackContext(self, enable)
+
     # NotImplemented methods
     # !!! Child-FileSystem Override these methods if needed
     def listdir(self, path: DNSBPath) -> List[DNSBPath]:
@@ -172,11 +180,6 @@ class FileSystem(ABC):
     def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
         """Open a file"""
         return NotImplemented
-
-    # Fallback methods
-    def fallback(self, enable: bool = True):
-        """Temporarily change fallback behavior"""
-        return _FallbackContext(self, enable)
     
 
 # --------------------------------------------------------
@@ -207,8 +210,8 @@ class AppFileSystem(FileSystem):
     This class automatically delegates all FileSystem methods to protocol-specific handlers.
     """
 
-    def __init__(self, enable_fallback: bool = False, chroot: DNSBPath = None):
-        super().__init__(chroot=chroot)
+    def __init__(self, chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
+        super().__init__(chroot=chroot, fallback=fallback)
         logger.debug(f"[AppFS] Initializing with chroot: {chroot}")
         # register default file system handlers
         self._handlers: Dict[str, FileSystem] = {}
@@ -218,7 +221,6 @@ class AppFileSystem(FileSystem):
         self.register_handler("git", GitFileSystem(DiskFileSystem(chroot=chroot), chroot=chroot))
         
         # fallback mechanism
-        self.enable_fallback = enable_fallback
         self._fallback_handler = DiskFileSystem(chroot=chroot)
         
         # fallback statistics
@@ -332,7 +334,7 @@ class AppFileSystem(FileSystem):
 class GenericFileSystem(FileSystem, ABC):
     """Generic File System base class for fsspec and morefs implementations"""
 
-    def __init__(self, fs_instance, name=None, chroot: DNSBPath = None, enable_fallback: bool = False):
+    def __init__(self, fs_instance, name=None, chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
         """
         Initialize with a filesystem instance
         
@@ -341,10 +343,9 @@ class GenericFileSystem(FileSystem, ABC):
             name: Optional name for logging purposes
             chroot: Root directory for relative path resolution (optional)
         """
-        super().__init__(chroot=chroot)
+        super().__init__(chroot=chroot, fallback=fallback)
         self.fs = fs_instance
         self.name = name or f"{type(fs_instance).__name__}"
-        self.enable_fallback = enable_fallback
 
     @abstractmethod
     def path2str(self, path: DNSBPath) -> str:
@@ -461,9 +462,9 @@ class GenericFileSystem(FileSystem, ABC):
 class FsspecFileSystem(GenericFileSystem):
     """fsspec-based File System"""
 
-    def __init__(self, protocol="file", chroot: DNSBPath = None, enable_fallback: bool = False):
+    def __init__(self, protocol="file", chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
         fs_instance = fsspec.filesystem(protocol)
-        super().__init__(fs_instance, name=f"{protocol}FS", chroot=chroot, enable_fallback=enable_fallback)
+        super().__init__(fs_instance, name=f"{protocol}FS", chroot=chroot, fallback=fallback)
         self.protocol = protocol
 
     @override
@@ -507,7 +508,7 @@ class FsspecFileSystem(GenericFileSystem):
 class MorefsFileSystem(GenericFileSystem):
     """morefs-based File System"""
 
-    def __init__(self, fs_type="dict", chroot: DNSBPath = None, enable_fallback: bool = False):
+    def __init__(self, fs_type="dict", chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
         """
         Initialize morefs filesystem
 
@@ -521,7 +522,7 @@ class MorefsFileSystem(GenericFileSystem):
             fs_instance = MemFS()
         else:
             raise ValueError(f"Unsupported morefs type: {fs_type}")
-        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS", chroot=chroot, enable_fallback=enable_fallback)
+        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS", chroot=chroot, fallback=fallback)
         self.fs_type = fs_type
 
     @override
@@ -585,8 +586,8 @@ class MorefsFileSystem(GenericFileSystem):
 class DiskFileSystem(FsspecFileSystem):
     """Local disk file system using fsspec"""
 
-    def __init__(self, chroot: DNSBPath = None, enable_fallback: bool = False):
-        super().__init__(protocol="file", chroot=chroot, enable_fallback=enable_fallback)
+    def __init__(self, chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
+        super().__init__(protocol="file", chroot=chroot, fallback=fallback)
         if not self.chroot:
             self.chroot = DNSBPath(Path.cwd())
             logger.debug(f"[DiskFS] No chroot provided, using cwd: {self.chroot}")
@@ -646,8 +647,8 @@ class DiskFileSystem(FsspecFileSystem):
 class NetworkFileSystem(FsspecFileSystem):
     """Network file system using fsspec"""
 
-    def __init__(self, protocol, chroot: DNSBPath = None, enable_fallback: bool = False):
-        super().__init__(protocol=protocol, chroot=chroot, enable_fallback=enable_fallback)
+    def __init__(self, protocol, chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
+        super().__init__(protocol=protocol, chroot=chroot, fallback=fallback)
 
 
 # --------------------------------------------------------
@@ -816,8 +817,8 @@ class MemoryFileSystem(FsspecFileSystem):
     """
     in-memory filesystem using fsspec
     """
-    def __init__(self, chroot: DNSBPath = None, enable_fallback: bool = False):
-        super().__init__(protocol="memory", chroot=chroot, enable_fallback=enable_fallback)
+    def __init__(self, chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
+        super().__init__(protocol="memory", chroot=chroot, fallback=fallback)
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -847,8 +848,8 @@ class HyperMemoryFileSystem(MorefsFileSystem):
     """
     High-performance in-memory filesystem
     """
-    def __init__(self, fs_type="mem", chroot: DNSBPath = None, enable_fallback: bool = False):
-        super().__init__(fs_type=fs_type, chroot=chroot, enable_fallback=enable_fallback)
+    def __init__(self, fs_type="mem", chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
+        super().__init__(fs_type=fs_type, chroot=chroot, fallback=fallback)
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -1185,7 +1186,8 @@ def create_app_fs(
     Returns:
         Configured AppFileSystem instance
     """
-    app_fs = AppFileSystem(enable_fallback=enable_fallback, chroot=chroot)
+    _fallback = _Fallback(enable_fallback)
+    app_fs = AppFileSystem(chroot=chroot, fallback=_fallback)
     if use_vfs:
-        app_fs.register_handler("file", HyperMemoryFileSystem(chroot=chroot))
+        app_fs.register_handler("file", HyperMemoryFileSystem(chroot=chroot, fallback=_fallback))
     return app_fs

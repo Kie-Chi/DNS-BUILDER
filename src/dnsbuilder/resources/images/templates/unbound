@@ -56,4 +56,4 @@ EXPOSE 8953/udp
 WORKDIR /usr/local/etc
 
 # Define default command
-# CMD ["unbound", "-d"]
+CMD ["unbound", "-d"]

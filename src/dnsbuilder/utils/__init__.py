@@ -13,6 +13,7 @@ Usage:
 from .logger import setup_logger
 from .merge import deep_merge
 from .typing_compat import override
+from .util import to_pascal, to_snake, to_camel
 from .reflection import (
     discover_classes,
     extract_bhv_info,
@@ -31,5 +32,8 @@ __all__ = [
     'extract_img_info',
     'extract_inc_info',
     'gen_exports',
+    'to_pascal',
+    'to_snake',
+    'to_camel',
 ]
 

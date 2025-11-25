@@ -8,207 +8,144 @@ Dependencies:
 - abstractions: For abstract base classes used in discovery
 """
 
-from typing import Dict, Type, Set, Optional, Tuple
+from typing import Dict, Type, Set, Optional, Tuple, TypeVar, Generic
+from abc import ABC, abstractmethod
 import logging
 
 from . import constants
 from .protocols import BehaviorProtocol, ImageProtocol, IncluderProtocol
 from .abstractions import Behavior, Includer, InternalImage
-from .utils.reflection import discover_classes, extract_bhv_info, extract_img_info, extract_inc_info
+from .utils import discover_classes, extract_bhv_info, extract_img_info, extract_inc_info, override
 
 logger = logging.getLogger(__name__)
 
+K = TypeVar('K')
+V = TypeVar('V')
 
-class BehaviorRegistry:
+class Registry(Generic[K, V], ABC):
+    """
+    An abstract base class for a generic discoverable registry.
+    """
+    
+    # --- Configuration: To be defined by subclasses ---
+    package: Optional[str] = None # package to scan
+    base_class: Optional[Type] = None # base class to discover
+    
+    def __init__(self):
+        self._registry: Dict[K, V] = {}
+        
+        if self.package is None or self.base_class is None:
+            raise NotImplementedError(
+                f"{self.__class__.__name__} must define class attributes "
+                "'package' and 'base_class'."
+            )
+            
+        logger.debug(f"Initialized {self.__class__.__name__}")
+        
+    def register(self, key: K, value: V):
+        self._registry[key] = value
+        logger.debug(f"Registered in {self.__class__.__name__}: {key} -> {getattr(value, '__name__', str(value))}")
+        
+    def get(self, key: K) -> Optional[V]:
+        return self._registry.get(key)
+
+    @property
+    def registry(self) -> Dict[K, V]:
+        return self._registry
+        
+    @abstractmethod
+    def _register_item(self, class_name: str, discovered_class: Type[V]):
+        """
+        Abstract method: Defines the logic to register a single discovered class.
+        This is the primary method subclasses need to implement.
+        """
+        raise NotImplementedError
+
+    def discover(self):
+        """
+        Template method to automatically discover and register classes.
+        """
+        logger.debug(f"Starting discovery for {self.__class__.__name__} in '{self.package}'...")
+        from .utils import discover_classes
+        discovered = discover_classes(
+            self.package, 
+            self.base_class, 
+            exclude_abstract=True, 
+            exclude_base=True
+        )
+        
+        for name, obj in discovered.items():
+            self._register_item(name, obj)
+            
+        logger.debug(f"Discovery for {self.__class__.__name__} finished. Total items: {len(self._registry)}")
+
+
+class BehaviorRegistry(Registry[Tuple[str, str], Type[BehaviorProtocol]]):
     """
     Registry for dynamically discovering and managing behavior classes.
     Uses reflection to automatically find and register behavior implementations.
     """
-    
-    def __init__(self):
-        self._behaviors: Dict[Tuple[str, str], Type[BehaviorProtocol]] = {}
-        self._software_types: Set[str] = set()
-        self._behavior_types: Set[str] = set()
-        
-    def register_behavior(self, software: str, behavior_type: str, behavior_class: Type[BehaviorProtocol]):
-        """
-        Manually register a behavior class.
-        
-        Args:
-            software: Software type (e.g., 'bind', 'unbound')
-            behavior_type: Behavior type (e.g., 'forward', 'stub', 'master')
-            behavior_class: The behavior class to register
-        """
-        key = (software, behavior_type)
-        self._behaviors[key] = behavior_class
-        self._software_types.add(software)
-        self._behavior_types.add(behavior_type)
-        logger.debug(f"Registered behavior: {software}.{behavior_type} -> {behavior_class.__name__}")
-    
-    def get_behavior_class(self, software: str, behavior_type: str) -> Optional[Type[BehaviorProtocol]]:
-        """
-        Get a behavior class by software and behavior type.
-        
-        Args:
-            software: Software type
-            behavior_type: Behavior type
-            
-        Returns:
-            The behavior class if found, None otherwise
-        """
-        return self._behaviors.get((software, behavior_type))
-    
-    def get_supported_behaviors(self, software: str) -> Set[str]:
-        """
-        Get all supported behavior types for a given software.
-        
-        Args:
-            software: Software type
-            
-        Returns:
-            Set of supported behavior types
-        """
-        return {behavior_type for (sw, behavior_type) in self._behaviors.keys() if sw == software}
-    
-    def get_supported_software(self) -> Set[str]:
+    package = "dnsbuilder.bases.behaviors"
+    base_class = Behavior
+
+    @override
+    def _register_item(self, class_name: str, discovered_class: Type[BehaviorProtocol]):
+        software, behavior_type = extract_bhv_info(class_name, constants.BEHAVIOR_TYPES)
+        if software and behavior_type:
+            key = (software, behavior_type)
+            self.register(key, discovered_class)
+
+    def behavior(self, software: str, behavior_type: str) -> Optional[Type[BehaviorProtocol]]:
+        return self.get((software, behavior_type))
+
+    def get_supports(self) -> Set[str]:
         """Get all supported software types."""
-        return self._software_types.copy()
-    
-    def get_all_behavior_types(self) -> Set[str]:
+        return {sw for (sw, _) in self.registry.keys()}
+
+    def get_all_behaviors(self) -> Set[str]:
         """Get all available behavior types across all software."""
-        return self._behavior_types.copy()
-    
-    def auto_discover_behaviors(self, package_name: str = "dnsbuilder.bases.behaviors"):
-        """
-        Automatically discover and register behavior classes from a package.
-        
-        Args:
-            package_name: Package to scan for behavior classes
-        """
-        # Use the generic discover_classes utility
-        discovered = discover_classes(package_name, Behavior, exclude_abstract=True, exclude_base=True)
-        
-        # Register each discovered behavior
-        for name, obj in discovered.items():
-            # Extract software and behavior type from class name
-            software, behavior_type = extract_bhv_info(name, constants.BEHAVIOR_TYPES)
-            if software and behavior_type:
-                self.register_behavior(software, behavior_type, obj)
+        return {b_type for (_, b_type) in self.registry.keys()}
 
-
-class ImageRegistry:
+class ImageRegistry(Registry[str, Type[ImageProtocol]]):
     """
     Registry for dynamically discovering and managing image classes.
     Uses reflection to automatically find and register image implementations.
     """
+    package = "dnsbuilder.bases.internal"
+    base_class = InternalImage
     
-    def __init__(self):
-        self._images: Dict[str, Type[ImageProtocol]] = {}
-        
-    def register_image(self, software: str, image_class: Type[ImageProtocol]):
-        """
-        Register an image class for a software type.
-        
-        Args:
-            software: Software type (e.g., 'bind', 'unbound')
-            image_class: The image class to register
-        """
-        self._images[software] = image_class
-        logger.debug(f"Registered image: {software} -> {image_class.__name__}")
-    
-    def get_image_class(self, software: str) -> Optional[Type[ImageProtocol]]:
-        """
-        Get an image class by software type.
-        
-        Args:
-            software: Software type
-            
-        Returns:
-            The image class if found, None otherwise
-        """
-        return self._images.get(software)
-    
-    def get_supported_software(self) -> Set[str]:
-        """Get all supported software types."""
-        return set(self._images.keys())
-    
-    def auto_discover_images(self, package_name: str = "dnsbuilder.bases.internal"):
-        """
-        Automatically discover and register image classes from a package.
-        
-        Args:
-            package_name: Package to scan for image classes
-        """
-        # Use the generic discover_classes utility
-        discovered = discover_classes(package_name, InternalImage, exclude_abstract=True, exclude_base=True)
-        
-        # Register each discovered image
-        for name, obj in discovered.items():
-            # Extract software type from class name
-            software = extract_img_info(name)
-            if software:
-                self.register_image(software, obj)
+    @override
+    def _register_item(self, class_name: str, discovered_class: Type[ImageProtocol]):
+        software = extract_img_info(class_name)
+        if software:
+            self.register(software, discovered_class)
+
+    def image(self, software: str) -> Optional[Type[ImageProtocol]]:
+        return self.get(software)
+
+    def get_supports(self) -> Set[str]:
+        return set(self.registry.keys())
 
 
-class IncluderRegistry:
+class IncluderRegistry(Registry[str, Type[IncluderProtocol]]):
     """
     Registry for dynamically discovering and managing includer classes.
     Uses reflection to automatically find and register includer implementations.
     """
+    package = "dnsbuilder.bases.includers"
+    base_class = Includer
     
-    def __init__(self):
-        self._includers: Dict[str, Type[IncluderProtocol]] = {}
-        self._software_types: Set[str] = set()
-        
-    def register_includer(self, software: str, includer_class: Type[IncluderProtocol]):
-        """
-        Manually register an includer class.
-        
-        Args:
-            software: Software type (e.g., 'bind', 'unbound')
-            includer_class: The includer class to register
-        """
-        self._includers[software] = includer_class
-        self._software_types.add(software)
-        logger.debug(f"Registered includer: {software} -> {includer_class.__name__}")
-    
-    def get_includer_class(self, software: str) -> Optional[Type[IncluderProtocol]]:
-        """
-        Get an includer class by software type.
-        
-        Args:
-            software: Software type
-            
-        Returns:
-            The includer class if found, None otherwise
-        """
-        return self._includers.get(software)
-    
-    def get_supported_software(self) -> Set[str]:
-        """
-        Get all supported software types.
-        
-        Returns:
-            Set of supported software types
-        """
-        return self._software_types.copy()
-    
-    def auto_discover_includers(self):
-        """
-        Automatically discover and register includer classes.
-        Searches for classes that inherit from Includer and follow naming conventions.
-        """
-        logger.debug("Auto-discovering includer classes...")
-        
-        # Use the generic discover_classes utility
-        discovered = discover_classes('dnsbuilder.bases.includers', Includer, exclude_abstract=True, exclude_base=True)
-        
-        # Register each discovered includer
-        for name, obj in discovered.items():
-            software_type = extract_inc_info(name)
-            if software_type:
-                self.register_includer(software_type, obj)
-                logger.debug(f"Auto-discovered includer: {name} -> {software_type}")
+    @override
+    def _register_item(self, class_name: str, discovered_class: Type[IncluderProtocol]):
+        software = extract_inc_info(class_name)
+        if software:
+            self.register(software, discovered_class)
+
+    def includer(self, software: str) -> Optional[Type[IncluderProtocol]]:
+        return self.get(software)
+
+    def get_supports(self) -> Set[str]:
+        return set(self.registry.keys())
 
 
 # Global registries
@@ -225,15 +162,15 @@ def initialize_registries():
     logger.debug("Initializing behavior, image, and includer registries...")
     
     # Auto-discover behaviors
-    behavior_registry.auto_discover_behaviors()
+    behavior_registry.discover()
     
     # Auto-discover images  
-    image_registry.auto_discover_images()
+    image_registry.discover()
     
     # Auto-discover includers
-    includer_registry.auto_discover_includers()
+    includer_registry.discover()
     
-    logger.debug(f"Discovered {len(behavior_registry._behaviors)} behavior implementations")
-    logger.debug(f"Discovered {len(image_registry._images)} image implementations")
-    logger.debug(f"Discovered {len(includer_registry._includers)} includer implementations")
-    logger.debug(f"Supported software types: {behavior_registry.get_supported_software()}")
+    logger.debug(f"Discovered {len(behavior_registry.registry)} behavior implementations")
+    logger.debug(f"Discovered {len(image_registry.registry)} image implementations")
+    logger.debug(f"Discovered {len(includer_registry.registry)} includer implementations")
+    logger.debug(f"Supported software types: {behavior_registry.get_supports()}")

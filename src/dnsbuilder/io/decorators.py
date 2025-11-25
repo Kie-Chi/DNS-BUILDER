@@ -8,6 +8,7 @@ File system decorators for error handling and fallback mechanisms.
 """
 
 import functools
+from gc import enable
 import logging
 from typing import Tuple, Type, List
 
@@ -57,7 +58,7 @@ def wrap_io_error(func, ignores: Tuple[Type[Exception], ...] = (Signal,)):
 
 def signal(sig: Signal):
     """
-    Decorator to raise a Signal when a path is not found.
+    Decorator to raise a Signal when function return result Not True
     """
     def decorator(func):
         @functools.wraps(func)
@@ -69,13 +70,14 @@ def signal(sig: Signal):
             if not res:
                 # Check if fallback is enabled
                 # The enable_fallback state is synced from AppFileSystem to handler
-                enable_fallback = getattr(self, 'enable_fallback', True)
+                _fallback = getattr(self, '_fallback', None)
+                enable_fallback = _fallback.enable if _fallback else False
                 
                 if enable_fallback:
-                    logger.debug(f"Signal {sig.__name__} triggered for path: {path}")
-                    raise sig(f"Signal {sig.__name__} triggered for path: {path}", value=res)
+                    logger.debug(f"[{self.__class__.__name__}] Signal {sig.__name__} triggered for path: {path}")
+                    raise sig(f"[{self.__class__.__name__}] Signal {sig.__name__} triggered for path: {path}", value=res)
                 else:
-                    logger.debug(f"Signal {sig.__name__} suppressed (fallback disabled) for path: {path}")
+                    logger.debug(f"[DISABLED {self.__class__.__name__}] Signal {sig.__name__} suppressed for path: {path}")
             return res
         return wrapper
     return decorator
@@ -104,7 +106,8 @@ def fallback(errors: Tuple[Type[Exception], ...] = (FileNotFoundError, KeyError)
                 return func(self, path, *args, **kwargs)
             except errors as e:
                 # Check if fallback is enabled and applicable
-                if not getattr(self, 'enable_fallback', False):
+                _fallback = getattr(self, '_fallback', None)
+                if not _fallback or not _fallback.enable:
                     raise
                 if not isinstance(path, DNSBPath) or path.protocol != "file":
                     raise
@@ -113,14 +116,14 @@ def fallback(errors: Tuple[Type[Exception], ...] = (FileNotFoundError, KeyError)
                 
                 method_name = func.__name__
                 logger.debug(
-                    f"Primary handler failed for {path} ({method_name}), "
+                    f"[Fallback] Primary handler failed for {path} ({method_name}), "
                     f"trying fallback: {type(e).__name__}"
                 )
                 
                 # Try fallback handler
                 fallback_method = getattr(self._fallback_handler, method_name, None)
                 if not fallback_method:
-                    logger.debug(f"Fallback handler has no method '{method_name}'")
+                    logger.debug(f"[Fallback] Fallback handler has no method '{method_name}'")
                     raise
                 
                 try:
@@ -129,12 +132,12 @@ def fallback(errors: Tuple[Type[Exception], ...] = (FileNotFoundError, KeyError)
                     if hasattr(self, '_record_fallback'):
                         self._record_fallback(path, method_name)
                     logger.debug(
-                        f"Successfully read from disk via fallback: {path} ({method_name})"
+                        f"[Fallback] Successfully read from disk via fallback: {path} ({method_name})"
                     )
                     return result
                 except Exception as fallback_e:
                     logger.debug(
-                        f"Fallback handler also failed for {path}: "
+                        f"[Fallback] Fallback handler also failed for {path}: "
                         f"{type(fallback_e).__name__}"
                     )
                     # Raise the original exception, not the fallback exception
