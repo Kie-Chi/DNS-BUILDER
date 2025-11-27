@@ -23,22 +23,22 @@ class Version:
         
         match = self.SEMVER_REGEX.match(version_str)
         if not match:
-            if '-' in version_str:
-                core_part, prerelease_part = version_str.split('-', 1)
-                try:
-                    Version(core_part) # raise ValueError if core_part invalid
-                except ValueError:
-                    raise ImageDefinitionError(f"Unrecognized Version '{version_str}'")
-            else:
-                core_part_match = re.match(r"(\d+\.\d+\.\d+)", version_str)
-                if core_part_match:
-                    core_part = core_part_match.group(1)
-                    prerelease_part = version_str[len(core_part):]
-                else: 
-                     raise ImageDefinitionError(f"Unrecognized Version '{version_str}'")
+            prerelease_part = None
+            core_match = re.match(r"^(\d+(?:\.\d+)*)", version_str)
+            
+            if core_match:
+                core_str = core_match.group(1)
+                if len(core_str) < len(version_str):
+                    prerelease_part = version_str[len(core_str):].lstrip('-.+')
+                
+                core_list = list(map(int, core_str.split('.')))
+                while len(core_list) < 3:
+                    core_list.append(0)
 
-            self.core = tuple(map(int, core_part.split('.')))
-            self.prerelease = self._parse_prerelease(prerelease_part)
+                self.core = tuple(core_list[:3])
+                self.prerelease = self._parse_prerelease(prerelease_part)
+            else:
+                raise ImageDefinitionError(f"Unrecognized Version '{version_str}'")
         else:
             parts = match.groupdict()
             self.core = (int(parts['major']), int(parts['minor']), int(parts['patch']))

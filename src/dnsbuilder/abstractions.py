@@ -256,6 +256,14 @@ class InternalImage(Image, ABC):
         """
         Judge a dependency rule for os version or not
         """
+        try:
+            p = Package.parse(dep, default_pm=None)
+            logger.debug(f"{dep} parsed as distinct {p.__repr__}, not a os version")
+            return False
+        except Exception:
+            logger.debug(f"{dep} parsed as not distince package, may be os version.")
+            pass
+
         if "." in dep:
             # like ubuntu:12.04, python:3.9-slim etc.
             return True
@@ -637,12 +645,13 @@ class ExternalImage(Image, ABC):
         
         supported_software = image_registry.get_supports()
         name_lower = name.lower()
-        for software in supported_software:
-            if software in constants.RECOGNIZED_PATTERNS:
-                for pattern in constants.RECOGNIZED_PATTERNS[software]:
+        for soft in constants.RECOGNIZED_PATTERNS.keys():
+            if soft in supported_software:
+                for pattern in constants.RECOGNIZED_PATTERNS[soft]:
                     if re.search(pattern, name_lower):
-                        return software
-        
+                        return soft
+            else:
+                logger.debug(f"[{self.original_name}] Software type '{soft}' is not supported, passed.")
         return "NaS"
 
     @abstractmethod

@@ -86,6 +86,12 @@ DNS_SOFTWARE_BLOCKS = {
     },
     "pdns_recursor": {
         "global",           # PowerDNS Recursor only has global configuration
+    },
+    "knot_resolver": {
+        "global",
+    },
+    "knot_resolver6": {
+        "global",
     }
 }
 
@@ -102,6 +108,18 @@ RECOGNIZED_PATTERNS = {
         r"\bpdns[_-]?recursor(?![a-zA-Z])",  # pdns_recursor or pdns-recursor
         r"\bpowerdns[_-]?recursor(?![a-zA-Z])",  # powerdns_recursor or powerdns-recursor
     ],
+    "knot_resolver6": [
+        r"(?:^|/)knot[_-]resolver:(?:latest|v?6(?:\.\d+|\.x)?)",  # knot_resolver or knot-resolver
+        r"(?:^|/)kresd:(?:latest|v?6(?:\.\d+|\.x)?)",  # kresd
+    ],
+    "knot_resolver": [
+        r"\bknot[_-]?resolver(?![a-zA-Z])",  # knot_resolver or knot-resolver
+        r"\bkresd(?![a-zA-Z])",  # kresd
+    ],
+    "technitium": [
+        r"\btechnitium[_-]?dns-server(?![a-zA-Z])",  # technitium_dns-server or technitium-dns-server
+        r"\btechnitium(?![a-zA-Z])",  # technitium_dns-server or technitium-dns-server
+    ]
 }
 
 
@@ -190,6 +208,9 @@ PKG_NAMES = [
     
     # Go packages: go-xxx, golang-xxx
     (r"^(go|golang)-(.+)$", "go", 2),
+
+    # Wapt packages: https-xxx.deb, http-xxx.deb
+    (r"^(https|http)(.+)\.deb$", "wapt", 2),
 ]
 
 BASE_PACKAGE_MANAGERS = {
@@ -229,6 +250,17 @@ SOFT_PACKAGE_MANAGERS = {
             "dnf": ["python3", "python3-pip"],
             "yum": ["python3", "python3-pip"],
             "apk": ["python3", "py3-pip"],
+        }
+    },
+    "wapt": {
+        "check_cmd": "command -v wget >/dev/null 2>&1 && command -v apt >/dev/null 2>&1",
+        "install_cmd": "mkdir -p /tmp/wapts && wget -P /tmp/wapts {packages} && apt install /tmp/wapts/*.deb -y && rm /tmp/wapts/*.deb",
+        "cleanup_cmd": "",
+        "base_requirements": {
+            "apt": ["wget"],
+            "dnf": None,
+            "yum": None,
+            "apk": None,
         }
     },
     "pip3": {

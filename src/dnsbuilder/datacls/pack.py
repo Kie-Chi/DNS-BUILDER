@@ -70,7 +70,8 @@ class Package(BaseModel):
         
         if ":" in s:
             name, pm = s.rsplit(":", 1)
-            return cls(name=name.strip(), pm=pm.strip())
+            if pm in constants.SOFT_PACKAGE_MANAGERS or pm in constants.BASE_PACKAGE_MANAGERS:
+                return cls(name=name.strip(), pm=pm.strip())
         
         if auto_detect:
             for pattern, pm, group_idx in constants.PKG_NAMES:

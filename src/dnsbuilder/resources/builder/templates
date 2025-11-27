@@ -57,6 +57,46 @@
             ]
         }
     },
+    "knot_resolver": {
+        "recursor": {
+            "command": "kresd -v -c /usr/local/etc/kresd.conf /tmp/kresd_test",
+            "volumes": [
+                "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+                "${origin}./${name}/contents/tmp:/tmp/kresd_test",
+                "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+            ]
+        },
+        "forwarder": {
+            "command": "kresd -v -c /usr/local/etc/kresd.conf /tmp/kresd_test",
+            "volumes": [
+                "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+                "${origin}./${name}/contents/tmp:/tmp/kresd_test",
+                "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+            ]
+        }
+    },
+    "knot_resolver6": {
+        "recursor": {
+            "command": "kresd -v -c /usr/local/etc/kresd.yml",
+            "volumes": [
+                "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+                "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+            ],
+            "files": {
+                "/usr/local/etc/kresd.yml": "lua:\n  script: |\n    dofile('/usr/local/etc/kresd.conf')"
+            }
+        },
+        "forwarder": {
+            "command": "kresd -v -c /usr/local/etc/kresd.yml",
+            "volumes": [
+                "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+                "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+            ],
+            "files": {
+                "/usr/local/etc/kresd.yml": "lua:\n  script: |\n    dofile('/usr/local/etc/kresd.conf')"
+            }
+        }
+    },
     "monitor": {
         "influxdb": {
             "build": false,

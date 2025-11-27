@@ -247,6 +247,69 @@ class PdnsRecursorMasterBehavior(MasterBehavior):
         return f'auth-zones+={zone_name}={file_path}'
 
 
+# ============================================================================
+# KNOT RESOLVER IMPLEMENTATIONS ( < 5.x )
+# ============================================================================
+
+class KnotResolverForwardBehavior(Behavior):
+    def generate(
+        self, service_name: str, build_context: BuildContext
+    ) -> BehaviorArtifact:
+        target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
+        ip_list = ", ".join([f"'{ip}'" for ip in target_ips])
+        if self.zone == ".":
+            config_line = f"policy.add(policy.all(policy.FORWARD({{{ip_list}}})))"
+        else:
+            config_line = (
+                f"policy.add(policy.suffix(policy.FORWARD({{{ip_list}}}), {{todname('{self.zone}')}}))"
+            )
+        return BehaviorArtifact(config_line=config_line)
+
+
+class KnotResolverStubBehavior(Behavior):
+    def generate(
+        self, service_name: str, build_context: BuildContext
+    ) -> BehaviorArtifact:
+        target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
+        ip_list = ", ".join([f"'{ip}'" for ip in target_ips])
+        config_line = (
+            f"policy.add(policy.suffix(policy.STUB({{{ip_list}}}), {{todname('{self.zone}')}}))"
+        )
+        return BehaviorArtifact(config_line=config_line)
+
+
+class KnotResolverHintBehavior(Behavior):
+    def generate(
+        self, service_name: str, build_context: BuildContext
+    ) -> BehaviorArtifact:
+        if len(self.targets) != 1:
+            raise BehaviorError("The 'hint' behavior type only supports a single target.")
+        target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
+        target_name = self.targets[0]
+        target_ip = target_ips[0]
+        config_line = f"modules.load('hints')\nhints.root({{['{target_name}'] = {{'{target_ip}'}}}})"
+
+        filename = f"root.hints"
+        container_path = f"/etc/knot-resolver/{filename}"
+        file_content = ""
+        volume = VolumeArtifact(
+            filename=filename, content=file_content, container_path=container_path
+        )
+        return BehaviorArtifact(config_line=config_line, new_volume=volume)
+
+# ============================================================================
+# KNOT RESOLVER IMPLEMENTATIONS ( >= 6.x the same) 
+# ============================================================================
+
+class KnotResolver6HintBehavior(KnotResolverHintBehavior):
+    pass
+
+class KnotResolver6ForwardBehavior(KnotResolverForwardBehavior):
+    pass
+
+class KnotResolver6StubBehavior(KnotResolverStubBehavior):
+    pass
+
 # Dynamically generate __all__
 from ..utils.reflection import gen_exports
 
