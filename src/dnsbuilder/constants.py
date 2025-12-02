@@ -166,7 +166,7 @@ ALIAS_MAP = {
 }
 
 # --- supported protocol ---
-KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp", "git", "cache"}
+KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp", "git", "cache", "raw"}
 
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]
@@ -319,3 +319,6 @@ SOFT_PACKAGE_MANAGERS = {
         }
     },
 }
+
+# --- config about behavior generate
+ROOT = "A.ROOT-SERVERS.NET." # root server hostname

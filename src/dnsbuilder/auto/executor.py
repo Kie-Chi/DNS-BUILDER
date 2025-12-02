@@ -1,7 +1,7 @@
 import tempfile
 import os
 from typing import Any, Dict, List, Optional
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from ..io import DNSBPath, FileSystem, Path
 from ..exceptions import DefinitionError
@@ -164,7 +164,7 @@ class ScriptExecutor:
             logger.debug(f"[Auto@{self.max_workers}] Script config after execution: {script['config']}")
             return {script.get('service_name', 'global'): script['config']}
         
-        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_script = {}
             for script in scripts:
                 future = executor.submit(
@@ -212,7 +212,7 @@ class ScriptExecutor:
             }]
         
         # For multiple scripts, use parallel execution
-        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = [executor.submit(self._exec, script, self) for script in scripts]
             results = []
             for i, future in enumerate(futures):

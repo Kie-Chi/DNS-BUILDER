@@ -115,6 +115,9 @@ class DNSBPath(PurePosixPath):
         kwargs.pop("fragment", None)
         super().__init__(self.__first_part, *(args[1:]), **kwargs)
 
+    def is_disk(self) -> bool:
+        return self.protocol in ["file", "raw"]
+
     @property
     @override
     def parent(self):

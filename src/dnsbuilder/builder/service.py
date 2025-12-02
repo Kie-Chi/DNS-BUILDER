@@ -12,7 +12,7 @@ from ..datacls import BuildContext, BehaviorArtifact, Pair, Volume
 from .zone import ZoneGenerator
 from .. import constants
 from ..io import DNSBPath, FileSystem
-from ..exceptions import BuildError, BehaviorError, VolumeError, BuildDefinitionError
+from ..exceptions import BuildError, BehaviorError, DNSBPathNotFoundError, VolumeError, BuildDefinitionError
 
 logger = logging.getLogger(__name__)
 
@@ -335,6 +335,8 @@ class ServiceHandler:
             container_path = volume.dst
             if host_path.need_check:
                 # need fallback
+                if self.service_name == "sld":
+                    pass
                 if not self.context.fs.exists(host_path):
                     if not host_path.is_absolute():
                         raise VolumeError(f"Volume relative source path does not exist: '{host_path}'")
@@ -357,15 +359,28 @@ class ServiceHandler:
                             target_path = self.contents_dir / f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
                     return target_path
 
+                def get_host_path(filename: DNSBPath) -> DNSBPath:
+                    if filename.protocol == "file":
+                        return DNSBPath(f"raw:{host_path.__path__()}")
+                    return filename
+
+                def wrap(func):
+                    def wrapper(host_path, target_path):
+                        try:
+                            return func(host_path, target_path)
+                        except DNSBPathNotFoundError:
+                            return func(get_host_path(host_path), target_path)
+                    return wrapper
+
                 with self.context.fs.fallback(enable=False):
                     if self.context.fs.is_dir(host_path):
                         filename = host_path.__rname__.split(".")[0]
                         target_path = gen_target_path(filename)
-                        self.context.fs.copytree(host_path, target_path)
+                        wrap(self.context.fs.copytree)(host_path, target_path)
                     else:
                         filename = host_path.__rname__
                         target_path = gen_target_path(filename)
-                        self.context.fs.copy(host_path, target_path)
+                        wrap(self.context.fs.copy)(host_path, target_path)
                 suffixes = DNSBPath(container_path).suffixes
                 dcr_path = f"./{self.service_name}/contents/{filename}"
                 if (len(suffixes) >= 1 and suffixes[-1] == '.conf') or (len(suffixes) >= 2 and suffixes[-2] == '.conf'):

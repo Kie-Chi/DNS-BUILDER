@@ -9,10 +9,12 @@ Concrete classes:
 """
 
 import logging
+from tkinter import constants
 
 from ..abstractions import Behavior, MasterBehavior
 from ..datacls import BehaviorArtifact, VolumeArtifact, BuildContext
 from ..exceptions import BehaviorError
+from .. import constants
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +58,8 @@ class BindHintBehavior(Behavior):
         container_path = f"/usr/local/etc/zones/{filename}"
 
         file_content = (
-            f".\t3600000\tIN\tNS\t{target_name}.\n"
-            f"{target_name}.\t3600000\tIN\tA\t{target_ip}\n"
+            f".\t3600000\tIN\tNS\t{constants.ROOT}\n"
+            f"{constants.ROOT}\t3600000\tIN\tA\t{target_ip}\n"
         )
 
         config_line = f'zone "{self.zone}" {{ type hint; file "{container_path}"; }};'
@@ -130,8 +132,8 @@ class UnboundHintBehavior(Behavior):
         container_path = f"/usr/local/etc/unbound/zones/{filename}"
 
         file_content = (
-            f".\t3600000\tIN\tNS\t{target_name}.\n"
-            f"{target_name}.\t3600000\tIN\tA\t{target_ip}\n"
+            f".\t3600000\tIN\tNS\t{constants.ROOT}\n"
+            f"{constants.ROOT}\t3600000\tIN\tA\t{target_ip}\n"
         )
 
         config_line = f'root-hints: "{container_path}"'
@@ -209,8 +211,8 @@ class PdnsRecursorHintBehavior(Behavior):
         container_path = f"/usr/local/etc/zones/{filename}"
 
         file_content = (
-            f".\t3600000\tIN\tNS\t{target_name}.\n"
-            f"{target_name}.\t3600000\tIN\tA\t{target_ip}\n"
+            f".\t3600000\tIN\tNS\t{constants.ROOT}\n"
+            f"{constants.ROOT}\t3600000\tIN\tA\t{target_ip}\n"
         )
 
         config_line = f'hint-file={container_path}'
@@ -285,9 +287,8 @@ class KnotResolverHintBehavior(Behavior):
         if len(self.targets) != 1:
             raise BehaviorError("The 'hint' behavior type only supports a single target.")
         target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
-        target_name = self.targets[0]
         target_ip = target_ips[0]
-        config_line = f"modules.load('hints')\nhints.root({{['{target_name}'] = {{'{target_ip}'}}}})"
+        config_line = f"modules.load('hints')\nhints.root({{['{constants.ROOT}'] = {{'{target_ip}'}}}})"
 
         filename = f"root.hints"
         container_path = f"/etc/knot-resolver/{filename}"

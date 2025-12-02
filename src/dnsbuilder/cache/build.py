@@ -47,8 +47,12 @@ class CachedBuilder(Builder):
         cache_consistent = self._check_cache_consistency()
         
         # Step 3: build in memory
-        with self.memory_fs.fallback(enable=True):
+        with self.memory_fs.fallback_global(enable=True):
             context = await self._build_in_memory()
+
+        # just disable fallback globally, double check if it's disabled
+        self.memory_fs.set_fallback_global(False)
+        assert not self.memory_fs.get_fallback_global()
 
         # Step 4: generate memory cache view from build result
         self._generate_memory_cache_view(context)

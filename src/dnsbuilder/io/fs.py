@@ -41,27 +41,60 @@ logger = logging.getLogger(__name__)
 # Abstract FileSystem
 #
 # --------------------
-
-class _FallbackContext:
-    """Context manager for temporarily changing fallback behavior."""
-    
-    def __init__(self, fs: "FileSystem", enable: bool):
-        self.fs = fs
-        self.enable = enable
-        self.original_state = None
-    
-    def __enter__(self):
-        self.original_state = self.fs._fallback.enable
-        self.fs._fallback.enable = self.enable
-        return self.fs
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.fs._fallback.enable = self.original_state
-        return False
-
-@dataclass
 class _Fallback:
-    enable: bool = False
+    def __init__(self, enable: bool = False):
+        import threading
+        self._global = bool(enable)
+        self._local = threading.local()
+    def get_global(self) -> bool:
+        return self._global
+    def set_global(self, val: bool):
+        self._global = bool(val)
+    def get_local(self):
+        return getattr(self._local, "enable", None)
+    def set_local(self, val: bool):
+        self._local.enable = bool(val)
+    def reset_local(self):
+        if hasattr(self._local, "enable"):
+            del self._local.enable
+    @property
+    def enable(self) -> bool:
+        v = self.get_local()
+        return self._global if v is None else v
+    @enable.setter
+    def enable(self, val: bool):
+        self.set_local(val)
+    def context(self, enable: bool):
+        fb = self
+        class _Ctx:
+            def __init__(self, val: bool):
+                self.val = val
+                self.prev = None
+            def __enter__(self):
+                self.prev = fb.get_local()
+                fb.set_local(self.val)
+                return fb
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                if self.prev is None:
+                    fb.reset_local()
+                else:
+                    fb.set_local(self.prev)
+                return False
+        return _Ctx(enable)
+    def context_global(self, enable: bool):
+        fb = self
+        class _GCtx:
+            def __init__(self, val: bool):
+                self.val = val
+                self.prev = None
+            def __enter__(self):
+                self.prev = fb.get_global()
+                fb.set_global(self.val)
+                return fb
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                fb.set_global(self.prev)
+                return False
+        return _GCtx(enable)
 
 class FileSystem(ABC):
     """DNSB File System Abstract Base Class"""
@@ -144,8 +177,19 @@ class FileSystem(ABC):
     # Special methods
     # Fallback methods
     def fallback(self, enable: bool = True):
-        """Temporarily change fallback behavior"""
-        return _FallbackContext(self, enable)
+        return self._fallback.context(enable)
+    def fallback_global(self, enable: bool = True):
+        return self._fallback.context_global(enable)
+    def set_fallback_global(self, enable: bool):
+        self._fallback.set_global(enable)
+    def get_fallback_global(self) -> bool:
+        return self._fallback.get_global()
+    def set_fallback_local(self, enable: bool):
+        self._fallback.set_local(enable)
+    def get_fallback_local(self):
+        return self._fallback.get_local()
+    def reset_fallback_local(self):
+        self._fallback.reset_local()
 
     # NotImplemented methods
     # !!! Child-FileSystem Override these methods if needed
@@ -216,12 +260,13 @@ class AppFileSystem(FileSystem):
         # register default file system handlers
         self._handlers: Dict[str, FileSystem] = {}
         self.register_handler("file", DiskFileSystem(chroot=chroot))
+        self.register_handler("raw", DiskFileSystem(chroot=chroot))
         self.register_handler("temp", HyperMemoryFileSystem(chroot=chroot))
         self.register_handler("resource", ResourceFileSystem(chroot=chroot))
         self.register_handler("git", GitFileSystem(DiskFileSystem(chroot=chroot), chroot=chroot))
         
         # fallback mechanism
-        self._fallback_handler = DiskFileSystem(chroot=chroot)
+        self._fallback_handler = self._handlers["raw"]
         
         # fallback statistics
         self._fallback_stats = {
@@ -243,8 +288,32 @@ class AppFileSystem(FileSystem):
         """
         Temporarily change fallback behavior.
         """
-        return _FallbackContext(self, enable)
+        return super().fallback(enable)
         
+    @override
+    def fallback_global(self, enable: bool = True):
+        return super().fallback_global(enable)
+
+    @override
+    def set_fallback_global(self, enable: bool):
+        return super().set_fallback_global(enable)
+
+    @override
+    def get_fallback_global(self) -> bool:
+        return super().get_fallback_global()
+
+    @override
+    def set_fallback_local(self, enable: bool):
+        return super().set_fallback_local(enable)
+
+    @override
+    def get_fallback_local(self):
+        return super().get_fallback_local()
+
+    @override
+    def reset_fallback_local(self):
+        return super().reset_fallback_local()
+
     def register_handler(self, protocol: str, handler: FileSystem):
         """Register a file system handler for a specific protocol."""
         self._handlers[protocol] = handler
@@ -603,17 +672,17 @@ class DiskFileSystem(FsspecFileSystem):
 
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
-        if path.protocol != "file":
+        if not path.is_disk():
             return path
         if path.is_absolute():
             return path
         
         resolved = self.chroot / path
-        return DNSBPath(Path(str(resolved)).absolute())
+        return DNSBPath(Path(resolved.__path__()).absolute())
 
     @override
     def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
-        if path.protocol != "file" or other.protocol != "file":
+        if not path.is_disk() or not other.is_disk():
             raise UnsupportedFeatureError(
                 f"relative_to only supports file protocol, got path={path.protocol}, other={other.protocol}"
             )
