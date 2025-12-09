@@ -1,5 +1,5 @@
 import time
-from typing import List
+from typing import List, Dict
 from dnslib import RR, SOA, A, NS, DNSLabel, QTYPE, CLASS
 import logging
 import hashlib
@@ -15,6 +15,62 @@ DEPTHS = {
     2 : "sld-servers",
     # 3 or more is not supported, we just random
 }
+
+# Class-level counter
+_zone_counters: Dict[int, int] = {}
+def _gen_prefix(count: int) -> str:
+    """
+    Generate a unique identifier based on count.    
+    - 0: 'ns'
+    - 1-26: 'a' to 'z'
+    - 27-52: 'aa' to 'az'
+    - 53-78: 'ba' to 'bz'
+    - etc.
+    Args:
+        count: The counter value (0-indexed)
+    Returns:
+        A unique string identifier
+    """
+    if count == 0:
+        return "ns"
+    
+    # Adjust count to be 1-indexed for the alphabet pattern
+    count = count - 1
+    
+    # Calculate how many letters we need
+    result = []
+    while True:
+        result.append(chr(ord('a') + (count % 26)))
+        count = count // 26
+        if count == 0:
+            break
+        count -= 1  # Adjust for the next iteration
+    return ''.join(reversed(result))
+
+
+def _prefix(depth: int) -> str:
+    """
+    Get the prefix at a given depth.
+    
+    Args:
+        depth: The depth level of the zone 
+    Returns:
+        A unique identifier string
+    """
+    if depth not in _zone_counters:
+        _zone_counters[depth] = 0
+    else:
+        _zone_counters[depth] += 1
+    
+    return _gen_prefix(_zone_counters[depth])
+
+
+def _reset() -> None:
+    """
+    Reset all zone counters.
+    """
+    global _zone_counters
+    _zone_counters.clear()
 
 
 class ZoneGenerator:
@@ -46,9 +102,10 @@ class ZoneGenerator:
 
         # Create default SOA and NS records
         depth = self.zone_name.count(".") if self.zone_name != "." else 0
-        used_name = DEPTHS[depth] if depth in DEPTHS else f"{hashlib.sha256(self.zone_name.encode()).hexdigest()[:16]}-servers"
-        ns_name = f"ns.{used_name}.net."
-        soa_name = f"admin.{used_name}.net."
+        base_name = DEPTHS.get(depth, "servers")
+        unique_id = _prefix(depth)        
+        ns_name = f"{unique_id}.{base_name}.net."
+        soa_name = f"admin.{base_name}.net."
         
         default_records = [
             RR(
