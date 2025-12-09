@@ -16,8 +16,11 @@ DEPTHS = {
     # 3 or more is not supported, we just random
 }
 
-# Class-level counter
+# Class-level counter per depth and per service
 _zone_counters: Dict[int, int] = {}
+_zone_prefixes: Dict[int, Dict[str, str]] = {}
+
+
 def _gen_prefix(count: int) -> str:
     """
     Generate a unique identifier based on count.    
@@ -48,21 +51,27 @@ def _gen_prefix(count: int) -> str:
     return ''.join(reversed(result))
 
 
-def _prefix(depth: int) -> str:
+def _prefix(depth: int, service_name: str) -> str:
     """
-    Get the prefix at a given depth.
-    
-    Args:
-        depth: The depth level of the zone 
-    Returns:
-        A unique identifier string
+    Get a stable prefix for a given depth and service name. Reuses the same
+    prefix when the same service appears multiple times at the same depth.
     """
+    service_key = service_name.rstrip(".")
+
+    if depth not in _zone_prefixes:
+        _zone_prefixes[depth] = {}
+
+    if service_key in _zone_prefixes[depth]:
+        return _zone_prefixes[depth][service_key]
+
     if depth not in _zone_counters:
         _zone_counters[depth] = 0
     else:
         _zone_counters[depth] += 1
-    
-    return _gen_prefix(_zone_counters[depth])
+
+    prefix = _gen_prefix(_zone_counters[depth])
+    _zone_prefixes[depth][service_key] = prefix
+    return prefix
 
 
 def _reset() -> None:
@@ -71,6 +80,7 @@ def _reset() -> None:
     """
     global _zone_counters
     _zone_counters.clear()
+    _zone_prefixes.clear()
 
 
 class ZoneGenerator:
@@ -103,7 +113,7 @@ class ZoneGenerator:
         # Create default SOA and NS records
         depth = self.zone_name.count(".") if self.zone_name != "." else 0
         base_name = DEPTHS.get(depth, "servers")
-        unique_id = _prefix(depth)        
+        unique_id = _prefix(depth, self.service_name)
         ns_name = f"{unique_id}.{base_name}.net."
         soa_name = f"admin.{base_name}.net."
         
