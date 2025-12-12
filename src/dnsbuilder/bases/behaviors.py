@@ -9,7 +9,6 @@ Concrete classes:
 """
 
 import logging
-from tkinter import constants
 
 from ..abstractions import Behavior, MasterBehavior
 from ..datacls import BehaviorArtifact, VolumeArtifact, BuildContext
