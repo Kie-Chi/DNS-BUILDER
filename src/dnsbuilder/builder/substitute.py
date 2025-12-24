@@ -181,6 +181,39 @@ class VariableSubstitutor:
         except AttributeError:
             raise ReferenceNotFoundError(f"Cannot resolve image.{image_property} for service '{service_to_find}': property does not exist.")
 
+    def _resolve_config_attr(self, key: str, fallback: str = None) -> str:
+        """
+        Resolves a value from top-level config attributes using dot-separated path.
+        Examples: vars.first, mirror.url, etc.
+        """
+        parts = key.split('.')        
+        value = self.config.model
+        
+        for i, part in enumerate(parts):
+            # Try to get attribute or dict key
+            if hasattr(value, part):
+                value = getattr(value, part)
+                logger.debug(f"[Resolve/config] Got attribute '{part}' -> {type(value).__name__}")
+            elif isinstance(value, dict) and part in value:
+                value = value[part]
+                logger.debug(f"[Resolve/config] Got dict key '{part}' -> {type(value).__name__}")
+            else:
+                logger.debug(f"[Resolve/config] Path '{key}' not found: '{part}' does not exist in {type(value).__name__}")
+                return None
+        
+        # Check if we got a valid leaf value
+        if isinstance(value, (dict, list)):
+            # Complex types cannot be substituted into strings
+            logger.debug(f"[Resolve/config] Path '{key}' is a {type(value).__name__}, cannot substitute")
+            return None
+        
+        if value is None:
+            logger.debug(f"[Resolve/config] Path '{key}' resolved to None")
+            return None
+            
+        logger.debug(f"[Resolve/config] path '{key}' -> '{value}'.")
+        return str(value)
+
     @lenient_resolver
     @no_required
     def _resolve_prop(self, key: str, var_map: Dict[str, str], fallback: str = None) -> str:
@@ -257,6 +290,11 @@ class VariableSubstitutor:
             resolved = var_map[core_key]
             logger.debug(f"[Resolve/var_map] service '{var_map.get('name', 'unknown')}', key '{core_key}' -> '{resolved}'.")
             return resolved
+
+        # Try to resolve from top-level config attributes
+        config_value = self._resolve_config_attr(core_key, fallback=fallback)
+        if config_value is not None:
+            return config_value
 
         # Try to resolve from build_conf as a path
         value = self._resolve_prop(core_key, var_map, fallback=fallback)
