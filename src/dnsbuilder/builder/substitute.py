@@ -69,22 +69,46 @@ class VariableSubstitutor:
             logger.debug(f"[Alias] Normalized key '{key}' -> '{normalized}'.")
         return normalized
 
-    def run(self, resolved_builds: Dict[str, Dict]) -> Dict[str, Dict]:
+    def run(self, config_dict: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Executes the substitution process for all provided build configurations.
+        Executes the substitution process for the entire config.
+        Processes both top-level extra fields and all build configurations.
+        
+        Args:
+            config_dict: Full config dictionary including builds
+            
+        Returns:
+            Complete config with all variables substituted
         """
-        logger.info("Substituting variables in all build configurations...")
+        logger.info("Substituting variables in configuration...")
         
-        substituted_builds = {}
-        for service_name, service_conf in resolved_builds.items():
-            # Build the variable map specific to this service
-            var_map = self._map(service_name, service_conf)
-            # Perform substitution on this service's config using its map
-            substituted_builds[service_name] = self._recursive(service_conf, var_map)
-            logger.debug(f"Variable substitution complete for service '{service_name}'.")
+        # Build project-level variable map for config top-level fields
+        project_var_map = {
+            "project.name": self.config.name,
+            "project.inet": self.config.inet,
+        }
         
-        logger.info("All variables substituted.")
-        return substituted_builds
+        # Process top-level extra fields
+        result = {}
+        for key, value in config_dict.items():
+            if key == 'builds':
+                # Process builds separately with service-specific context
+                logger.debug("[VariableSubstitutor] Processing builds...")
+                substituted_builds = {}
+                for service_name, service_conf in value.items():
+                    # Build the variable map specific to this service
+                    var_map = self._map(service_name, service_conf)
+                    # Perform substitution on this service's config
+                    substituted_builds[service_name] = self._recursive(service_conf, var_map)
+                    logger.debug(f"Variable substitution complete for service '{service_name}'.")
+                result['builds'] = substituted_builds
+            else:
+                # This is a top-level extra field, substitute with project-level variables
+                result[key] = self._recursive(value, project_var_map)
+                logger.debug(f"Variable substitution complete for config field '{key}'.")
+        
+        logger.info("All configuration variables substituted.")
+        return result
 
     def _map(self, service_name: str, service_conf: Dict) -> Dict[str, str]:
         """Constructs the dictionary of available variables for a given service."""

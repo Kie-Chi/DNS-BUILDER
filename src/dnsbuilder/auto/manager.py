@@ -65,6 +65,11 @@ class AutomationManager:
         builds = current_config.get('builds', {})
         
         for service_name, build_config in builds.items():
+            # Skip services with build: false (templates)
+            if not build_config.get('build', True):
+                logger.debug(f"[Auto@{self.max_workers}] Skipping setup for service '{service_name}' (build=false)")
+                continue
+                
             service_auto = build_config.get('auto', {})
             service_setup = service_auto.pop('setup', None)
             
@@ -158,6 +163,11 @@ class AutomationManager:
         builds = current_config.get('builds', {})
         
         for service_name, build_config in builds.items():
+            # Skip services with build: false (templates)
+            if not build_config.get('build', True):
+                logger.debug(f"[Auto@{self.max_workers}] Skipping modify for service '{service_name}' (build=false)")
+                continue
+                
             service_auto = build_config.get('auto', {})
             service_modify = service_auto.pop('modify', None)
             
@@ -243,6 +253,11 @@ class AutomationManager:
         # Service-level restrict scripts
         builds = config.get("builds", {})
         for service_name, service_config in builds.items():
+            # Skip services with build: false (templates)
+            if not service_config.get('build', True):
+                logger.debug(f"[Auto@{self.max_workers}] Skipping restrict for service '{service_name}' (build=false)")
+                continue
+                
             service_restrict = service_config.get("auto", {}).get("restrict")
             if service_restrict:
                 if isinstance(service_restrict, str):

@@ -62,10 +62,12 @@ class Builder:
         service_ips = self._plan_net(context)
         context = context.model_copy(update={"service_ips": service_ips})
 
-        # Substitute variables (like ${name}, ${ip}) in the resolved configurations
+        # Substitute variables (like ${name}, ${ip}) in the entire config
         logger.debug("[Builder] Invoking VariableSubstitutor for variable replacement...")
-        substituted_builds = self._sub_var(context)
-        context = context.model_copy(update={'resolved_builds': substituted_builds})
+        config_data = self._sub_var(context)
+        # Update both config and resolved_builds from the substituted result
+        context.config.model = context.config.model.model_validate(config_data)
+        context = context.model_copy(update={'resolved_builds': config_data['builds']})
 
         # Map the network topology and generate a graph if requested
         logger.debug("[Builder] Invoking Mapper for topology analysis...")
@@ -141,17 +143,22 @@ class Builder:
         return service_ips
 
     def _sub_var(self, context: BuildContext) -> Dict:
-        """Performs variable substitution across all resolved build configs."""
+        """Performs variable substitution across the entire config including builds and top-level extra fields."""
         logger.debug("[VariableSubstitutor] Substituting variables...")
+        
+        # Prepare full config dict with resolved builds
+        config_data = context.config.model.model_dump(by_alias=True, exclude_none=True)
+        config_data['builds'] = context.resolved_builds
+        
         substitutor = VariableSubstitutor(
             config=context.config, 
             images=context.images, 
             service_ips=context.service_ips,
             resolved_builds=context.resolved_builds
         )
-        substituted_builds = substitutor.run(context.resolved_builds)
+        substituted_config = substitutor.run(config_data)
         logger.debug("[VariableSubstitutor] Variable substitution complete.")
-        return substituted_builds
+        return substituted_config
 
     def _map(self, context: BuildContext):
         """Analyzes service behaviors to map the network topology."""

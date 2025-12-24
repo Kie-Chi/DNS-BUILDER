@@ -155,6 +155,10 @@ class ZoneGenerator:
         zone_content_parts = [f"$ORIGIN {self.zone_name}"]
         zone_label = DNSLabel(self.zone_name)
 
+        # First pass: calculate the maximum domain name length
+        max_rname_len = 0
+        formatted_records = []
+        
         for record in all_records:
             record_label = DNSLabel(record.rname)
             rname_str = ""
@@ -167,11 +171,20 @@ class ZoneGenerator:
             else:
                 rname_str = str(record_label)
 
+            max_rname_len = max(max_rname_len, len(rname_str))
+            
             ttl_str = str(record.ttl) if record.ttl else ""
             rclass_str = CLASS.get(record.rclass, f"CLASS{record.rclass}")
             rtype_str = QTYPE.get(record.rtype, f"TYPE{record.rtype}")
-
-            line = f"{rname_str:<24}{ttl_str:<8}{rclass_str:<8}{rtype_str:<8}{record.rdata.toZone()}"
+            
+            formatted_records.append((rname_str, ttl_str, rclass_str, rtype_str, record.rdata.toZone()))
+        
+        # Use dynamic width based on the longest domain name, minimum 24
+        rname_width = max(24, max_rname_len + 4)
+        
+        # Second pass: format all records with consistent width
+        for rname_str, ttl_str, rclass_str, rtype_str, rdata in formatted_records:
+            line = f"{rname_str:<{rname_width}}{ttl_str:<8}{rclass_str:<8}{rtype_str:<8}{rdata}"
             zone_content_parts.append(line)
 
         logger.debug(f"Finished generating zone file for '{self.zone_name}'.")
