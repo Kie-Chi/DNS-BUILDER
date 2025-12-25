@@ -1,13 +1,11 @@
 # 服务配置
 
-用于声明具体服务（容器）的构建与运行参数。支持在预处理阶段将列表结构展开为字典
-
-结构上支持三种写法：顶层字典、单键字典列表、显式 `name` 的列表；**列表形式将于预处理阶段展开为字典**
+用于声明具体服务（容器）的构建与运行参数。配置必须使用 **字典格式**（推荐），每个服务作为顶层 `builds` 的一个键值对
+如需动态生成多个相似的服务，请使用 [Auto 自动化脚本](auto.md) 中的 `setup` 阶段
 
 ## name**
 
-- 仅在使用 **显示 `name`列表结构** 定义服务时可**显式定义**，其余两种定义方式默认字典key为服务名
-- 含义：服务唯一名称，用于服务引用与内部解析
+- 含义：服务唯一名称（即在 `builds` 中的字典键），用于服务引用与内部解析
 - 类型与格式：`string`，不可包含冒号（`:`）
 - 约束：全局唯一；重复或含冒号会在校验阶段报错
 
@@ -97,7 +95,7 @@
 
 ## 校验与约束总览
 
-- 至少需要 `image` 或 `ref` (ref的对象中需要包含 `image`)之一；都缺失会报错
+- 至少需要 `image` 或 `ref` 或 `auto.setup` (ref的对象中需要包含 `image`)之一；都缺失会报错
 - `std:` 前缀的模板必须配合 `image` 使用
 - 引用同级服务时会进行循环检测；形成环或引用不存在时报错
 
@@ -105,84 +103,49 @@
 
 ```yaml
 builds:
-  - recursor:
-      image: "bind"
-      ref: "std:recursor"
-      behavior: . hint root
+  recursor:
+    image: "bind"
+    ref: "std:recursor"
+    behavior: . hint root
 
-  - root:
-      image: "bind"
-      ref: "std:auth"
-      behavior: |
-        . master com NS tld
+  root:
+    image: "bind"
+    ref: "std:auth"
+    behavior: |
+      . master com NS tld
 
-  - name: "tld"
+  tld:
     image: "bind"
     ref: "std:auth"
     behavior: |
       com master example NS sld
-
-  - name: "sld-{{ value }}"
-    for_each:
-      range: [1, 3]
-    template:
-      image: "bind"
-      ref: "std:auth"
-      behavior: |
-        example.com master www A 1.2.3.{{ value }}
-        example.com master mail A 1.2.3.{{ value + 1 }}
-
-
 ```
 
-- 推导式语法必须使用 **列表项定义，不得使用顶层字典定义法**
+### 动态生成多个服务
 
-### 三种结构写法示例
-
-1) 顶层字典（推荐）
+如需批量生成多个相似的服务（如生成 `sld-1`, `sld-2`, `sld-3`），使用 `auto.setup` 阶段：
 
 ```yaml
-builds:
-  recursor:
-    image: "bind"
-    ref: "std:recursor"
-  root:
-    image: "bind"
-    ref: "std:auth"
+auto:
+  setup: |
+    for i in range(1, 4):
+      name = f"sld-{i}"
+      config.setdefault('builds', {})[name] = {
+        'image': 'bind',
+        'ref': 'std:auth',
+        'behavior': f'example.com master www A 1.2.3.{i}'
+      }
 
+builds: {}
 ```
 
-2) 单键字典列表
-
-```yaml
-builds:
-  - recursor:
-      image: "bind"
-      ref: "std:recursor"
-  - root:
-      image: "bind"
-      ref: "std:auth"
-```
-
-3) 显式 `name` 的列表
-
-```yaml
-builds:
-  - name: recursor
-    image: "bind"
-    ref: "std:recursor"
-  - name: root
-    image: "bind"
-    ref: "std:auth"
-```
-
-更多关于批量生成与模板展开的写法，详见[推导式语法](../rule/comprehension.md)
+详见 [Auto 自动化脚本](auto.md)
 
 ## 延伸阅读
-
-- [顶层配置](top-level.md)
+- [配置处理流程](processing-pipeline.md) - 了解服务配置的解析和处理顺序- [顶层配置](top-level.md)
 - [内部镜像配置](images.md)
 - [外部镜像配置](external-images.md)
+- [Auto 自动化脚本](auto.md)
 - [标准服务模板](../rule/build-templates.md)
 - [行为 DSL](../rule/behavior-dsl.md)
 - [文件路径与FS](../rule/paths-and-fs.md)

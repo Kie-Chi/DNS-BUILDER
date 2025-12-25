@@ -1,8 +1,8 @@
 # 内部镜像配置
 
-在 DNSB**内部Dockerfile模板** 基础上，声明基础镜像或继承镜像，决定服务运行环境。支持两种方式：通过 `ref` 引用已有内部镜像，或完整给出基础三元组
+在 DNSB**内部Dockerfile模板** 基础上，声明基础镜像或继承镜像，决定服务运行环境。支持两种方式：通过 `ref` 引用已有内部镜像，或完整给出基础三元组。
 
-结构上支持三种写法：顶层字典、单键字典列表、显式 `name` 的列表；**列表形式将于预处理阶段展开为字典**
+配置必须使用 **字典格式**（推荐），每个镜像作为顶层 `images` 的一个键值对。
 
 与内部镜像对应的还有外部镜像，详情可阅读[外部镜像配置](external-images.md)
 
@@ -43,8 +43,7 @@ images:
 
 ## name**
 
-- 仅在使用 **显示 `name`列表结构**定义镜像时可**显式定义**，其余两种定义方式默认字典key为服务名
-- 含义：镜像唯一名称，用于服务引用与内部解析
+- 含义：镜像唯一名称（即在 `images` 中的字典键），用于服务引用与内部解析
 - 类型与格式：`string`，不可包含冒号（`:`）
 - 约束：全局唯一；重复或含冒号会在校验阶段报错
 
@@ -101,61 +100,24 @@ images:
   bind:
     ref: "bind:9.18.0"
 
-  bind-from-source:
-    from: "ubuntu:20.04"
-    software: "bind"
+  bind-fast:
+    software: bind
     version: "9.18.0"
-    dependency:
-      - build-essential
-      - libssl-dev
-    util:
-      - dnsutils
-      - tcpdump
+    from: "ubuntu:20.04"
+    mirror:
+      apt_mirror: "mirrors.ustc.edu.cn"
+
+  judas-cn:
+    software: judas
+    version: "0.0.0"
+    from: "debian:10"
+    mirror:
+      apt_mirror: "mirrors.tencent.com"
+      npm_registry: "https://registry.npmmirror.com"
 ```
-
-### 三种结构写法示例
-
-1) 顶层字典（推荐）
-
-```yaml
-images:
-  bind:
-    ref: "bind:9.18.0"
-  unbound:
-    software: "unbound"
-    version: "1.19.0"
-    from: "debian:12"
-```
-
-2) 单键字典列表
-
-```yaml
-images:
-  - bind:
-      ref: "bind:9.18.0"
-  - unbound:
-      software: "unbound"
-      version: "1.19.0"
-      from: "debian:12"
-```
-
-3) 显式 `name` 的列表
-
-```yaml
-images:
-  - name: bind
-    ref: "bind:9.18.0"
-  - name: unbound
-    software: "unbound"
-    version: "1.19.0"
-    from: "debian:12"
-```
-
-更多关于批量生成的写法与模板展开，详见[推导式语法](../rule/comprehension.md)
 
 ## 延伸阅读
 
 - [顶层配置](top-level.md)
 - [服务配置](builds.md)
-- [推导式语法](../rule/comprehension.md)
 - [合并与覆盖规则](../rule/merge-and-override.md)

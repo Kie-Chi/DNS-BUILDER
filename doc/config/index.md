@@ -18,13 +18,17 @@ builds: {}
 
 ## 核心约束（速览）
 
+- 镜像与服务：必须使用字典格式，不再支持列表展开
 - 镜像：`ref` 与 `software/version/from` 互斥；镜像名不可重复且不能含冒号
 - 服务：需要 `image` 或 `ref`；使用 `std:` 模板时必须提供 `image`
 - 引用：同级 `ref` 支持链式继承；出现循环或未知引用会报错
 - include：支持相对、绝对与 `resource:/` 路径；按深度合并策略整合配置
+- auto：支持在三个阶段（setup、modify、restrict）执行 Python 脚本来动态管理配置
 
 ## 延伸阅读
 
+- [配置处理流程](processing-pipeline.md)
+- [Auto 自动化脚本](auto.md)
 - [顶层配置](top-level.md)
 - [镜像配置](images.md)
 - [服务配置](builds.md)
