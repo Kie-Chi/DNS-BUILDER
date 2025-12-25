@@ -16,6 +16,7 @@ from .exceptions import (
     BuildError,
 )
 from .api.main import app
+from . import __version__
 
 async def get_paths(args: argparse.Namespace) -> Tuple[DNSBPath]:
     dnsb_path = DNSBPath(args.config_file)
@@ -57,6 +58,7 @@ async def set_logger(args: argparse.Namespace):
     
 async def parse_args() -> Tuple[argparse.Namespace, argparse.ArgumentParser]:
     parser = argparse.ArgumentParser(description="DNS Builder CLI")
+    parser.add_argument("--version", action="version", version=f"dnsbuilder {__version__}")
     parser.add_argument("config_file", nargs='?', default=None, help="Path to the config.yml file.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     parser.add_argument(

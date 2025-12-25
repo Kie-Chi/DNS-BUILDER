@@ -1,6 +1,6 @@
 [project]
 name = "dnsbuilder"
-version = "0.8.0"
+dynamic = ["version"]
 description = "A tool to generate complex DNS test environments using Docker."
 requires-python = ">=3.12"
 dependencies = [
@@ -24,6 +24,9 @@ dnsb = "dnsbuilder.__main__:_sync"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "dnsbuilder.__version__"}
 
 [tool.setuptools.package-data]
 dnsbuilder = ["resources/**"]
