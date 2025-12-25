@@ -21,4 +21,4 @@ DNSBuilder 是用于构建与模拟 DNS 环境的工具，包含：
 - [按要求安装](root/install.md)后，参考[快速开始](root/getting-started.md)，按示例运行 `dnsb config.yml [--debug]`，并在输出目录执行 `docker compose up --build` 完成环境搭建
 - 遇到问题请查看[配置参考](config/index.md)与[FAQ](faq.md)，重点关注循环引用、模板使用与路径挂载等常见误区
 - 需要在配置生成或修改阶段执行自定义逻辑时，使用 [Auto 自动化脚本](config/auto.md)
-- 想要理解配置的完整处理流程（包括各个 auto 阶段的执行时机）时，参考[配置处理流程](config/processing-pipeline.md)
+- 想要理解配置的完整处理流程时，参考[配置处理流程](config/processing-pipeline.md)
