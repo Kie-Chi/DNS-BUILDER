@@ -23,6 +23,12 @@ dnsb config.yml [cli-args]
 - `-g/--graph GRAPH_PATH`：生成构建过程服务拓扑环境，保存至 `GRAPH_PATH`处
 - `--vfs`：内存构建，不使用真实磁盘空间
 - `-l/--log-levels`: 模块级控制日志
+- `-f/--log-file`: 保存log文件
+- `-i/--incremental`: 启用增量构建缓存
+- `-w/--workdir WORKDIR`: 指定工作目录
+  - 默认为运行命令的当前目录
+  - `@config` 代表配置文件所在目录
+  - 也可使用相对路径（相对于当前目录）或绝对路径
 
 #### 日志示例
 

@@ -120,7 +120,7 @@ auto:
 | `service_name` | `str` \| `None` | 当前服务名（全局脚本为 `None`，服务级脚本为对应的服务名） |
 | `result` | `Any` | 仅 `restrict` 脚本使用，存储验证结果 |
 | `fs` | `FileSystem` | 文件系统对象，用于文件读写操作 |
-| `workdir` | `str` | 工作目录路径（chroot），可用于相对路径操作 |
+| `workdir` | `DNSBPath` | 工作目录路径（chroot），可用于相对路径操作，兼容(`pathlib.PurePosixPath`，使用pathlib.Path可以直接传递workdir作为构造参数) |
 
 ### 变量使用示例
 
