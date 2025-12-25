@@ -47,7 +47,7 @@
 
 ## 与占位符的关系
 
-- Behavior DSL 自身不引入占位符语法；但 `behavior` 的字符串也会参与全局变量替换（详见[内置变量与占位符](builtins-and-placeholders.md)）
+- Behavior DSL 自身不引入占位符语法；但 `behavior` 的字符串也会参与全局变量替换，详见[内置变量与占位符](builtins-and-placeholders.md)
 - 推荐做法：在行为中直接写服务名或明确的 IP；避免在行为内使用 `${services.<name>.ip}` 等占位符以降低耦合
 
 ## 示例

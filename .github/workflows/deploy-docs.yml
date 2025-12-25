@@ -2,11 +2,6 @@ name: Deploy MkDocs site
 
 on:
   push:
-    tags:
-      - 'v*'
-  push:
-    branches:
-      - master
     paths:
       - 'doc/**'
       - 'mkdocs.yml'
