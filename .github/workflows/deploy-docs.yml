@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+    paths:
+      - 'doc/**'
+      - 'mkdocs.yml'
+      - 'scripts/gen_openapi.py'
+    
   workflow_dispatch:
 
 permissions:
