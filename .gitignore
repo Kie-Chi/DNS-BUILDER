@@ -23,3 +23,5 @@
 !template.yml
 !mkdocs.yml
 **/__pycache__
+*.log
+*.Dockerfile
