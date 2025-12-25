@@ -33,6 +33,7 @@ class Builder:
         self.output_dir = DNSBPath("output") / self.config.name
         self.pr_blds = self._load_pr_blds()
         self.ic: Dict[str, Image] = {}
+        # Initialize AutomationManager without resolver dependencies (will be set later)
         self.am = AutomationManager(fs=fs)
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")
 
@@ -41,6 +42,14 @@ class Builder:
         logger.info(f"[Builder] Starting build for project '{self.config.name}'...")
         self._setup()
 
+        # Initialize context and resolve all defined images from the 'images' block
+        context = self._init_ctx()
+        
+        # Set resolver dependencies in AutomationManager before executing setup
+        self.am.config = self.config
+        self.am.images = context.images
+        self.am.pr_blds = self.pr_blds
+
         # Execute setup phase automation
         logger.debug("[Builder] Executing AutomationManager setup phase...")
         config_data = self.config.model.model_dump(by_alias=True, exclude_none=True)
@@ -48,8 +57,8 @@ class Builder:
         
         # Update config with modified data from setup phase
         self.config.model = self.config.model.model_validate(config_data)
-
-        # Initialize context and resolve all defined images from the 'images' block
+        
+        # Update context with potentially new images
         context = self._init_ctx()
 
         # Resolve all service build configurations, handling inheritance and mixins
