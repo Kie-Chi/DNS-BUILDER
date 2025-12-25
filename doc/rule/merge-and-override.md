@@ -155,7 +155,6 @@ builds:
 
 ## 延伸阅读
 
-- [推导式语法](comprehension.md)
 - [标准服务模板](build-templates.md)
 - [文件路径与FS](paths-and-fs.md)
 - [顶层配置（include 用法）](../config/top-level.md)

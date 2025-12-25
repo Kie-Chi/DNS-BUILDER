@@ -41,5 +41,6 @@ builds: {}
 
 ## 相关文档
 
-- [Auto 自动化脚本 - 迁移指南](../config/auto.md#迁移指南从推导式语法)
+- [Auto 自动化脚本 - 迁移指南](../config/auto.md)
 - [配置概览](../config/index.md)
+- [配置处理流程](../config/processing-pipeline.md)
