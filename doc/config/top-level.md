@@ -66,11 +66,49 @@
     - ./local-extra.yml
   ```
 
+## auto*
+### setup*
+### modify*
+### restrict*
+
+利用脚本自动化初始化或者修改配置，详见 [Auto 自动化脚本](auto.md)
+
+## mirror*
+
+- 可选项
+- 含义：全局镜像源配置，为所有内部镜像提供默认的包管理器镜像源，加速构建
+- 类型与格式：`object`
+- 支持字段：
+  - `apt_mirror`（别名：`apt`、`apt_host`）: 替换 `Ubuntu`/`Debian` 的 `sources.list` 域名，例如 `mirrors.ustc.edu.cn`
+  - `pip_index_url`（别名：`pip_index`、`pip`）: 设置 `pip` 的默认 `index-url`，例如 `https://pypi.tuna.tsinghua.edu.cn/simple`
+  - `npm_registry`（别名：`npm`、`registry`）: 设置 `npm` 的 `registry`，例如 `https://registry.npmmirror.com`
+  - 特殊值 `"auto"`：使用 [chsrc](https://github.com/RubyMetric/chsrc) 自动选择最快的镜像源
+- 优先级：全局 mirror 配置优先级最低，会被 `images` 配置中的 `mirror` 覆盖
+- 示例：
+
+  ```yaml
+  name: demo
+  inet: 10.88.0.0/24
+  mirror:
+    apt: "mirrors.ustc.edu.cn"
+    pip: "https://pypi.tuna.tsinghua.edu.cn/simple"
+  images:
+    bind:
+      ref: "bind:9.18.0"
+      # 继承全局 mirror 配置
+    custom:
+      software: bind
+      version: "9.18.0"
+      from: "ubuntu:20.04"
+      mirror:
+        apt: "mirrors.tencent.com"  # 覆盖全局配置
+  ```
+
 ## 额外字段*
 
 - 可选项
 - 顶层允许存在未列出的附加字段；这些字段不会参与校验，但会 **透传到最终 Compose 输出**
-- 注意：为避免与保留键冲突，顶层保留键包括：`name`、`inet`、`images`、`builds`、`include`
+- 注意：为避免与保留键冲突，顶层保留键包括：`name`、`inet`、`images`、`builds`、`include`、`auto`、`mirror`
 
 ## 示例
 

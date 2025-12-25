@@ -87,6 +87,25 @@
 - 含义：容器额外能力
 - 类型与格式：`string[]`；默认支持值包括 `NET_ADMIN` 等
 
+## mirror*
+
+- 可选项
+- 含义：服务级别的镜像源配置，仅对使用内部镜像的服务生效
+- 类型与格式：`object`
+- 支持字段：同顶层 `mirror` 配置（`apt_mirror`、`pip_index_url`、`npm_registry` 及其别名）
+- 优先级：服务级 mirror > 镜像级 mirror > 全局 mirror
+- 说明：此配置会与其余 mirror 配置深度合并，用于为特定服务定制镜像源
+- 延伸阅读
+  - [顶层配置 - mirror](top-level.md#mirror)
+  - [内部镜像配置 - mirror](images.md#mirror可选)
+
+## auto*
+### setup*
+### modify*
+### restrict*
+
+利用脚本自动化初始化或者修改配置，详见 [Auto 自动化脚本](auto.md)
+
 ## 其它 Compose 字段*
 
 - 可选项
@@ -142,7 +161,8 @@ builds: {}
 详见 [Auto 自动化脚本](auto.md)
 
 ## 延伸阅读
-- [配置处理流程](processing-pipeline.md) - 了解服务配置的解析和处理顺序- [顶层配置](top-level.md)
+- [配置处理流程](processing-pipeline.md)
+- [顶层配置](top-level.md)
 - [内部镜像配置](images.md)
 - [外部镜像配置](external-images.md)
 - [Auto 自动化脚本](auto.md)

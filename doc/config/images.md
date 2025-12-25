@@ -6,40 +6,6 @@
 
 与内部镜像对应的还有外部镜像，详情可阅读[外部镜像配置](external-images.md)
 
-## mirror（可选）
-
-- 作用：为内部镜像的模板注入国内或自定义的包管理器镜像源，加速构建
-- 类型与格式：`object`
-- 支持字段：
-  - `apt_mirror`: 替换 `Ubuntu`/`Debian` 的 `sources.list` 域名，例如 `mirrors.ustc.edu.cn`
-  - `pip_index_url`: 设置 `pip` 的默认 `index-url`，例如 `https://pypi.tuna.tsinghua.edu.cn/simple`
-  - `npm_registry`: 设置 `npm` 的 `registry`，例如 `https://registry.npmmirror.com`
-
-说明：
-
-- 模板会在 `ENV` 后注入镜像配置，且在首次 `apt-get update`、`pip`、`npm install` 前生效
-- 未提供的字段将跳过（不影响构建）
-
-示例：
-
-```yaml
-images:
-  bind-fast:
-    software: bind
-    version: "9.18.0"
-    from: "ubuntu:20.04"
-    mirror:
-      apt_mirror: "mirrors.ustc.edu.cn"
-      pip_index_url: "https://pypi.tuna.tsinghua.edu.cn/simple"
-
-  judas-cn:
-    software: judas
-    version: "0.0.0"
-    from: "debian:10"
-    mirror:
-      apt_mirror: "mirrors.tencent.com"
-      npm_registry: "https://registry.npmmirror.com"
-```
 
 ## name**
 
@@ -86,6 +52,37 @@ images:
 - 含义：运行期工具包列表，如 `dnsutils`、`tcpdump` 等
 - 类型与格式：`string[]`；可包含 `python3-xxx` 以自动处理 Python 依赖
 - 默认值与参考：不同软件类型有各自默认工具包，参见 `resources/images/defaults`
+
+## mirror*
+
+- 可选项
+- 含义：为内部镜像的模板注入国内或自定义的包管理器镜像源，加速构建
+- 类型与格式：`object`
+- 支持字段：
+  - `apt_mirror`: 替换 `Ubuntu`/`Debian` 的 `sources.list` 域名，例如 `mirrors.ustc.edu.cn`
+  - `pip_index_url`: 设置 `pip` 的默认 `index-url`，例如 `https://pypi.tuna.tsinghua.edu.cn/simple`
+  - `npm_registry`: 设置 `npm` 的 `registry`，例如 `https://registry.npmmirror.com`
+
+示例：
+
+```yaml
+images:
+  bind-fast:
+    software: bind
+    version: "9.18.0"
+    from: "ubuntu:20.04"
+    mirror:
+      apt: "mirrors.ustc.edu.cn"
+      pip: "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+  judas-cn:
+    software: judas
+    version: "0.0.0"
+    from: "debian:10"
+    mirror:
+      apt: "mirrors.tencent.com"
+      npm: "https://registry.npmmirror.com"
+```
 
 ## 校验与约束总览
 
