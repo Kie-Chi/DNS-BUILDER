@@ -11,6 +11,14 @@ class VolumeArtifact(BaseModel):
     content: str
     container_path: str
 
+class ZoneArtifact(VolumeArtifact):
+    """
+        Class represents a zone file artifact with optional DNSSEC key files.
+        Used by ZoneGenerator to return all generated files.
+    """
+    # For zone files that reference this in config
+    is_primary: bool = True  # True for the main zone file to use in config
+
 class BehaviorArtifact(BaseModel):
     """
         Class represents output of a behavior generation process.

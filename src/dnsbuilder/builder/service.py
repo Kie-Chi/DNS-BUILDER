@@ -462,23 +462,39 @@ class ServiceHandler:
         gen_vol_dir = self.contents_dir / constants.GENERATED_ZONES_SUBDIR
         self.context.fs.mkdir(gen_vol_dir, exist_ok=True)
 
-        # 2. Generate zone file and config line for each aggregated zone
+        # Check if DNSSEC is enabled for this build
+        enable_dnssec = self.build_conf.get('dnssec', False)
+
+        # 2. Generate zone files and artifacts for each aggregated zone
         for zone, records in records_by_zone.items():
-            generator = ZoneGenerator(self.context, zone, self.service_name, records)
-            zone_content = generator.generate()
-
-            filename = f"db.{zone}" if zone != "." else "db.root"
-            filepath = gen_vol_dir / filename
-            self.context.fs.write_text(filepath, zone_content)
-
-            container_path = f"/usr/local/etc/zones/{filename}"
-            volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{filename}:{container_path}"
-            self.processed_volumes.append(volume_str)
-            logger.debug(f"Generated master zone file and volume: {volume_str}")
-
-            behavior_obj = behavior_by_zone[zone]
-            config_line = behavior_obj.generate_config_line(zone, container_path)
-            all_config_lines[constants.BehaviorSection.TOPLEVEL].append(config_line)
+            generator = ZoneGenerator(self.context, zone, self.service_name, records, enable_dnssec=enable_dnssec)
+            artifacts = generator.generate()  # Returns List[ZoneArtifact]
+            
+            # Find the primary zone file for config generation
+            primary_artifact = None
+            
+            # Process all artifacts: write files and create volume mounts
+            for artifact in artifacts:
+                # Write file to disk
+                filepath = gen_vol_dir / artifact.filename
+                self.context.fs.write_text(filepath, artifact.content)
+                
+                # Create volume mount
+                volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{artifact.filename}:{artifact.container_path}"
+                self.processed_volumes.append(volume_str)
+                logger.debug(f"Generated zone artifact: {artifact.filename} -> {artifact.container_path}")
+                
+                # Track the primary artifact for config generation
+                if artifact.is_primary:
+                    primary_artifact = artifact
+            
+            # Generate config line using the primary zone file
+            if primary_artifact:
+                behavior_obj = behavior_by_zone[zone]
+                config_line = behavior_obj.generate_config_line(zone, primary_artifact.container_path)
+                all_config_lines[constants.BehaviorSection.TOPLEVEL].append(config_line)
+            else:
+                logger.warning(f"No primary artifact found for zone '{zone}'")
 
         return all_config_lines
 

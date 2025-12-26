@@ -70,6 +70,7 @@ class BuildModel(BaseModel):
     behavior: Optional[str] = None
     mixins: List[str] = Field(default_factory=list)
     build: bool = True
+    dnssec: bool = False
     files: Dict[str, str] = Field(default_factory=dict)
     volumes: List[str] = Field(default_factory=list)
     mounts: List[str] = Field(default_factory=list)

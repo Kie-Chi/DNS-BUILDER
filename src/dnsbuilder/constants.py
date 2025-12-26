@@ -166,7 +166,7 @@ ALIAS_MAP = {
 }
 
 # --- supported protocol ---
-KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp", "git", "cache", "raw"}
+KNOWN_PROTOCOLS = {"http", "https", "ftp", "s3", "gs", "file", "resource", "temp", "git", "cache", "raw", "key"}
 
 # --- Docker Compose Keys & Values ---
 DEFAULT_CAP_ADD = ["NET_ADMIN"]
@@ -174,7 +174,7 @@ DEFAULT_NETWORK_NAME = "app_net"
 DEFAULT_DEVICE_NAME = "bridge"
 
 # --- Reserved Keys in Build Configs ---
-RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', 'mixins', 'mounts', 'files', 'auto', 'extra_conf', 'mirror'}
+RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', 'mixins', 'mounts', 'files', 'auto', 'extra_conf', 'mirror', 'dnssec'}
 
 RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include', 'auto', 'mirror'}
 

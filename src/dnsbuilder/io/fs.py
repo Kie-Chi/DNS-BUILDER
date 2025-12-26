@@ -264,6 +264,7 @@ class AppFileSystem(FileSystem):
         self.register_handler("temp", HyperMemoryFileSystem(chroot=chroot))
         self.register_handler("resource", ResourceFileSystem(chroot=chroot))
         self.register_handler("git", GitFileSystem(DiskFileSystem(chroot=chroot), chroot=chroot))
+        self.register_handler("key", HyperMemoryFileSystem(chroot=chroot))
         
         # fallback mechanism
         self._fallback_handler = self._handlers["raw"]
