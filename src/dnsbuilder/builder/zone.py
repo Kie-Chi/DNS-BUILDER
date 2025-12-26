@@ -106,7 +106,7 @@ class ZoneGenerator:
         self.records = records
         self.enable_dnssec = enable_dnssec
 
-    def _sign_zone(self, unsigned_content: str) -> Optional[Tuple[str, str, str]]:
+    def _sign_zone(self, unsigned_content: str) -> Optional[Tuple[str, str, str, str]]:
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
@@ -178,9 +178,18 @@ class ZoneGenerator:
                     return None
                 
                 signed_content = signed_file.read_text()
+                zone_name_clean = self.zone_name.rstrip('.')
+                dsset_file = temp_path / f"dsset-{zone_name_clean}."
+                ds_content = ""
+                if dsset_file.exists():
+                    ds_content = dsset_file.read_text()
+                    logger.debug(f"Found DS records for '{self.zone_name}'")
+                else:
+                    logger.warning(f"DS record file not found: {dsset_file}")
+                
                 logger.debug(f"DNSSEC signing succeeded for '{self.zone_name}'")
                 
-                return (signed_content, ksk_key_content, zsk_key_content)
+                return (signed_content, ksk_key_content, zsk_key_content, ds_content)
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"DNSSEC command failed for '{self.zone_name}': {e.stderr}")
@@ -307,9 +316,11 @@ class ZoneGenerator:
                     is_primary=True
                 )
             ]
-        signed_content, ksk_content, zsk_content = sign_result
+        signed_content, ksk_content, zsk_content, ds_content = sign_result
         logger.debug(f"DNSSEC signing successful for '{self.zone_name}', generating artifacts.")
+        
         zone_name_clean = self.zone_name.rstrip('.')
+        
         artifacts = [
             # Signed zone file
             ZoneArtifact(
@@ -340,4 +351,17 @@ class ZoneGenerator:
                 is_primary=False
             )
         ]
+        
+        if ds_content:
+            artifacts.append(
+                ZoneArtifact(
+                    filename=f"dsset-{zone_name_clean}",
+                    content=ds_content,
+                    container_path=f"/usr/local/etc/zones/keys/dsset-{zone_name_clean}",
+                    is_primary=False
+                )
+            )
+            self.context.fs.mkdir(DNSBPath(f"key:/{self.service_name.rstrip('.')}"), exist_ok=True)
+            self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ds"), ds_content)
+        
         return artifacts

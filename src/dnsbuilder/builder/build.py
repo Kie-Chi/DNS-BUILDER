@@ -3,6 +3,7 @@ import logging
 import json
 from typing import Dict, Optional
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from ..abstractions import Image
@@ -240,6 +241,12 @@ class Builder:
         }
         logger.info(f"[ServiceHandler] Found {len(buildable_services)} buildable services.")
 
+        # Create barrier for synchronization before volume processing
+        num_services = len(buildable_services)
+        barrier = threading.Barrier(num_services) if num_services > 0 else None
+        if barrier:
+            logger.info(f"[ServiceHandler] Created barrier for {num_services} services.")
+
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:
             tasks = []
@@ -248,7 +255,7 @@ class Builder:
                 if 'image' not in conf:
                     raise ImageDefinitionError(f"Buildable service '{name}' is missing the required 'image' key.")
 
-                handler = ServiceHandler(name, context)
+                handler = ServiceHandler(name, context, barrier=barrier)
                 tasks.append(loop.run_in_executor(executor, handler.generate_all))
             
             results = await asyncio.gather(*tasks)

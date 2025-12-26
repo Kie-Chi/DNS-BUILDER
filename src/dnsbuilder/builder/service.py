@@ -1,8 +1,9 @@
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 import collections
 import hashlib
 import json
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -83,10 +84,11 @@ class ServiceHandler:
     """
     Handles all artifact generation for a single service.
     """
-    def __init__(self, service_name: str, context: BuildContext):
+    def __init__(self, service_name: str, context: BuildContext, barrier: threading.Barrier = None):
         self.service_name = service_name
         self.context = context
         self.build_conf = context.resolved_builds[service_name]
+        self.barrier = barrier
         
         # Initialize configuration generation tracer
         self.trace = ConfigGenerationTrace(service_name=service_name, fs=context.fs)
@@ -153,6 +155,8 @@ class ServiceHandler:
         
         self.service_dir = self.context.output_dir / self.service_name
         self.contents_dir = self.service_dir / 'contents'
+        self.tmp_dir = DNSBPath(f"temp:/services/{self.service_name}")
+        self.context.fs.mkdir(self.tmp_dir, parents=True, exist_ok=True)
         self.processed_volumes: List[str] = []
         
         ip_display = f"with IP '{self.ip}'" if self.ip else "with dynamic IP"
@@ -185,6 +189,16 @@ class ServiceHandler:
         # Process extra_conf
         self.trace.add_stage("process_extra_conf", "Process extra_conf configuration")
         self._process_extra_conf()
+
+        # Process behavior configuration
+        self.trace.add_stage("process_behavior", "Process behavior configuration")
+        self._process_behavior()
+        
+        # Wait at barrier to ensure all services complete behavior processing
+        if self.barrier:
+            logger.debug(f"[{self.service_name}] Waiting at barrier before processing volumes...")
+            self.barrier.wait()
+            logger.debug(f"[{self.service_name}] Barrier released, proceeding to volume processing.")
         
         # Process volume mounts
         self.trace.add_stage("process_volumes", "Process volume mount configuration")
@@ -197,10 +211,6 @@ class ServiceHandler:
                 str(pairs.get("global", None)),
                 "Obtained main config file path from volume processing"
             )
-        
-        # Process behavior configuration
-        self.trace.add_stage("process_behavior", "Process behavior configuration")
-        self._process_behavior(pairs.get("global", None))
         
         # Assemble compose service block
         self.trace.add_stage("assemble_compose", "Assemble docker-compose service configuration")
@@ -334,9 +344,6 @@ class ServiceHandler:
             host_path = volume.src
             container_path = volume.dst
             if host_path.need_check:
-                # need fallback
-                if self.service_name == "sld":
-                    pass
                 if not self.context.fs.exists(host_path):
                     if not host_path.is_absolute():
                         raise VolumeError(f"Volume relative source path does not exist: '{host_path}'")
@@ -352,12 +359,14 @@ class ServiceHandler:
                 # relative path or resource path, copy to contents directory
                 filename = None
                 target_path = None
-                def gen_target_path(filename: DNSBPath) -> DNSBPath:
+                def gen_target_path(filename: DNSBPath) -> Tuple[DNSBPath, DNSBPath]:
                     target_path = self.contents_dir / filename
+                    new_name = filename
                     with self.context.fs.fallback(enable=False):
                         if self.context.fs.exists(target_path):
-                            target_path = self.contents_dir / f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
-                    return target_path
+                            new_name = f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
+                            target_path = self.contents_dir / new_name
+                    return target_path, new_name
 
                 def get_host_path(filename: DNSBPath) -> DNSBPath:
                     if filename.protocol == "file":
@@ -375,11 +384,11 @@ class ServiceHandler:
                 with self.context.fs.fallback(enable=False):
                     if self.context.fs.is_dir(host_path):
                         filename = host_path.__rname__.split(".")[0]
-                        target_path = gen_target_path(filename)
+                        target_path, filename = gen_target_path(filename)
                         wrap(self.context.fs.copytree)(host_path, target_path)
                     else:
                         filename = host_path.__rname__
-                        target_path = gen_target_path(filename)
+                        target_path, filename = gen_target_path(filename)
                         wrap(self.context.fs.copy)(host_path, target_path)
                 suffixes = DNSBPath(container_path).suffixes
                 dcr_path = f"./{self.service_name}/contents/{filename}"
@@ -440,7 +449,7 @@ class ServiceHandler:
         return standard_artifacts, master_artifacts_with_obj
 
     def _process_master_zones(
-        self, master_artifacts_with_obj: List[Tuple[BehaviorArtifact, MasterBehavior]]
+        self, volumes: List[Any], master_artifacts_with_obj: List[Tuple[BehaviorArtifact, MasterBehavior]]
     ) -> Dict[constants.BehaviorSection, List[str]]:
         """Aggregates master records, generates zone files, and creates config lines."""
         all_config_lines = collections.defaultdict(list)
@@ -459,7 +468,7 @@ class ServiceHandler:
             if zone_key not in behavior_by_zone:
                 behavior_by_zone[zone_key] = behavior_obj
 
-        gen_vol_dir = self.contents_dir / constants.GENERATED_ZONES_SUBDIR
+        gen_vol_dir = self.tmp_dir / constants.GENERATED_ZONES_SUBDIR
         self.context.fs.mkdir(gen_vol_dir, exist_ok=True)
 
         # Check if DNSSEC is enabled for this build
@@ -480,9 +489,9 @@ class ServiceHandler:
                 self.context.fs.write_text(filepath, artifact.content)
                 
                 # Create volume mount
-                volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{artifact.filename}:{artifact.container_path}"
-                self.processed_volumes.append(volume_str)
-                logger.debug(f"Generated zone artifact: {artifact.filename} -> {artifact.container_path}")
+                volume_str = f"{filepath}:{artifact.container_path}"
+                volumes.append(volume_str)
+                logger.debug(f"Generated zone artifact: {filepath} -> {artifact.container_path}")
                 
                 # Track the primary artifact for config generation
                 if artifact.is_primary:
@@ -498,17 +507,15 @@ class ServiceHandler:
 
         return all_config_lines
 
-    def _process_behavior(self, main_conf: Pair | None):
+    def _process_behavior(self):
         """Orchestrates the entire behavior processing workflow."""
+        volumes = self.build_conf.setdefault('volumes', [])
+
         if not self.build_conf.get("behavior"):
             logger.debug(f"Service '{self.service_name}' has no behavior to process.")
             return
 
         logger.debug(f"Processing behavior for '{self.service_name}'...")
-        if not main_conf:
-            raise BehaviorError(
-                f"Service '{self.service_name}' has 'behavior' but no main .conf file."
-            )
         if not self.image_obj.software:
             raise BehaviorError(
                 f"Cannot process 'behavior' for '{self.service_name}': image '{self.image_obj.name}' must have a 'software' type."
@@ -520,7 +527,7 @@ class ServiceHandler:
         )
 
         # Step 2: Process master zone artifacts to generate zone files and their config lines
-        all_config_lines = self._process_master_zones(master_artifacts_with_obj)
+        all_config_lines = self._process_master_zones(volumes, master_artifacts_with_obj)
 
         # Step 3: Process standard (non-master) artifacts
         for artifact in standard_artifacts:
@@ -530,15 +537,16 @@ class ServiceHandler:
             all_config_lines[artifact.section].append(artifact.config_line)
 
             if artifact.new_volume:
+                gen_vol_dir = self.tmp_dir / constants.GENERATED_ZONES_SUBDIR
+
                 vol = artifact.new_volume
-                gen_vol_dir = self.contents_dir / constants.GENERATED_ZONES_SUBDIR
-                self.context.fs.mkdir(gen_vol_dir, exist_ok=True)
+                self.context.fs.mkdir(gen_vol_dir, parents=True, exist_ok=True)
                 filepath = gen_vol_dir / vol.filename
                 self.context.fs.write_text(filepath, vol.content)
-                final_volume_str = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_SUBDIR}/{vol.filename}:{vol.container_path}"
-                self.processed_volumes.append(final_volume_str)
+                final_volume_str = f"{filepath}:{vol.container_path}"
+                volumes.append(final_volume_str)
                 logger.debug(
-                    f"Generated and added new volume from behavior: {final_volume_str}"
+                    f"Generated and added new volume from behavior: {filepath} -> {vol.container_path}"
                 )
 
         # Step 4: Write all collected config lines to the generated zones file
@@ -546,7 +554,7 @@ class ServiceHandler:
         if not generated_zones_content.strip():
             return
 
-        gen_zones_path = self.contents_dir / constants.GENERATED_ZONES_FILENAME
+        gen_zones_path = self.tmp_dir / constants.GENERATED_ZONES_FILENAME
         self.context.fs.write_text(
             gen_zones_path, f"# Auto-generated by DNS Builder\n\n{generated_zones_content}\n"
         )
@@ -555,29 +563,10 @@ class ServiceHandler:
         container_conf_path = (
             f"/usr/local/etc/zones/{constants.GENERATED_ZONES_FILENAME}"
         )
-        dcr_path = f"./{self.service_name}/contents/{constants.GENERATED_ZONES_FILENAME}"
-        self.processed_volumes.append(
-            f"{dcr_path}:{container_conf_path}"
+        volumes.append(
+            f"{gen_zones_path}:{container_conf_path}"
         )
-
-        includer = self.context.includer_factory.create(
-            {"global": main_conf}, self.image_obj.software
-        )
-        # Create a Pair for the generated zones config
-        generated_zones_pair = Pair(
-            src=gen_zones_path, 
-            dst=container_conf_path,
-            dcr=dcr_path
-        )
-        p = includer.include(generated_zones_pair)
-        if p:
-            logger.debug(f"Help Copy to Another directory: {p.dcr}:{p.dst}")
-            self.processed_volumes.append(
-                f"{p.dcr}:{p.dst}"
-            )
-        logger.debug(
-            f"Appended include directive for '{container_conf_path}' to '{main_conf.dst}'."
-        )
+        logger.debug(f"Added volume mount for generated zones config: {gen_zones_path} -> {container_conf_path}")
 
     def _format_behavior_config(
         self, config_lines_by_section: Dict[constants.BehaviorSection, List[str]]

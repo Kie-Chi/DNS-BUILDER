@@ -377,10 +377,11 @@ class AppFileSystem(FileSystem):
         dst_handler = self._get_handler(dst)
         logger.debug(f"[AppFS] src_handler={src_handler.__class__.__name__}, dst_handler={dst_handler.__class__.__name__}")
         
-        if src_handler is dst_handler and isinstance(src_handler, DiskFileSystem):
-            logger.debug(f"[AppFS] Using same-handler copytree (DiskFileSystem)")
-            src_handler.copytree(src, dst)
-            return
+        if src_handler is dst_handler:
+            if isinstance(src_handler, (DiskFileSystem, HyperMemoryFileSystem, MemoryFileSystem)):
+                logger.debug(f"[AppFS] Using same-handler copytree ({src_handler.__class__.__name__})")
+                src_handler.copytree(src, dst)
+                return
 
         if isinstance(src_handler, GitFileSystem):
             logger.debug(f"[AppFS] Using GitFileSystem.copy2fs")
@@ -391,9 +392,31 @@ class AppFileSystem(FileSystem):
             src_handler.copy2fs(src, dst, dst_handler)
             return
 
+        # Generic cross-filesystem copytree for supported filesystems
+        if isinstance(src_handler, (HyperMemoryFileSystem, MemoryFileSystem, DiskFileSystem)) and \
+           isinstance(dst_handler, (HyperMemoryFileSystem, MemoryFileSystem, DiskFileSystem)):
+            logger.debug(f"[AppFS] Using generic cross-filesystem copytree")
+            self._generic_copytree(src, dst, src_handler, dst_handler)
+            return
+
         raise UnsupportedFeatureError(
             f"Cross-filesystem copytree from '{src_handler.__class__.__name__}' to '{dst_handler.__class__.__name__}' is not yet implemented."
         )
+    
+    def _generic_copytree(self, src: DNSBPath, dst: DNSBPath, src_handler: FileSystem, dst_handler: FileSystem):
+        """Generic recursive copytree across filesystems"""
+        if src_handler.is_file(src):
+            content = src_handler.read_bytes(src)
+            dst_handler.write_bytes(dst, content)
+        elif src_handler.is_dir(src):
+            if not dst_handler.exists(dst):
+                dst_handler.mkdir(dst, parents=True, exist_ok=True)
+            
+            for item in src_handler.listdir(src):
+                item_name = item.__rname__ if hasattr(item, '__rname__') else item.name
+                src_item = src / item_name
+                dst_item = dst / item_name
+                self._generic_copytree(src_item, dst_item, src_handler, dst_handler)
 
 # --------------------
 #
