@@ -15,6 +15,7 @@ from .substitute import VariableSubstitutor
 from .resolve import Resolver
 from .net import NetworkManager
 from .service import ServiceHandler
+from .dnssec import DNSSECHandler
 from .. import constants
 from ..config import Config
 from ..io import DNSBPath, FileSystem
@@ -243,7 +244,11 @@ class Builder:
 
         # Create barrier for synchronization before volume processing
         num_services = len(buildable_services)
-        barrier = threading.Barrier(num_services) if num_services > 0 else None
+        
+        # Create DNSSEC handler and set it as barrier action
+        dnssec_handler = DNSSECHandler(context)
+        barrier = threading.Barrier(num_services, action=dnssec_handler.run) if num_services > 0 else None
+        
         if barrier:
             logger.info(f"[ServiceHandler] Created barrier for {num_services} services.")
 
@@ -258,7 +263,14 @@ class Builder:
                 handler = ServiceHandler(name, context, barrier=barrier)
                 tasks.append(loop.run_in_executor(executor, handler.generate_all))
             
-            results = await asyncio.gather(*tasks)
+            # Gather results with exception handling to prevent barrier deadlock
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Check for exceptions in results
+        for name, result in zip(buildable_services.keys(), results):
+            if isinstance(result, Exception):
+                logger.error(f"[ServiceHandler] Service '{name}' failed: {result}")
+                raise result
         
         compose_services = {
             name: result 

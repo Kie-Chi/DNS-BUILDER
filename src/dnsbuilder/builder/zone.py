@@ -320,6 +320,7 @@ class ZoneGenerator:
         logger.debug(f"DNSSEC signing successful for '{self.zone_name}', generating artifacts.")
         
         zone_name_clean = self.zone_name.rstrip('.')
+        zone_name_clean = zone_name_clean if zone_name_clean != '.' else 'root'
         
         artifacts = [
             # Signed zone file
@@ -349,19 +350,17 @@ class ZoneGenerator:
                 content=zsk_content,
                 container_path=f"/usr/local/etc/zones/keys/K{zone_name_clean}.zsk.key",
                 is_primary=False
+            ),
+            # DS record set file
+            ZoneArtifact(
+                filename=f"dsset-{zone_name_clean}",
+                content=ds_content,
+                container_path=f"/usr/local/etc/zones/keys/dsset-{zone_name_clean}",
+                is_primary=False
             )
         ]
-        
-        if ds_content:
-            artifacts.append(
-                ZoneArtifact(
-                    filename=f"dsset-{zone_name_clean}",
-                    content=ds_content,
-                    container_path=f"/usr/local/etc/zones/keys/dsset-{zone_name_clean}",
-                    is_primary=False
-                )
-            )
-            self.context.fs.mkdir(DNSBPath(f"key:/{self.service_name.rstrip('.')}"), exist_ok=True)
-            self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ds"), ds_content)
+        self.context.fs.mkdir(DNSBPath(f"key:/{self.service_name.rstrip('.')}"), exist_ok=True)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ksk.key"), ksk_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ds"), ds_content)
         
         return artifacts

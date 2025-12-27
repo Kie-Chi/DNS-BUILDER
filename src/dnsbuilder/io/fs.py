@@ -191,6 +191,34 @@ class FileSystem(ABC):
     def reset_fallback_local(self):
         self._fallback.reset_local()
 
+    # Helper methods for path conversion
+    def str2path(self, path_str: str, base_path: DNSBPath) -> DNSBPath:
+        """
+        Convert a string path from underlying filesystem back to DNSBPath,
+        preserving the protocol from base_path.
+        
+        Args:
+            path_str: Path string returned by underlying filesystem
+            base_path: Original DNSBPath that contains protocol information
+            
+        Returns:
+            DNSBPath with protocol preserved from base_path
+        """
+        # If the returned path already looks like it has a protocol, use it as-is
+        if ":" in path_str and "/" in path_str:
+            idx = path_str.index(":")
+            if idx < path_str.index("/"):
+                return DNSBPath(path_str)
+        
+        # Otherwise, reconstruct with the base path's protocol
+        protocol = base_path.protocol
+        if protocol and protocol != "file":
+            # Strip leading slash if present
+            clean_path = path_str.lstrip("/")
+            return DNSBPath(f"{protocol}:/{clean_path}")
+        
+        return DNSBPath(path_str)
+
     # NotImplemented methods
     # !!! Child-FileSystem Override these methods if needed
     def listdir(self, path: DNSBPath) -> List[DNSBPath]:
@@ -524,7 +552,7 @@ class GenericFileSystem(FileSystem, ABC):
 
     @override
     def listdir(self, path: DNSBPath) -> List[DNSBPath]:
-        return [DNSBPath(p) for p in self.fs.ls(self.path2str(path))]
+        return [self.str2path(p, path) for p in self.fs.ls(self.path2str(path))]
 
     @override
     def remove(self, path: DNSBPath):
@@ -533,12 +561,12 @@ class GenericFileSystem(FileSystem, ABC):
     @override
     @signal(SignalPathNotFound)
     def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
-        return [DNSBPath(p) for p in self.fs.glob(self.path2str(path / pattern))]
+        return [self.str2path(p, path) for p in self.fs.glob(self.path2str(path / pattern))]
 
     @override
     @signal(SignalPathNotFound)
     def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
-        return [DNSBPath(p) for p in self.fs.glob(self.path2str(path / f"**/{pattern}"))]
+        return [self.str2path(p, path) for p in self.fs.glob(self.path2str(path / f"**/{pattern}"))]
 
     @override
     def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:

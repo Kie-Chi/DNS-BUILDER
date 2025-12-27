@@ -197,8 +197,12 @@ class ServiceHandler:
         # Wait at barrier to ensure all services complete behavior processing
         if self.barrier:
             logger.debug(f"[{self.service_name}] Waiting at barrier before processing volumes...")
-            self.barrier.wait()
+            self.barrier.wait(timeout=10)
             logger.debug(f"[{self.service_name}] Barrier released, proceeding to volume processing.")
+
+        # Help DNSSEC key combine
+        self.trace.add_stage("dnssec_key_combine", "Combine DNSSEC keys if applicable")
+
         
         # Process volume mounts
         self.trace.add_stage("process_volumes", "Process volume mount configuration")
@@ -231,7 +235,7 @@ class ServiceHandler:
             rep_path = self.save_generation_report()
             logger.debug(f"[{self.service_name}] Generation report saved to '{rep_path}'.")
         return compose_service_block
-    
+
     def _validate_required_fields(self):
         """
         Recursively checks the service configuration for any unfulfilled '${required}' placeholders.
