@@ -16,6 +16,7 @@ from .resolve import Resolver
 from .net import NetworkManager
 from .service import ServiceHandler
 from .dnssec import DNSSECHandler
+from .image import ImageBuilder
 from .. import constants
 from ..config import Config
 from ..io import DNSBPath, FileSystem
@@ -37,6 +38,8 @@ class Builder:
         self.ic: Dict[str, Image] = {}
         # Initialize AutomationManager without resolver dependencies (will be set later)
         self.am = AutomationManager(fs=fs)
+        # Initialize ImageBuilder for shared image management
+        self.ib = ImageBuilder()
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")
 
     async def run(self, need_context: bool = False) -> Optional[BuildContext]:
@@ -255,7 +258,7 @@ class Builder:
                 if 'image' not in conf:
                     raise ImageDefinitionError(f"Buildable service '{name}' is missing the required 'image' key.")
 
-                handler = ServiceHandler(name, context, barrier=barrier)
+                handler = ServiceHandler(name, context, image_builder=self.ib, barrier=barrier)
                 tasks.append(loop.run_in_executor(executor, handler.generate_all))
             
             # Gather results with exception handling to prevent barrier deadlock
@@ -278,10 +281,25 @@ class Builder:
     def _assemble(self, services: Dict, context: BuildContext):
         """Assembles the final docker-compose dictionary and writes it to a YAML file."""
         logger.debug("[Builder] Assembling final docker-compose file...")
+        
+        # Generate builder services for shared images
+        builder_services = self.ib.gen_srv()
+        
+        # Log builder summary
+        if builder_services:
+            summary = self.ib.get_summary()
+            logger.info(
+                f"[ImageBuilder] Generated {summary['total_shared_images']} builder service(s) "
+                f"for {summary['total_consumers']} consumer service(s)"
+            )
+        
+        # Merge builder services and regular services (builders first for clarity)
+        all_services = {**builder_services, **services}
+        
         compose_config = {
             "version": "3.9",
             "name": self.config.name,
-            "services": services,
+            "services": all_services,
             "networks": NetworkManager(self.config.inet).compose()
         }
         

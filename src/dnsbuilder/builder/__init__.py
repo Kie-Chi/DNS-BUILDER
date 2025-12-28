@@ -26,6 +26,7 @@ from .resolve import Resolver
 from .substitute import VariableSubstitutor
 from .map import Mapper, GraphGenerator
 from .dnssec import DNSSECHandler
+from .image import ImageBuilder
 from ..cache import CachedBuilder
 
 __all__ = [

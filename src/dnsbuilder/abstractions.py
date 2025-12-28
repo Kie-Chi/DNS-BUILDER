@@ -396,7 +396,7 @@ class InternalImage(Image, ABC):
             return self._img_cache
         
         content = self._generate_dockerfile_content()
-        self._img_cache = hashlib.sha256(content.encode()).hexdigest()[:12]
+        self._img_cache = hashlib.sha256(content.encode()).hexdigest()[:16]
         return self._img_cache
 
     def get_tag(self) -> str:
