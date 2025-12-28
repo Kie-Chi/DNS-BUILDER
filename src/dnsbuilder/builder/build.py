@@ -46,11 +46,6 @@ class Builder:
 
         # Initialize context and resolve all defined images from the 'images' block
         context = self._init_ctx()
-        
-        # Set resolver dependencies in AutomationManager before executing setup
-        self.am.config = self.config
-        self.am.images = context.images
-        self.am.pr_blds = self.pr_blds
 
         # Execute setup phase automation
         logger.debug("[Builder] Executing AutomationManager setup phase...")

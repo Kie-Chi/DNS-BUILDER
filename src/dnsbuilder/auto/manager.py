@@ -15,26 +15,18 @@ logger = logging.getLogger(__name__)
 class AutomationManager:
     """Manager for orchestrating automation phases."""
     
-    def __init__(self, max_workers: Optional[int] = None, fs: Optional[FileSystem] = None, 
-                 config: Optional[Config] = None, images: Optional[Dict[str, Image]] = None,
-                 pr_blds: Optional[Dict] = None):
+    def __init__(self, max_workers: Optional[int] = None, fs: Optional[FileSystem] = None):
         """
         Initialize the automation manager.
         
         Args:
             max_workers: Maximum number of worker processes
             fs: File system instance to pass to ScriptExecutor
-            config: Config instance for resolving refs
-            images: Images dictionary for resolving refs
-            pr_blds: Predefined builds for resolving refs
         """
         self.executor = ScriptExecutor(max_workers, fs)
         if max_workers is None:
             max_workers = os.cpu_count() or 1
         self.max_workers = max_workers
-        self.config = config
-        self.images = images
-        self.pr_blds = pr_blds
     
     def setup(self, config: Dict[str, Any]) -> None:
         """
@@ -71,33 +63,6 @@ class AutomationManager:
                     )
         else:
             logger.debug(f"[Auto@{self.max_workers}] No global setup script found")
-        
-        # After global setup, resolve refs for newly created services
-        # This allows services created in global setup to inherit auto.setup from their ref templates
-        if self.config and self.images is not None and self.pr_blds is not None:
-            logger.debug(f"[Auto@{self.max_workers}] Resolving refs after global setup...")
-            
-            # Update config with current builds state
-            builds_dict = current_config.get('builds', {})
-            for name, build_conf in builds_dict.items():
-                if name in self.config.model.builds:
-                    # Update existing build in config model
-                    self.config.model.builds[name] = self.config.model.builds[name].model_copy(update=build_conf)
-                else:
-                    # Add new build to config model
-                    from ..config import BuildModel
-                    self.config.model.builds[name] = BuildModel.model_validate(build_conf)
-            
-            # Resolve all builds to expand refs
-            resolver = Resolver(self.config, self.images, self.pr_blds)
-            resolved_builds = resolver.resolve_all()
-            
-            # Update builds with resolved configs (which now include inherited auto.setup)
-            for name, resolved_conf in resolved_builds.items():
-                if name in builds_dict:
-                    builds_dict[name] = resolved_conf
-            
-            logger.debug(f"[Auto@{self.max_workers}] Ref resolution complete")
         
         service_scripts = []
         builds = current_config.get('builds', {})
