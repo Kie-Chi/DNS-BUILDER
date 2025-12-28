@@ -3,6 +3,7 @@ import logging
 import traceback
 import asyncio
 import uvicorn
+import yaml
 from python_on_whales import DockerClient, docker
 from pathlib import Path as StdPath
 
@@ -18,6 +19,86 @@ from .exceptions import (
 )
 from .api.main import app
 from . import __version__
+
+def complete_config_files(ctx, param, incomplete):
+    """Auto-complete .yml and .yaml config files in current directory"""
+    try:
+        cwd = StdPath.cwd()
+        # Find all yml/yaml files
+        yml_files = list(cwd.glob('*.yml')) + list(cwd.glob('*.yaml'))
+        
+        # Get relative paths and filter by incomplete input
+        file_names = [
+            f.name for f in yml_files
+            if f.name.startswith(incomplete)
+        ]
+        
+        return sorted(file_names)
+    except Exception as e:
+        logging.debug(f"Config file auto-completion failed: {e}")
+        return []
+
+def complete_services(ctx, param, incomplete):
+    """Auto-complete service names from docker-compose.yml"""
+    config_file = ctx.params.get('config_file')
+    if not config_file:
+        return []
+    
+    try:
+        # Get absolute path and workdir
+        config_path = StdPath(config_file)
+        if not config_path.is_absolute():
+            config_path = config_path.resolve()
+        
+        if not config_path.exists():
+            return []
+        
+        # Parse config file to get project name directly
+        with open(config_path, 'r') as f:
+            config_data = yaml.safe_load(f)
+        
+        project_name = config_data.get('name')
+        if not project_name:
+            return []
+        
+        # Determine workdir (prefer from context params, fallback to config parent)
+        workdir = ctx.params.get('workdir')
+        if workdir:
+            if workdir == "@config":
+                workdir = config_path.parent
+            elif workdir == "@cwd":
+                workdir = StdPath.cwd()
+            else:
+                workdir = StdPath(workdir).resolve()
+        else:
+            workdir = config_path.parent
+        
+        # Find docker-compose.yml
+        output_dir = workdir / "output" / project_name
+        compose_file = output_dir / "docker-compose.yml"
+        
+        if not compose_file.exists():
+            return []
+        
+        # Parse docker-compose.yml to get all services
+        with open(compose_file, 'r') as f:
+            compose_data = yaml.safe_load(f)
+        
+        services = compose_data.get('services', {})
+        
+        # Filter services that match incomplete input
+        # Exclude builder services (they shouldn't be interacted with)
+        service_names = [
+            name for name in sorted(services.keys())
+            if not name.startswith('dnsb-image-builder-') and name.startswith(incomplete)
+        ]
+        
+        return service_names
+        
+    except Exception as e:
+        # Silently fail for auto-completion
+        logging.debug(f"Auto-completion failed: {e}")
+        return []
 
 
 def get_paths(config_file: str, workdir: str = None):
@@ -351,15 +432,17 @@ def do_exec(config_file: str, workdir: str, service: str, command: tuple, intera
     
     docker_client = DockerClient(compose_files=[str(compose_file)])
     
-    # Build exec options
-    exec_opts = {'tty': interactive, 'interactive': interactive}
-    if user:
-        exec_opts['user'] = user
-    
     try:
         # Convert command tuple to list
         cmd = list(command) if command else ['/bin/bash']
-        docker_client.compose.execute(service, cmd, **exec_opts)
+        
+        # Execute with tty and user options
+        docker_client.compose.execute(
+            service, 
+            cmd,
+            tty=interactive,
+            user=user
+        )
     except Exception as e:
         logging.error(f"Failed to execute command: {e}")
         raise
@@ -470,10 +553,11 @@ def do_restart(config_file: str, workdir: str, services: tuple):
 def cli(ctx, debug, log_levels, log_file):
     """DNS Builder - Build DNS infrastructure from configuration files
     
+    \b
     Examples:
-      dnsb build config.yml -i        Build with incremental mode
-      dnsb clean --all                Clean all shared images
-      dnsb ui                         Start web UI
+      dnsb build config.yml -i    Build with incremental mode
+      dnsb clean --all            Clean all shared images
+      dnsb ui                     Start web UI
     """
     ctx.ensure_object(dict)
     ctx.obj['debug'] = debug
@@ -481,7 +565,7 @@ def cli(ctx, debug, log_levels, log_file):
 
 
 @cli.command()
-@click.argument('config_file')
+@click.argument('config_file', shell_complete=complete_config_files)
 @click.option('-i', '--incremental', is_flag=True, help='Enable incremental build using cache')
 @click.option('-g', '--graph', help='Generate a DOT file for the network topology graph')
 @click.option('-w', '--workdir', help="Working directory (use '@config' for config dir, default: cwd)")
@@ -493,13 +577,14 @@ def build(ctx, config_file, incremental, graph, workdir, vfs):
 
 
 @cli.command()
-@click.argument('config_file', required=False)
+@click.argument('config_file', required=False, shell_complete=complete_config_files)
 @click.option('--all', 'all_images', is_flag=True, help='Clean all dnsb-generated shared images')
 @click.option('-w', '--workdir', help='Working directory')
 @click.pass_context
 def clean(ctx, config_file, all_images, workdir):
     """Clean docker images
     
+    \b
     Examples:
       dnsb clean test.yml       Clean project-specific images
       dnsb clean --all          Clean all dnsb-* shared images
@@ -508,7 +593,7 @@ def clean(ctx, config_file, all_images, workdir):
 
 
 @cli.command()
-@click.argument('config_file')
+@click.argument('config_file', shell_complete=complete_config_files)
 @click.option('-i', '--incremental', is_flag=True, help='Enable incremental build')
 @click.option('-g', '--graph', help='Generate topology graph DOT file')
 @click.option('-w', '--workdir', help='Working directory')
@@ -519,10 +604,12 @@ def clean(ctx, config_file, all_images, workdir):
 def run(ctx, config_file, incremental, graph, workdir, vfs, detach, build):
     """Build and run the project (build + compose up)
     
+    \b
     This command will:
       1. Build the DNS infrastructure
       2. Start all containers using docker-compose
     
+    \b
     Examples:
       dnsb run test.yml -d         Build and run in background
       dnsb run test.yml --build    Force rebuild docker images
@@ -531,7 +618,7 @@ def run(ctx, config_file, incremental, graph, workdir, vfs, detach, build):
 
 
 @cli.command()
-@click.argument('config_file')
+@click.argument('config_file', shell_complete=complete_config_files)
 @click.option('-w', '--workdir', help='Working directory')
 @click.option('-d', '--detach', is_flag=True, help='Run containers in background')
 @click.pass_context
@@ -541,6 +628,7 @@ def up(ctx, config_file, workdir, detach):
     Similar to 'run' but skips the build step. Use this for faster startup
     when you haven't changed the configuration.
     
+    \b
     Examples:
       dnsb up test.yml -d          Start project in background
     """
@@ -548,8 +636,8 @@ def up(ctx, config_file, workdir, detach):
 
 
 @cli.command()
-@click.argument('config_file')
-@click.argument('service')
+@click.argument('config_file', shell_complete=complete_config_files)
+@click.argument('service', required=False, shell_complete=complete_services)
 @click.argument('command', nargs=-1)
 @click.option('-w', '--workdir', help='Working directory')
 @click.option('-u', '--user', help='User to execute as')
@@ -559,6 +647,7 @@ def exec(ctx, config_file, service, command, workdir, user):
     
     If no command is provided, starts an interactive bash shell.
     
+    \b
     Examples:
       dnsb exec test.yml sld                    Start bash in sld container
       dnsb exec test.yml sld sh                 Start sh instead of bash
@@ -569,14 +658,15 @@ def exec(ctx, config_file, service, command, workdir, user):
 
 
 @cli.command()
-@click.argument('config_file')
-@click.argument('service')
+@click.argument('config_file', shell_complete=complete_config_files)
+@click.argument('service', required=False, shell_complete=complete_services)
 @click.argument('shell_cmd', default='/bin/bash')
 @click.option('-w', '--workdir', help='Working directory')
 @click.pass_context
 def shell(ctx, config_file, service, shell_cmd, workdir):
     """Start an interactive shell in a service container (shortcut for exec)
     
+    \b
     Examples:
       dnsb shell test.yml sld          Start bash in sld
       dnsb shell test.yml sld sh       Start sh in sld
@@ -585,8 +675,8 @@ def shell(ctx, config_file, service, shell_cmd, workdir):
 
 
 @cli.command()
-@click.argument('config_file')
-@click.argument('services', nargs=-1)
+@click.argument('config_file', shell_complete=complete_config_files)
+@click.argument('services', nargs=-1, shell_complete=complete_services)
 @click.option('-w', '--workdir', help='Working directory')
 @click.option('-f', '--follow', is_flag=True, help='Follow log output')
 @click.option('-t', '--tail', type=int, help='Number of lines to show from the end')
@@ -594,6 +684,7 @@ def shell(ctx, config_file, service, shell_cmd, workdir):
 def logs(ctx, config_file, services, workdir, follow, tail):
     """Show logs from services
     
+    \b
     Examples:
       dnsb logs test.yml                  Show all logs
       dnsb logs test.yml sld tld          Show logs from sld and tld
@@ -604,12 +695,13 @@ def logs(ctx, config_file, services, workdir, follow, tail):
 
 
 @cli.command()
-@click.argument('config_file')
+@click.argument('config_file', shell_complete=complete_config_files)
 @click.option('-w', '--workdir', help='Working directory')
 @click.pass_context
 def ps(ctx, config_file, workdir):
     """List containers and their status
     
+    \b
     Examples:
       dnsb ps test.yml
     """
@@ -617,13 +709,14 @@ def ps(ctx, config_file, workdir):
 
 
 @cli.command()
-@click.argument('config_file')
-@click.argument('services', nargs=-1)
+@click.argument('config_file', shell_complete=complete_config_files)
+@click.argument('services', nargs=-1, shell_complete=complete_services)
 @click.option('-w', '--workdir', help='Working directory')
 @click.pass_context
 def restart(ctx, config_file, services, workdir):
     """Restart services
     
+    \b
     Examples:
       dnsb restart test.yml              Restart all services
       dnsb restart test.yml sld tld      Restart specific services
@@ -632,7 +725,7 @@ def restart(ctx, config_file, services, workdir):
 
 
 @cli.command()
-@click.argument('config_file')
+@click.argument('config_file', shell_complete=complete_config_files)
 @click.option('-w', '--workdir', help='Working directory')
 @click.option('-v', '--volumes', is_flag=True, help='Also remove volumes')
 @click.option('-c', '--clean', is_flag=True, help='Clean images after stopping')
@@ -643,12 +736,14 @@ def down(ctx, config_file, workdir, volumes, clean):
     By default, this command only stops containers and removes networks,
     keeping images for faster restart. Use -c to also clean images.
     
+    \b
     This command will:
       1. Stop and remove all containers for the project
       2. Remove project networks
       3. Remove project volumes (if -v/--volumes is specified)
       4. Remove project images (if -c/--clean is specified)
     
+    \b
     Examples:
       dnsb down test.yml           Stop project (keep images for faster restart)
       dnsb down test.yml -c        Stop project and clean images
