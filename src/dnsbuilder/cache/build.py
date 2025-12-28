@@ -252,6 +252,8 @@ class CachedBuilder(Builder):
         for service_name in changes['services_to_update']:
             self._sync_service(service_name, memory_output_dir)
         
+        self._sync_shared_images(memory_output_dir)
+        
         # sync docker-compose file (if changed)
         if changes['docker_compose_changed']:
             self._sync_compose(memory_output_dir)
@@ -342,6 +344,51 @@ class CachedBuilder(Builder):
             logger.info("Docker-compose file updated")
         else:
             logger.warning("Docker-compose file not found in memory build")
+    
+    def _sync_shared_images(self, memory_output_dir: DNSBPath):
+        """Sync shared .images directory to disk"""
+        logger.debug("Syncing shared .images directory to disk...")
+        
+        memory_images_dir = memory_output_dir / ".images"
+        real_images_dir = self.output_dir / ".images"
+        
+        if not self.memory_fs.exists(memory_images_dir):
+            logger.debug("No shared .images directory found in memory, skipping sync")
+            return
+        
+        # Ensure real images directory exists
+        if not self.real_fs.exists(real_images_dir):
+            self.real_fs.mkdir(real_images_dir, parents=True)
+            logger.debug(f"Created shared .images directory: {real_images_dir}")
+        
+        # Sync all image hash directories
+        synced_count = 0
+        try:
+            image_hashes = self.memory_fs.listdir(memory_images_dir)
+            for hash_item in image_hashes:
+                hash_dir = hash_item.name
+                memory_hash_dir = memory_images_dir / hash_dir
+                real_hash_dir = real_images_dir / hash_dir
+                
+                if self.memory_fs.is_dir(memory_hash_dir):
+                    # Sync Dockerfile
+                    memory_dockerfile = memory_hash_dir / "Dockerfile"
+                    real_dockerfile = real_hash_dir / "Dockerfile"
+                    
+                    if self.memory_fs.exists(memory_dockerfile):
+                        # Ensure hash directory exists
+                        if not self.real_fs.exists(real_hash_dir):
+                            self.real_fs.mkdir(real_hash_dir, parents=True)
+                        
+                        # Copy Dockerfile
+                        dockerfile_content = self.memory_fs.read_bytes(memory_dockerfile)
+                        self.real_fs.write_bytes(real_dockerfile, dockerfile_content)
+                        synced_count += 1
+                        logger.debug(f"Synced Dockerfile for image hash: {hash_dir}")
+            
+            logger.info(f"Shared .images directory synced: {synced_count} Dockerfiles")
+        except Exception as e:
+            logger.warning(f"Failed to sync shared .images directory: {e}")
         
     def _save_updated_cache(self):
         """save updated cache to disk"""

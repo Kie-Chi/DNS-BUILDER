@@ -1,12 +1,421 @@
 import logging
-from typing import List
+from typing import List, Dict, Optional, Tuple
 import dns.rdata
 import dns.rdatatype
 import dns.rdataclass
+import subprocess
+import tempfile
+import hashlib
+from pathlib import Path
 from ..datacls import BuildContext
 from ..io import DNSBPath
 
 logger = logging.getLogger(__name__)
+
+
+class DNSSECResigner:
+    """
+    Handles DNSSEC re-signing operations to establish trust chain.
+    
+    This class analyzes zone dependencies, injects DS records from child zones
+    into parent zones, and re-signs parent zones to complete the DNSSEC chain.
+    """
+    
+    def __init__(self, context: BuildContext):
+        """
+        Initialize the DNSSEC re-signer.
+        
+        Args:
+            context: Build context containing file system and service information
+        """
+        self.context = context
+        self.fs = context.fs
+        
+    def run(self) -> None:
+        """
+        Main entry point for DNSSEC re-signing.
+        
+        Builds zone dependency graph, determines signing order, and re-signs
+        parent zones with child DS records.
+        """
+        logger.info("[DNSSEC-Resigner] Starting DNSSEC re-signing process...")
+        
+        try:
+            # Step 1: Build zone dependency graph
+            zone_graph = self._bld_deps()
+            
+            if not zone_graph:
+                logger.warning("[DNSSEC-Resigner] No zones found for re-signing.")
+                return
+            
+            logger.info(f"[DNSSEC-Resigner] Built dependency graph with {len(zone_graph)} zone(s)")
+            logger.debug(f"[DNSSEC-Resigner] Zone graph: {zone_graph}")
+            
+            # Step 2: Topologically sort zones (children first, parents last)
+            sorted_zones = self._topological_sort(zone_graph)
+            
+            if not sorted_zones:
+                logger.warning("[DNSSEC-Resigner] No parent zones found for re-signing.")
+                return
+            
+            logger.info(f"[DNSSEC-Resigner] Will re-sign {len(sorted_zones)} parent zone(s): {sorted_zones}")
+            
+            # Step 3: Re-sign each parent zone with child DS records
+            success_count = 0
+            skip_count = 0
+            
+            for parent_zone in sorted_zones:
+                zone_info = zone_graph[parent_zone]
+                
+                # Performance optimization: skip zones without children
+                if not zone_info['children']:
+                    logger.debug(f"[DNSSEC-Resigner] Skipping leaf zone '{parent_zone}' (no children)")
+                    skip_count += 1
+                    continue
+                
+                logger.info(f"[DNSSEC-Resigner] Re-signing parent zone '{parent_zone}' with {len(zone_info['children'])} child DS record(s)")
+                
+                if self._resign_parent_zone(parent_zone, zone_graph):
+                    success_count += 1
+                    logger.info(f"[DNSSEC-Resigner] Successfully re-signed '{parent_zone}'")
+                else:
+                    logger.warning(f"[DNSSEC-Resigner] Failed to re-sign '{parent_zone}'")
+            
+            logger.info(f"[DNSSEC-Resigner] Re-signing completed: {success_count} success, {skip_count} skipped (leaf zones)")
+            
+        except Exception as e:
+            logger.error(f"[DNSSEC-Resigner] Error during DNSSEC re-signing: {e}")
+            logger.exception(e)
+    
+    def _bld_deps(self) -> Dict[str, Dict]:
+        """
+        Build zone dependency graph by scanning key:/ directory.
+        
+        Returns:
+            Dictionary mapping zone_name to {
+                'service': service_name,
+                'parent': parent_zone_name,
+                'children': [child_zone_names],
+                'temp_path_prefix': temp path prefix
+            }
+        """
+        graph = {}
+        key_root = DNSBPath("key:/")
+        
+        if not self.fs.exists(key_root):
+            logger.warning("[DNSSEC-Resigner] key:/ path does not exist")
+            return graph
+        
+        # Find all .ksk.key files to identify zones
+        ksk_files = self.fs.rglob(key_root, "*ksk.key")
+        logger.debug(f"[DNSSEC-Resigner] Found {len(ksk_files)} KSK key file(s)")
+        
+        for ksk_path in ksk_files:
+            try:
+                # Parse path: key:/service/zone.ksk.key
+                
+                service_name = ksk_path.parent.name
+                zone_filename = ksk_path.name
+                zone_name_clean = zone_filename.replace('.ksk.key', '')
+                
+                # Handle special root zone naming
+                if zone_name_clean == 'root' or zone_name_clean == '':
+                    zone_name = '.'
+                else:
+                    zone_name = zone_name_clean + '.'
+                
+                # Determine parent zone
+                parent_zone = self._find_parent(zone_name)
+                
+                # Add to graph
+                if zone_name not in graph:
+                    graph[zone_name] = {
+                        'service': service_name,
+                        'parent': parent_zone,
+                        'children': [],
+                        'temp_path_prefix': f"temp:/services/{service_name}/zones/",
+                        'zone_name_clean': zone_name_clean
+                    }
+                
+                logger.debug(f"[DNSSEC-Resigner] Added zone '{zone_name}' (service: {service_name}, parent: {parent_zone})")
+                
+            except Exception as e:
+                logger.warning(f"[DNSSEC-Resigner] Failed to parse {ksk_path}: {e}")
+        
+        # Build children relationships
+        for zone_name, zone_info in graph.items():
+            parent = zone_info['parent']
+            if parent and parent in graph:
+                graph[parent]['children'].append(zone_name)
+        
+        return graph
+    
+    def _find_parent(self, zone_name: str) -> Optional[str]:
+        """
+        Determine the parent zone for a given zone name.
+        
+        Args:
+            zone_name: Zone name (e.g., 'com.', 'example.com.', '.')
+            
+        Returns:
+            Parent zone name or None if no parent (root zone)
+        """
+        if zone_name == '.':
+            return None  # Root has no parent
+        
+        zone_clean = zone_name.rstrip('.')
+        parts = zone_clean.split('.')
+        
+        if len(parts) == 1:
+            return '.'  # TLD's parent is root
+        
+        # Parent is everything after the first label
+        return '.'.join(parts[1:]) + '.'
+    
+    def _topological_sort(self, graph: Dict[str, Dict]) -> List[str]:
+        """
+        Sort zones in topological order
+        ensures child zones are processed before their parents,
+        """
+        # Use depth-first search to order zones
+        visited = set()
+        result = []
+        
+        def visit(zone: str):
+            if zone in visited:
+                return
+            visited.add(zone)
+            
+            # Visit children first
+            zone_info = graph.get(zone)
+            if zone_info:
+                for child in zone_info['children']:
+                    if child in graph:
+                        visit(child)
+            
+            # Then add parent
+            result.append(zone)
+        
+        # Start from all zones
+        for zone in graph.keys():
+            visit(zone)
+        
+        return result
+    
+    def _resign_parent_zone(self, parent_zone: str, zone_graph: Dict[str, Dict]) -> bool:
+        """
+        Re-sign a parent zone with DS records from its children.
+        
+        Args:
+            parent_zone: Parent zone name to re-sign
+            zone_graph: Complete zone dependency graph
+            
+        Returns:
+            True if re-signing succeeded, False otherwise
+        """
+        try:
+            zone_info = zone_graph[parent_zone]
+            service_name = zone_info['service']
+            zone_name_clean = zone_info['zone_name_clean']
+            children = zone_info['children']
+            
+            # Read unsigned zone content from temp:/
+            base_filename = f"db.{zone_name_clean}" if parent_zone != "." else "db.root"
+            unsigned_path = DNSBPath(f"{zone_info['temp_path_prefix']}{base_filename}.unsigned")
+            
+            if not self.fs.exists(unsigned_path):
+                logger.error(f"[DNSSEC-Resigner] Unsigned zone file not found: {unsigned_path}")
+                return False
+            
+            unsigned_content = self.fs.read_text(unsigned_path)
+            logger.debug(f"[DNSSEC-Resigner] Read unsigned zone from {unsigned_path}")
+            
+            # Collect DS records from all children
+            ds_records_content = []
+            
+            for child_zone in children:
+                if child_zone not in zone_graph:
+                    logger.warning(f"[DNSSEC-Resigner] Child zone '{child_zone}' not in graph")
+                    continue
+                
+                child_info = zone_graph[child_zone]
+                child_service = child_info['service']
+                child_zone_clean = child_info['zone_name_clean']
+                
+                # Read DS record from key:/
+                ds_path = DNSBPath(f"key:/{child_service}/{child_zone_clean}.ds")
+                
+                if not self.fs.exists(ds_path):
+                    logger.warning(f"[DNSSEC-Resigner] DS record not found for child '{child_zone}': {ds_path}")
+                    continue
+                
+                ds_content = self.fs.read_text(ds_path)
+                if ds_content.strip():
+                    ds_records_content.append(f"; DS records for {child_zone}")
+                    ds_records_content.append(ds_content.strip())
+                    logger.debug(f"[DNSSEC-Resigner] Collected DS records for '{child_zone}'")
+            
+            if not ds_records_content:
+                logger.warning(f"[DNSSEC-Resigner] No DS records found for children of '{parent_zone}'")
+                return False
+            
+            # Append DS records to unsigned zone content
+            modified_content = unsigned_content + "\n\n" + "\n".join(ds_records_content) + "\n"
+            
+            # Re-sign the zone with modified content
+            signed_result = self._resign_zone(
+                parent_zone,
+                zone_name_clean,
+                service_name,
+                modified_content
+            )
+            
+            if not signed_result:
+                logger.error(f"[DNSSEC-Resigner] Failed to sign '{parent_zone}'")
+                return False
+            
+            signed_content, new_ds_content = signed_result
+            
+            # Update temp:/ with new signed zone
+            signed_path = DNSBPath(f"{zone_info['temp_path_prefix']}{base_filename}")
+            self.fs.write_text(signed_path, signed_content)
+            logger.debug(f"[DNSSEC-Resigner] Updated signed zone at {signed_path}")
+            
+            # Update key:/ with new DS record (for use by parent zones)
+            if new_ds_content:
+                ds_output_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.ds")
+                self.fs.write_text(ds_output_path, new_ds_content)
+                logger.debug(f"[DNSSEC-Resigner] Updated DS record at {ds_output_path}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"[DNSSEC-Resigner] Exception while re-signing '{parent_zone}': {e}")
+            logger.exception(e)
+            return False
+    
+    def _resign_zone(
+        self,
+        zone_name: str,
+        zone_name_clean: str,
+        service_name: str,
+        unsigned_content: str
+    ) -> Optional[Tuple[str, str]]:
+        """
+        Sign a zone using existing keys from key:/.
+        
+        Args:
+            zone_name: Zone name (e.g., 'com.', '.')
+            zone_name_clean: Clean zone name (e.g., 'com', 'root')
+            service_name: Service name managing this zone
+            unsigned_content: Unsigned zone file content (with DS records appended)
+            
+        Returns:
+            Tuple of (signed_content, ds_content) or None on failure
+        """
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                
+                # Write unsigned zone content
+                zone_filename = f"db.{zone_name_clean}" if zone_name != "." else "db.root"
+                unsigned_file = temp_path / zone_filename
+                unsigned_file.write_text(unsigned_content)
+                
+                # Read existing keys from key:/
+                ksk_key_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.ksk.key")
+                ksk_private_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.ksk.private")
+                zsk_key_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.zsk.key")
+                zsk_private_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.zsk.private")
+                keynames_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.keynames")
+                
+                # Check all key files exist
+                for key_path in [ksk_key_path, ksk_private_path, zsk_key_path, zsk_private_path, keynames_path]:
+                    if not self.fs.exists(key_path):
+                        logger.error(f"[DNSSEC-Resigner] Key file not found: {key_path}")
+                        return None
+                
+                # Read key basenames from metadata file
+                # Format: KSK_BASENAME=K.+013+61193\nZSK_BASENAME=K.+013+14828
+                keynames_content = self.fs.read_text(keynames_path)
+                ksk_basename = None
+                zsk_basename = None
+                for line in keynames_content.strip().split('\n'):
+                    if line.startswith('KSK_BASENAME='):
+                        ksk_basename = line.split('=', 1)[1]
+                    elif line.startswith('ZSK_BASENAME='):
+                        zsk_basename = line.split('=', 1)[1]
+                
+                if not ksk_basename or not zsk_basename:
+                    logger.error(f"[DNSSEC-Resigner] Failed to parse key basenames from {keynames_path}")
+                    logger.error(f"[DNSSEC-Resigner] Content: {keynames_content}")
+                    return None
+                
+                logger.debug(f"[DNSSEC-Resigner] Using KSK basename: {ksk_basename}, ZSK basename: {zsk_basename}")
+                
+                # Read key contents
+                ksk_key_content = self.fs.read_text(ksk_key_path)
+                ksk_private_content = self.fs.read_text(ksk_private_path)
+                zsk_key_content = self.fs.read_text(zsk_key_path)
+                zsk_private_content = self.fs.read_text(zsk_private_path)
+                
+                # Write key files to temp directory with BIND standard names
+                (temp_path / f"{ksk_basename}.key").write_text(ksk_key_content)
+                (temp_path / f"{ksk_basename}.private").write_text(ksk_private_content)
+                (temp_path / f"{zsk_basename}.key").write_text(zsk_key_content)
+                (temp_path / f"{zsk_basename}.private").write_text(zsk_private_content)
+                
+                # Append key includes to zone file
+                unsigned_file.write_text(
+                    unsigned_file.read_text() + "\n" +
+                    f"$INCLUDE {ksk_basename}.key\n" +
+                    f"$INCLUDE {zsk_basename}.key\n"
+                )
+                
+                # Sign the zone
+                logger.debug(f"[DNSSEC-Resigner] Signing zone '{zone_name}' with dnssec-signzone")
+                sign_result = subprocess.run(
+                    [
+                        "dnssec-signzone",
+                        "-3", hashlib.sha1(zone_name.encode()).hexdigest()[:16],
+                        "-N", "INCREMENT",
+                        "-o", zone_name,
+                        str(unsigned_file)
+                    ],
+                    cwd=temp_path,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                
+                logger.debug(f"[DNSSEC-Resigner] dnssec-signzone output: {sign_result.stdout}")
+                
+                # Read signed zone
+                signed_file = temp_path / f"{zone_filename}.signed"
+                if not signed_file.exists():
+                    logger.error(f"[DNSSEC-Resigner] Signed zone file not found: {signed_file}")
+                    return None
+                
+                signed_content = signed_file.read_text()
+                
+                # Read DS records
+                dsset_file = temp_path / f"dsset-{zone_name_clean}."
+                ds_content = ""
+                if dsset_file.exists():
+                    ds_content = dsset_file.read_text()
+                    logger.debug(f"[DNSSEC-Resigner] Found new DS records for '{zone_name}'")
+                else:
+                    logger.warning(f"[DNSSEC-Resigner] DS record file not found: {dsset_file}")
+                
+                return (signed_content, ds_content)
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[DNSSEC-Resigner] dnssec-signzone failed for '{zone_name}': {e.stderr}")
+            return None
+        except Exception as e:
+            logger.error(f"[DNSSEC-Resigner] Failed to sign zone '{zone_name}': {e}")
+            logger.exception(e)
+            return None
 
 
 class DNSSECHandler:
@@ -38,21 +447,14 @@ class DNSSECHandler:
         logger.info("[DNSSEC] Starting DNSSEC key processing...")
         
         try:
-            # Combine all KSK keys into a single file
-            self._combine_ksk_keys()
+            resigner = DNSSECResigner(self.context)
+            resigner.run()
             
-            # Combine all DS records into a single file
+            # Generate root.key trust anchor for recursive resolvers
+            self._generate_root_key()
+            
+            # Combine all DS records for documentation
             self._combine_ds_records()
-            
-            # Generate BIND trusted-keys format
-            self._gen_bind_keys()
-            
-            # Generate PowerDNS trust anchors format
-            self._gen_pdns_trustanchors()
-            
-            # Future operations can be added here:
-            # self._generate_trust_anchors()
-            # self._validate_key_chain()
             
             logger.info("[DNSSEC] DNSSEC key processing completed successfully.")
         except Exception as e:
@@ -60,24 +462,22 @@ class DNSSECHandler:
             # Log the error but don't raise to avoid breaking the barrier
             # Services can continue even if DNSSEC processing fails
     
-    def _combine_ksk_keys(self) -> None:
+    def _generate_root_key(self) -> None:
         """
-        Combine all KSK keys from key:/ into a single file.
+        Generate root.key trust anchor file from all KSK keys.
         
         This method scans the key:/ protocol path for all *.ksk.key files,
-        reads their contents, and combines them into key:/combined.ksk.key.
-        This combined file can be used as a trust anchor file for recursive resolvers.
         """
-        logger.debug("[DNSSEC] Combining KSK keys...")
+        logger.debug("[DNSSEC] Generating root.key trust anchor...")
         
         # Find all KSK key files under key:/
-        ksk_files = self._find_ksk_files()
+        ksk_files = self._find_root()
         
         if not ksk_files:
-            logger.warning("[DNSSEC] No KSK key files found in key:/. Skipping combination.")
+            logger.warning("[DNSSEC] No KSK key files found in key:/. Skipping root.key generation.")
             return
         
-        logger.info(f"[DNSSEC] Found {len(ksk_files)} KSK key file(s): {ksk_files}")
+        logger.info(f"[DNSSEC] Found {len(ksk_files)} KSK key file(s) for root.key")
         
         # Read and combine all KSK key contents
         combined_content = []
@@ -86,7 +486,7 @@ class DNSSECHandler:
                 content = self.fs.read_text(ksk_file)
                 if content.strip():  # Only add non-empty content
                     combined_content.append(content.strip())
-                    logger.debug(f"[DNSSEC] Read KSK key from {ksk_file}")
+                    logger.debug(f"[DNSSEC] Added KSK from {ksk_file}")
             except Exception as e:
                 logger.warning(f"[DNSSEC] Failed to read {ksk_file}: {e}")
         
@@ -94,18 +494,19 @@ class DNSSECHandler:
             logger.warning("[DNSSEC] All KSK key files were empty or unreadable.")
             return
         
-        # Write combined content to key:/all.ksk.key
-        output_path = DNSBPath("key:/all.ksk.key")
+        # Write combined content to key:/root.key
+        output_path = DNSBPath("key:/root.key")
         combined_text = "\n\n".join(combined_content) + "\n"
         
         try:
             self.fs.write_text(output_path, combined_text)
-            logger.info(f"[DNSSEC] Successfully combined {len(combined_content)} KSK key(s) into {output_path}")
-            logger.debug(f"[DNSSEC] Combined file size: {len(combined_text)} bytes")
+            logger.info(f"[DNSSEC] Successfully generated {output_path} with {len(combined_content)} KSK key(s)")
+            logger.info(f"[DNSSEC] root.key can be used as trust-anchor-file for recursive resolvers")
+            logger.debug(f"[DNSSEC] root.key file size: {len(combined_text)} bytes")
         except Exception as e:
-            logger.error(f"[DNSSEC] Failed to write combined KSK file to {output_path}: {e}")
+            logger.error(f"[DNSSEC] Failed to write root.key to {output_path}: {e}")
     
-    def _find_ksk_files(self) -> List[DNSBPath]:
+    def _find_root(self) -> List[DNSBPath]:
         """
         Find all KSK key files in the key:/ protocol path.
         
@@ -120,9 +521,8 @@ class DNSSECHandler:
                 logger.debug("[DNSSEC] key:/ path does not exist")
                 return []
             
-            # Use rglob to recursively find all .ksk.key files
-            # Using *ksk.key to match files like .ksk.key, K{zone}.ksk.key, etc.
-            ksk_files = self.fs.rglob(key_root, "*ksk.key")
+            # find the root
+            ksk_files = self.fs.rglob(key_root, ".ksk.key")
             logger.debug(f"[DNSSEC] rglob found {len(ksk_files)} KSK key file(s): {[str(f) for f in ksk_files]}")
             return ksk_files
             
@@ -198,185 +598,3 @@ class DNSSECHandler:
         except Exception as e:
             logger.warning(f"[DNSSEC] Error scanning key:/ for DS files: {e}")
             return []
-    
-    def _gen_bind_keys(self) -> None:
-        """
-        Generate BIND trusted-keys format from combined KSK keys.
-        
-        Reads key:/all.ksk.key and converts DNSKEY records to BIND's trusted-keys
-        format, writing the result to key:/all.ksk.key.bind.
-        
-        Uses dnspython to properly parse DNSKEY records.
-        """
-        logger.debug("[DNSSEC] Generating BIND trusted-keys format...")
-        
-        combined_key_path = DNSBPath("key:/all.ksk.key")
-        
-        # Check if combined key file exists
-        if not self.fs.exists(combined_key_path):
-            logger.warning("[DNSSEC] Combined key file key:/all.ksk.key not found. Skipping BIND format generation.")
-            return
-        
-        try:
-            # Read combined key file
-            content = self.fs.read_text(combined_key_path)
-            
-            # Parse DNSKEY records and convert to trusted-keys format
-            trusted_keys_entries = []
-            
-            for line in content.strip().split('\n'):
-                line = line.strip()
-                if not line or line.startswith(';') or line.startswith('#'):
-                    # Skip empty lines and comments
-                    continue
-                
-                if 'DNSKEY' in line:
-                    try:
-                        # Parse DNSKEY record using dnspython
-                        # Format: zone. IN DNSKEY flags protocol algorithm key_data
-                        parts = line.split()
-                        
-                        if len(parts) < 7:
-                            logger.warning(f"[DNSSEC] Skipping malformed DNSKEY line: {line}")
-                            continue
-                        
-                        zone = parts[0].rstrip('.')
-                        # parts[1] = IN (class)
-                        # parts[2] = DNSKEY
-                        
-                        # Join the DNSKEY record data (from flags onwards)
-                        rdata_text = ' '.join(parts[3:])
-                        
-                        # Parse using dnspython
-                        dnskey_rdata = dns.rdata.from_text(
-                            dns.rdataclass.IN,
-                            dns.rdatatype.DNSKEY,
-                            rdata_text
-                        )
-                        
-                        # Extract fields from parsed DNSKEY
-                        flags = dnskey_rdata.flags
-                        protocol = dnskey_rdata.protocol
-                        algorithm = dnskey_rdata.algorithm
-                        # Convert key to base64 string
-                        import base64
-                        key_data = base64.b64encode(dnskey_rdata.key).decode('ascii')
-                        
-                        # Generate trusted-keys entry
-                        # Format: "zone" flags protocol algorithm "key_data";
-                        trusted_key_entry = f'    "{zone}." {flags} {protocol} {algorithm} "{key_data}";'
-                        trusted_keys_entries.append(trusted_key_entry)
-                        logger.debug(f"[DNSSEC] Converted DNSKEY for zone {zone}")
-                        
-                    except Exception as e:
-                        logger.warning(f"[DNSSEC] Failed to parse DNSKEY line '{line}': {e}")
-                        continue
-            
-            if not trusted_keys_entries:
-                logger.warning("[DNSSEC] No valid DNSKEY records found in combined key file.")
-                return
-            
-            # Wrap entries in trusted-keys block
-            trusted_keys_content = '\n'.join(trusted_keys_entries)
-            
-            # Write to key:/all.ksk.key.bind
-            output_path = DNSBPath("key:/all.ksk.key.bind")
-            self.fs.write_text(output_path, trusted_keys_content)
-            
-            logger.info(f"[DNSSEC] Generated BIND trusted-keys format with {len(trusted_keys_entries)} key(s) in {output_path}")
-            logger.debug(f"[DNSSEC] Trusted-keys file size: {len(trusted_keys_content)} bytes")
-            
-        except Exception as e:
-            logger.error(f"[DNSSEC] Failed to generate BIND trusted-keys format: {e}")
-    
-    def _gen_pdns_trustanchors(self) -> None:
-        """
-        Generate PowerDNS trust anchors configuration from combined DS records.
-        
-        Reads key:/all.ds and converts it to PowerDNS YAML format with trustanchors
-        configuration. The output is written to key:/all.ds.pdns.
-        
-        PowerDNS format:
-        dnssec:
-          trustanchors:
-            - name: '.'
-              dsrecords:
-                - 'keytag algorithm digesttype digest'
-            - name: 'example.com'
-              dsrecords:
-                - 'keytag algorithm digesttype digest'
-        """
-        logger.debug("[DNSSEC] Generating PowerDNS trust anchors format...")
-        
-        combined_ds_path = DNSBPath("key:/all.ds")
-        
-        # Check if combined DS file exists
-        if not self.fs.exists(combined_ds_path):
-            logger.warning("[DNSSEC] Combined DS file key:/all.ds not found. Skipping PowerDNS format generation.")
-            return
-        
-        try:
-            # Read combined DS file
-            content = self.fs.read_text(combined_ds_path)
-            
-            # Parse DS records and group by zone name
-            from collections import defaultdict
-            zone_ds_map = defaultdict(list)
-            
-            for line in content.strip().split('\n'):
-                line = line.strip()
-                if not line or line.startswith(';') or line.startswith('#'):
-                    # Skip empty lines and comments
-                    continue
-                
-                if 'DS' in line:
-                    try:
-                        # Parse DS record
-                        # Format: zone. TTL IN DS keytag algorithm digesttype digest
-                        parts = line.split()
-                        
-                        if len(parts) < 8:
-                            logger.warning(f"[DNSSEC] Skipping malformed DS line: {line}")
-                            continue
-                        
-                        zone = parts[0].rstrip('.')
-                        # parts[1] = TTL
-                        # parts[2] = IN (class)
-                        # parts[3] = DS
-                        keytag = parts[4]
-                        algorithm = parts[5]
-                        digesttype = parts[6]
-                        digest = parts[7]
-                        
-                        # Build DS record string: 'keytag algorithm digesttype digest'
-                        ds_entry = f'{keytag} {algorithm} {digesttype} {digest}'
-                        zone_ds_map[zone].append(ds_entry)
-                        logger.debug(f"[DNSSEC] Parsed DS record for zone {zone}: {ds_entry}")
-                        
-                    except Exception as e:
-                        logger.warning(f"[DNSSEC] Failed to parse DS line '{line}': {e}")
-                        continue
-            
-            if not zone_ds_map:
-                logger.warning("[DNSSEC] No valid DS records found in combined DS file.")
-                return
-            
-            # Generate PowerDNS YAML format
-            yaml_lines = ["dnssec:", "  trustanchors:"]
-            
-            for zone, ds_records in sorted(zone_ds_map.items()):
-                yaml_lines.append(f"    - name: '{zone}.'")
-                yaml_lines.append("      dsrecords:")
-                for ds_record in ds_records:
-                    yaml_lines.append(f"        - '{ds_record}'")
-            
-            yaml_content = "\n".join(yaml_lines) + "\n"
-            
-            # Write to key:/all.ds.pdns
-            output_path = DNSBPath("key:/all.ds.pdns")
-            self.fs.write_text(output_path, yaml_content)
-            
-            logger.info(f"[DNSSEC] Successfully generated PowerDNS trust anchors format: {output_path}")
-            logger.debug(f"[DNSSEC] PowerDNS config includes {len(zone_ds_map)} zone(s)")
-        except Exception as e:
-            logger.error(f"[DNSSEC] Failed to generate PowerDNS trust anchors format: {e}")

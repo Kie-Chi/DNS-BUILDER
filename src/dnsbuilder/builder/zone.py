@@ -14,79 +14,6 @@ from ..io import DNSBPath
 
 logger = logging.getLogger(__name__)
 
-DEPTHS = {
-    0 : "root-servers",
-    1 : "tld-servers",
-    2 : "sld-servers",
-    # 3 or more is not supported, we just random
-}
-
-# Class-level counter per depth and per service
-_zone_counters: Dict[int, int] = {}
-_zone_prefixes: Dict[int, Dict[str, str]] = {}
-
-
-def _gen_prefix(count: int) -> str:
-    """
-    Generate a unique identifier based on count.    
-    - 0: 'ns'
-    - 1-26: 'a' to 'z'
-    - 27-52: 'aa' to 'az'
-    - 53-78: 'ba' to 'bz'
-    - etc.
-    Args:
-        count: The counter value (0-indexed)
-    Returns:
-        A unique string identifier
-    """
-    if count == 0:
-        return "ns"
-    
-    # Adjust count to be 1-indexed for the alphabet pattern
-    count = count - 1
-    
-    # Calculate how many letters we need
-    result = []
-    while True:
-        result.append(chr(ord('a') + (count % 26)))
-        count = count // 26
-        if count == 0:
-            break
-        count -= 1  # Adjust for the next iteration
-    return ''.join(reversed(result))
-
-
-def _prefix(depth: int, service_name: str) -> str:
-    """
-    Get a stable prefix for a given depth and service name. Reuses the same
-    prefix when the same service appears multiple times at the same depth.
-    """
-    service_key = service_name.rstrip(".")
-
-    if depth not in _zone_prefixes:
-        _zone_prefixes[depth] = {}
-
-    if service_key in _zone_prefixes[depth]:
-        return _zone_prefixes[depth][service_key]
-
-    if depth not in _zone_counters:
-        _zone_counters[depth] = 0
-    else:
-        _zone_counters[depth] += 1
-
-    prefix = _gen_prefix(_zone_counters[depth])
-    _zone_prefixes[depth][service_key] = prefix
-    return prefix
-
-
-def _reset() -> None:
-    """
-    Reset all zone counters.
-    """
-    global _zone_counters
-    _zone_counters.clear()
-    _zone_prefixes.clear()
-
 
 class ZoneGenerator:
     """
@@ -106,7 +33,7 @@ class ZoneGenerator:
         self.records = records
         self.enable_dnssec = enable_dnssec
 
-    def _sign_zone(self, unsigned_content: str) -> Optional[Tuple[str, str, str, str]]:
+    def _sign_zone(self, unsigned_content: str) -> Optional[Tuple[str, str, str, str, str, str, str, str]]:
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
@@ -148,7 +75,9 @@ class ZoneGenerator:
                     return None
                 
                 zsk_key_content = zsk_key_file.read_text()
+                zsk_private_content = zsk_private_file.read_text()
                 ksk_key_content = ksk_key_file.read_text()
+                ksk_private_content = ksk_private_file.read_text()
                 # append keys
                 unsigned_file.write_text(
                     unsigned_file.read_text() + "\n" +
@@ -189,7 +118,8 @@ class ZoneGenerator:
                 
                 logger.debug(f"DNSSEC signing succeeded for '{self.zone_name}'")
                 
-                return (signed_content, ksk_key_content, zsk_key_content, ds_content)
+                return (signed_content, ksk_key_content, zsk_key_content, ds_content, 
+                        ksk_private_content, zsk_private_content, ksk_basename, zsk_basename)
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"DNSSEC command failed for '{self.zone_name}': {e.stderr}")
@@ -216,12 +146,11 @@ class ZoneGenerator:
         # Generate a simple serial number based on the current timestamp
         serial = int(time.time())
 
-        # Create default SOA and NS records
-        depth = self.zone_name.count(".") if self.zone_name != "." else 0
-        base_name = DEPTHS.get(depth, "servers")
-        unique_id = _prefix(depth, self.service_name)
-        ns_name = f"{unique_id}.{base_name}.net."
-        soa_name = f"admin.{base_name}.net."
+        # Create default SOA and NS records using service name
+        # Format: {service}.servers.net. (e.g., root.servers.net., tld.servers.net.)
+        service_prefix = self.service_name.rstrip(".")
+        ns_name = f"{service_prefix}.servers.net."
+        soa_name = "admin.servers.net."
         
         default_records = [
             RR(
@@ -316,7 +245,7 @@ class ZoneGenerator:
                     is_primary=True
                 )
             ]
-        signed_content, ksk_content, zsk_content, ds_content = sign_result
+        signed_content, ksk_content, zsk_content, ds_content, ksk_private_content, zsk_private_content, ksk_basename, zsk_basename = sign_result
         logger.debug(f"DNSSEC signing successful for '{self.zone_name}', generating artifacts.")
         
         zone_name_clean = self.zone_name.rstrip('.')
@@ -361,6 +290,13 @@ class ZoneGenerator:
         ]
         self.context.fs.mkdir(DNSBPath(f"key:/{self.service_name.rstrip('.')}"), exist_ok=True)
         self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ksk.key"), ksk_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ksk.private"), ksk_private_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.zsk.key"), zsk_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.zsk.private"), zsk_private_content)
         self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ds"), ds_content)
+        # Save key basenames for re-signing (e.g., "K.+013+61193")
+        # This metadata is needed to recreate proper key filenames during re-signing
+        key_metadata = f"KSK_BASENAME={ksk_basename}\nZSK_BASENAME={zsk_basename}\n"
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.keynames"), key_metadata)
         
         return artifacts

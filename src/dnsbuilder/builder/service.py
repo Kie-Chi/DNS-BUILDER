@@ -98,6 +98,9 @@ class ServiceHandler:
         self.image_obj = context.images.get(self.image_name)
         self.is_internal_image = isinstance(self.image_obj, InternalImage)
         self.has_dockerfile = self.is_internal_image or isinstance(self.image_obj, SelfDefinedImage)
+        
+        # Store shared image tag for docker-compose (if using internal image)
+        self.shared_image_tag = None
 
         # Record image-related decisions
         self.trace.add_decision(
@@ -180,7 +183,10 @@ class ServiceHandler:
         
         # Write image files
         self.trace.add_stage("write_image", "Write image related files")
-        self.image_obj.write(directory=self.service_dir)
+        shared_tag = self.image_obj.write(directory=self.service_dir)
+        if shared_tag:
+            self.shared_image_tag = shared_tag
+            logger.debug(f"[{self.service_name}] Using shared image tag: {shared_tag}")
         
         # Process files
         self.trace.add_stage("process_files", "Process service files")
@@ -709,15 +715,32 @@ class ServiceHandler:
     def _generate_image_build_config(self, service_config: Dict[str, Any]) -> None:
         """Generate image or build configuration"""
         if self.has_dockerfile:
-            build_path = f"./{self.service_name}"
-            service_config['build'] = build_path
-            self.trace.add_decision(
-                "build_config", 
-                "Build configuration", 
-                "has_dockerfile", 
-                build_path,
-                "Dockerfile detected, using build method"
-            )
+            # For internal images, use shared image tag and build context
+            if self.shared_image_tag:
+                # Use shared image tag
+                # service_config['image'] = self.shared_image_tag
+                # Point build context to shared images directory
+                image_hash = self.image_obj.get_image_hash()
+                build_path = f"./.images/{image_hash}"
+                service_config['build'] = build_path
+                self.trace.add_decision(
+                    "build_config", 
+                    "Build configuration (shared)", 
+                    "shared_image_tag", 
+                    f"{self.shared_image_tag} @ {build_path}",
+                    f"Using shared Dockerfile with tag '{self.shared_image_tag}'"
+                )
+            else:
+                # Fallback to service-specific build (for SelfDefinedImage)
+                build_path = f"./{self.service_name}"
+                service_config['build'] = build_path
+                self.trace.add_decision(
+                    "build_config", 
+                    "Build configuration", 
+                    "has_dockerfile", 
+                    build_path,
+                    "Dockerfile detected, using service-specific build method"
+                )
         else:
             if not self.image_name:
                 error_msg = f"Service '{self.service_name}' is configured for a Non-Dockerfile build, but the 'image' key is missing."

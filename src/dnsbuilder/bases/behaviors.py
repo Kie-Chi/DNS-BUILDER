@@ -9,6 +9,7 @@ Concrete classes:
 """
 
 import logging
+import ipaddress
 
 from ..abstractions import Behavior, MasterBehavior
 from ..datacls import BehaviorArtifact, VolumeArtifact, BuildContext
@@ -16,6 +17,43 @@ from ..exceptions import BehaviorError
 from .. import constants
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# BASE HINT BEHAVIOR
+# ============================================================================
+
+class HintBehavior(Behavior):
+    """Base class for hint behaviors with common hint file generation logic"""
+
+    # Letter sequence for generating root server names
+    LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+    def gen_hint(self, service_name: str, build_context: BuildContext) -> str:
+        """
+        Generate hint file content for all targets.
+        
+        For service names: uses {service}.servers.net.
+        For IP addresses: uses A.ROOT-SERVERS.NET., B.ROOT-SERVERS.NET., etc.
+        """
+        target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
+        
+        lines = []
+        for idx, (target_name, target_ip) in enumerate(zip(self.targets, target_ips)):
+            # Determine NS name based on whether target is a service or IP
+            try:
+                ipaddress.ip_address(target_name)
+                # Pure IP address: use letter-based naming
+                letter = self.LETTERS[idx % len(self.LETTERS)]
+                ns_name = f"{letter}.ROOT-SERVERS.NET."
+            except ValueError:
+                # Service name: use service-based naming
+                ns_name = f"{target_name}.servers.net."
+            
+            lines.append(f".\t3600000\tIN\tNS\t{ns_name}")
+            lines.append(f"{ns_name}\t3600000\tIN\tA\t{target_ip}")
+        
+        return "\n".join(lines) + "\n"
 
 
 # ============================================================================
@@ -36,7 +74,7 @@ class BindForwardBehavior(Behavior):
         return BehaviorArtifact(config_line=config_line)
 
 
-class BindHintBehavior(Behavior):
+class BindHintBehavior(HintBehavior):
     """
     Generates 'type hint' configuration for BIND
     """
@@ -44,22 +82,10 @@ class BindHintBehavior(Behavior):
     def generate(
         self, service_name: str, build_context: BuildContext
     ) -> BehaviorArtifact:
-        if len(self.targets) != 1:
-            raise BehaviorError(
-                "The 'hint' behavior type only supports a single target."
-            )
-
-        target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
-        target_name = self.targets[0]
-        target_ip = target_ips[0]
-
         filename = f"gen_{service_name}_root.hints"
         container_path = f"/usr/local/etc/zones/{filename}"
 
-        file_content = (
-            f".\t3600000\tIN\tNS\t{constants.ROOT}\n"
-            f"{constants.ROOT}\t3600000\tIN\tA\t{target_ip}\n"
-        )
+        file_content = self.gen_hint(service_name, build_context)
 
         config_line = f'zone "{self.zone}" {{ type hint; file "{container_path}"; }};'
 
@@ -110,7 +136,7 @@ class UnboundForwardBehavior(Behavior):
         return BehaviorArtifact(config_line=config_line)
 
 
-class UnboundHintBehavior(Behavior):
+class UnboundHintBehavior(HintBehavior):
     """
     Generates 'root-hints' configuration for Unbound
     """
@@ -118,22 +144,10 @@ class UnboundHintBehavior(Behavior):
     def generate(
         self, service_name: str, build_context: BuildContext
     ) -> BehaviorArtifact:
-        if len(self.targets) != 1:
-            raise BehaviorError(
-                "The 'hint' behavior type only supports a single target."
-            )
-
-        target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
-        target_name = self.targets[0]
-        target_ip = target_ips[0]
-
         filename = f"gen_{service_name}_root.hints"
         container_path = f"/usr/local/etc/unbound/zones/{filename}"
 
-        file_content = (
-            f".\t3600000\tIN\tNS\t{constants.ROOT}\n"
-            f"{constants.ROOT}\t3600000\tIN\tA\t{target_ip}\n"
-        )
+        file_content = self.gen_hint(service_name, build_context)
 
         config_line = f'root-hints: "{container_path}"'
 
@@ -189,7 +203,7 @@ class PdnsRecursorForwardBehavior(Behavior):
         return BehaviorArtifact(config_line=config_line)
 
 
-class PdnsRecursorHintBehavior(Behavior):
+class PdnsRecursorHintBehavior(HintBehavior):
     """
     Generates 'hint-file' configuration for PowerDNS Recursor
     """
@@ -197,22 +211,10 @@ class PdnsRecursorHintBehavior(Behavior):
     def generate(
         self, service_name: str, build_context: BuildContext
     ) -> BehaviorArtifact:
-        if len(self.targets) != 1:
-            raise BehaviorError(
-                "The 'hint' behavior type only supports a single target."
-            )
-
-        target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
-        target_name = self.targets[0]
-        target_ip = target_ips[0]
-
         filename = f"gen_{service_name}_root.hints"
         container_path = f"/usr/local/etc/zones/{filename}"
 
-        file_content = (
-            f".\t3600000\tIN\tNS\t{constants.ROOT}\n"
-            f"{constants.ROOT}\t3600000\tIN\tA\t{target_ip}\n"
-        )
+        file_content = self.gen_hint(service_name, build_context)
 
         config_line = f'hint-file={container_path}'
 
@@ -279,15 +281,27 @@ class KnotResolverStubBehavior(Behavior):
         return BehaviorArtifact(config_line=config_line)
 
 
-class KnotResolverHintBehavior(Behavior):
+class KnotResolverHintBehavior(HintBehavior):
     def generate(
         self, service_name: str, build_context: BuildContext
     ) -> BehaviorArtifact:
-        if len(self.targets) != 1:
-            raise BehaviorError("The 'hint' behavior type only supports a single target.")
         target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
-        target_ip = target_ips[0]
-        config_line = f"modules.load('hints')\nhints.root({{['{constants.ROOT}'] = {{'{target_ip}'}}}})"
+        
+        # Generate Lua table with all NS servers
+        hint_entries = []
+        for idx, (target_name, target_ip) in enumerate(zip(self.targets, target_ips)):
+            # Determine NS name
+            try:
+                ipaddress.ip_address(target_name)
+                letter = self.LETTERS[idx % len(self.LETTERS)]
+                ns_name = f"{letter}.ROOT-SERVERS.NET."
+            except ValueError:
+                ns_name = f"{target_name}.servers.net."
+            
+            hint_entries.append(f"['{ns_name}'] = {{'{target_ip}'}}")
+        
+        hints_table = ", ".join(hint_entries)
+        config_line = f"modules.load('hints')\nhints.root({{{hints_table}}})"
 
         filename = f"root.hints"
         container_path = f"/etc/knot-resolver/{filename}"

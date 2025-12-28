@@ -1,0 +1,79 @@
+# ------------------
+# Standard Authentication
+# used to build a real-world DNS server
+# ------------------
+name: std-auth
+
+images:
+  def-auth:
+    ref: bind:9.18.4
+
+builds:
+  net:
+    image: def-auth
+    ref: std:auth
+    behavior: |
+      net master servers NS servers
+  
+  servers:
+    image: def-auth
+    ref: std:auth
+    # use auto.modify to generate behavior
+
+auto:
+  setup: |
+    # auto hook to the `root.servers.net`
+    # add ". master net NS net" to all root authoritative servers
+    
+    import re
+
+    # find the root authoritative servers (with ". master")
+    cta = config.get("builds", {})
+    roots = []
+    for srv in cta.keys():
+      behavs = cta.get(srv, {}).get("behavior", "")
+      # Check if this service has ". master" (root zone authority)
+      if re.search(r"\.\s+master\b", behavs):
+        # Check if already has "net NS" delegation
+        if not re.search(r"net\s+NS\s+net", behavs):
+          roots.append(srv)
+
+    if roots:
+      print(f"[Auto std-auth] Found root authoritative servers: {roots}")
+    else:
+      print(f"[Auto std-auth] All root servers already have net delegation.")
+      raise ValueError("No root servers found.")
+
+    # for each root master, add ". master net NS net"
+    for root_name in roots:
+      root_cta = cta.get(root_name, {})
+      root_behav = root_cta.get("behavior", "")
+      # Append the delegation record
+      new_behav = root_behav.rstrip() + "\n      . master net NS net\n"
+      # Write back to config
+      cta[root_name]["behavior"] = new_behav
+      print(f"[Auto std-auth] Updated {root_name}: added net delegation")
+
+  modify: |
+    # auto add records for all auth servers
+    
+    import re
+    
+    # find the auth servers by checking if they have 'master' behavior
+    def is_auth(srv):
+      cta = config.get("builds", {})
+      behavs = cta.get(srv, {}).get("behavior", "")
+      # Check if this service has any 'master' records (authoritative zone)
+      return bool(re.search(r'\bmaster\b', behavs))
+
+    # for each auth, add A record to servers.net
+    servs = config.get("builds", {}).setdefault("servers", {})
+    origin = servs.get("behavior", "")
+    behavs = []
+    for srv in config.get("builds", {}).keys():
+      if is_auth(srv):
+        # add A record for this auth server
+        print(f"[Auto std-auth] Adding A record for auth server {srv} in servers.net zone")
+        behavs.append(f"servers.net master {srv} A {srv}")
+    
+    servs["behavior"] = origin + "\n" + "\n".join(behavs)

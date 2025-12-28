@@ -191,6 +191,10 @@ class InternalImage(Image, ABC):
 
         self.default_deps = set()
         self.default_utils = set()
+        
+        # Cache for Dockerfile content and hash
+        self._dcr_cache: Optional[str] = None
+        self._img_cache: Optional[str] = None
 
         if ":" in self.name:
             self._load_defaults()
@@ -345,7 +349,12 @@ class InternalImage(Image, ABC):
         """
         Loads the appropriate Dockerfile template and formats it with instance variables.
         Subclasses can override this to provide additional template variables.
+        Result is cached to avoid redundant generation.
         """
+        # Return cached content if available
+        if self._dcr_cache is not None:
+            return self._dcr_cache
+        
         try:
             template = self.fs.read_text(
                 DNSBPath(f"resource:/images/templates/{self.software}")
@@ -354,7 +363,8 @@ class InternalImage(Image, ABC):
             raise ImageDefinitionError(f"Dockerfile template for '{self.software}' not found.")
 
         template_vars = self._get_template_vars()
-        return template.format(**template_vars)
+        self._dcr_cache = template.format(**template_vars)
+        return self._dcr_cache
 
     def _get_template_vars(self) -> Dict[str, Any]:
         """Provides a dictionary of variables for formatting the Dockerfile template."""
@@ -377,6 +387,22 @@ class InternalImage(Image, ABC):
             "pip_mirror_setup": pip_mirror_setup,
             "npm_registry_setup": npm_registry_setup,
         }
+
+    def get_image_hash(self) -> str:
+        """Generate a unique hash for this image configuration based on Dockerfile content.
+        Result is cached to avoid redundant hashing."""
+        # Return cached hash if available
+        if self._img_cache is not None:
+            return self._img_cache
+        
+        content = self._generate_dockerfile_content()
+        self._img_cache = hashlib.sha256(content.encode()).hexdigest()[:12]
+        return self._img_cache
+
+    def get_tag(self) -> str:
+        """Generate a unique image tag for sharing across services with identical configurations."""
+        image_hash = self.get_image_hash()
+        return f"dnsb-{self.software}-{self.version}-{image_hash}"
 
     def _needs_chsrc(self) -> bool:
         """Check if any mirror configuration uses 'auto' (requires chsrc)"""
@@ -505,18 +531,42 @@ class InternalImage(Image, ABC):
         # Manual mode - use specified registry URL
         return f"RUN npm config set registry {mirror_value} || true"
 
-    def write(self, directory: DNSBPath):
-        """Write Dockerfile to the specified directory"""
+    def write(self, directory: DNSBPath) -> Optional[str]:
+        """Write Dockerfile to shared images directory and return the shared image tag.
+        
+        Args:
+            directory: Service directory
+            
+        Returns:
+            The shared image tag if buildable, None otherwise
+        """
         if not self.software or not self.version:
             logger.debug(
                 f"Image '{self.name}' is not buildable (likely an alias), skipping Dockerfile generation."
             )
-            return
+            return None
 
         content = self._generate_dockerfile_content()
-        dockerfile_path = directory / "Dockerfile"
-        self.fs.write_text(dockerfile_path, content)
-        logger.debug(f"Dockerfile for '{self.name}' written to {dockerfile_path}")
+        image_hash = self.get_image_hash()
+        output_dir = directory.parent
+        shared_dir = output_dir / ".images" / image_hash
+
+        self.fs.mkdir(shared_dir, parents=True, exist_ok=True)
+        dockerfile_path = shared_dir / "Dockerfile"
+        
+        # Only write if doesn't exist (avoid redundant writes)
+        if not self.fs.exists(dockerfile_path):
+            self.fs.write_text(dockerfile_path, content)
+            logger.info(f"Shared Dockerfile for '{self.name}' written to {dockerfile_path}")
+        else:
+            logger.debug(f"Shared Dockerfile for '{self.name}' already exists at {dockerfile_path}")
+        
+        # Write a hook
+        hook_path = directory / "docker.hook"
+        self.fs.write_text(hook_path, f"# Dockerfile located at: {dockerfile_path}\n# Tag to use: {self.get_tag()}\n")
+
+        # Return the shared image tag for docker-compose
+        return self.get_tag()
 
     def merge(self, child_config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -772,11 +822,9 @@ class MasterBehavior(Behavior, ABC):
                 # Check for and generate glue records
                 target_ip = build_context.service_ips.get(target)
                 if target_ip:
-                    # Generate semantic hash based on zone, target and IP for consistent NS naming
-                    ns_hash = hashlib.sha256(f"{self.zone_file_key}:{target}:{target_ip}".encode()).hexdigest()[:16]
-                    subfix = f"ns{ns_hash}"
-                    ns_name = f"{subfix}.{self.zone_file_key}" if self.zone_file_key != "." else f"{subfix}."
-                    logger.debug(f"Generated Default NS record: {ns_name} -> {target_ip}({target})")
+                    # Use service name as NS domain: {service}.servers.net.
+                    ns_name = f"{target}.servers.net."
+                    logger.debug(f"Generated NS record with glue: {ns_name} -> {target_ip} (service: {target})")
                     records.append(
                         RR(
                             rname=rname,
