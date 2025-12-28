@@ -40,7 +40,7 @@ def get_paths(config_file: str, workdir: str = None):
         workdir = DNSBPath(Path.cwd())
         logging.info(f"Using current working directory as workdir: {workdir}")
     else:
-        workdir = DNSBPath(Path.cwd())
+        workdir = dnsb_path.parent if dnsb_path.protocol == "file" else DNSBPath(Path.cwd())
         logging.debug(f"Using default workdir: {workdir}")
     return (abs_cfg, workdir)
 
@@ -471,9 +471,9 @@ def cli(ctx, debug, log_levels, log_file):
     """DNS Builder - Build DNS infrastructure from configuration files
     
     Examples:
-      dnsb build config.yml -i    Build with incremental mode
-      dnsb clean --all            Clean all shared images
-      dnsb ui                     Start web UI
+      dnsb build config.yml -i        Build with incremental mode
+      dnsb clean --all                Clean all shared images
+      dnsb ui                         Start web UI
     """
     ctx.ensure_object(dict)
     ctx.obj['debug'] = debug
