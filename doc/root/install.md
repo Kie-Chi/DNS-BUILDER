@@ -15,8 +15,23 @@ pip install .
 ## 运行(CLI)
 
 ```shell
-dnsb config.yml [cli-args]
+dnsb COMMAND CONFIG_FILE [OPTIONS]
 ```
+
+### 常用命令
+
+- `build`: 构建项目配置
+- `run`: 构建并启动容器
+- `up`: 启动已构建的项目
+- `down`: 停止并清理容器
+- `shell`: 进入容器 shell
+- `logs`: 查看容器日志
+- `ps`: 列出容器状态
+- `clean`: 清理镜像
+
+详细命令说明请查看 [CLI 命令参考](../cli.md)
+
+### 常用选项
 
 - `--debug`：DEBUG模式，输出更加详细的日志
 - `-h`：获取CLI参数帮助

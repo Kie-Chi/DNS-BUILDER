@@ -42,6 +42,7 @@ nav:
   - 开始: 
     - 安装与运行: root/install.md
     - 快速开始: root/getting-started.md
+  - CLI 命令参考: cli.md
   - 配置参考: 
     - 概览: config/index.md
     - 配置处理流程: config/processing-pipeline.md
@@ -57,6 +58,8 @@ nav:
     - 行为 DSL: rule/behavior-dsl.md
     - 内置变量与占位符: rule/builtins-and-placeholders.md
     - 文件路径与FS: rule/paths-and-fs.md
+  - 实验功能:
+    - DNSSEC 支持: dnssec.md
   - 已弃用:
     - 概览: old/index.md
     - 推导式语法: old/comprehension.md
