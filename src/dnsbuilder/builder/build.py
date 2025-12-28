@@ -297,7 +297,6 @@ class Builder:
         all_services = {**builder_services, **services}
         
         compose_config = {
-            "version": "3.9",
             "name": self.config.name,
             "services": all_services,
             "networks": NetworkManager(self.config.inet).compose()
