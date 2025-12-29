@@ -458,8 +458,12 @@ class DNSSECHandler:
             
             logger.info("[DNSSEC] DNSSEC key processing completed successfully.")
         except Exception as e:
+            # Log detailed error information including traceback
+            import traceback
             logger.error(f"[DNSSEC] Error during DNSSEC processing: {e}")
-            # Log the error but don't raise to avoid breaking the barrier
+            logger.error(f"[DNSSEC] Exception type: {type(e).__name__}")
+            logger.error(f"[DNSSEC] Traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
+            # Don't raise - barrier action must complete successfully
             # Services can continue even if DNSSEC processing fails
     
     def _generate_root_key(self) -> None:

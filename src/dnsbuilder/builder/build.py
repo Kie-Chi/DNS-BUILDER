@@ -243,32 +243,112 @@ class Builder:
         # Create barrier for synchronization before volume processing
         num_services = len(buildable_services)
         
+        # Track which services reach the barrier for debugging
+        import threading
+        barrier_arrivals = set()
+        barrier_lock = threading.Lock()
+        
+        def track_arrival(service_name):
+            """Thread-safe tracking of barrier arrivals"""
+            with barrier_lock:
+                barrier_arrivals.add(service_name)
+                logger.debug(f"[ServiceHandler] Service '{service_name}' reached barrier ({len(barrier_arrivals)}/{num_services})")
+        
         # Create DNSSEC handler and set it as barrier action
         dnssec_handler = DNSSECHandler(context)
-        barrier = threading.Barrier(num_services, action=dnssec_handler.run) if num_services > 0 else None
+        
+        # Wrap barrier action to catch and log any exceptions
+        def safe_barrier_action():
+            """Wrapper for barrier action to ensure exceptions don't break the barrier"""
+            try:
+                with barrier_lock:
+                    arrived = sorted(barrier_arrivals)
+                    all_services = sorted(buildable_services.keys())
+                    missing = sorted(set(all_services) - barrier_arrivals)
+                logger.info(f"[ServiceHandler] Barrier released! {len(barrier_arrivals)}/{num_services} services arrived")
+                logger.debug(f"[ServiceHandler] Services that arrived: {arrived}")
+                if missing:
+                    logger.warning(f"[ServiceHandler] Services that did NOT arrive at barrier: {missing}")
+                logger.debug(f"[ServiceHandler] Barrier action starting (DNSSEC processing)...")
+                dnssec_handler.run()
+                logger.debug(f"[ServiceHandler] Barrier action completed successfully")
+            except Exception as e:
+                import traceback
+                logger.error(f"[ServiceHandler] CRITICAL: Barrier action failed with exception!")
+                logger.error(f"  Exception type: {type(e).__name__}")
+                logger.error(f"  Exception message: {e}")
+                logger.error(f"  Traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
+                # Don't re-raise - this would break the barrier
+        
+        barrier = threading.Barrier(num_services, action=safe_barrier_action) if num_services > 0 else None
         
         if barrier:
             logger.info(f"[ServiceHandler] Created barrier for {num_services} services.")
 
         loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor() as executor:
+        # Ensure thread pool has enough workers for all services to avoid barrier deadlock
+        # When services wait at barrier, they block their threads. If pool is too small,
+        # some services never get a thread to reach the barrier, causing timeout.
+        max_workers = max(num_services, 32)  # At least as many as services, minimum 32
+        logger.debug(f"[ServiceHandler] Creating thread pool with {max_workers} workers for {num_services} services")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             tasks = []
             for name, conf in buildable_services.items():
                 logger.debug(f"[ServiceHandler] Handling buildable service: '{name}'")
                 if 'image' not in conf:
                     raise ImageDefinitionError(f"Buildable service '{name}' is missing the required 'image' key.")
 
-                handler = ServiceHandler(name, context, image_builder=self.ib, barrier=barrier)
+                handler = ServiceHandler(name, context, image_builder=self.ib, barrier=barrier, barrier_tracker=track_arrival)
                 tasks.append(loop.run_in_executor(executor, handler.generate_all))
             
             # Gather results with exception handling to prevent barrier deadlock
             results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Check for exceptions in results
+        # Check for exceptions in results and provide detailed error information
+        import traceback
+        failed_services = []
+        root_cause_services = []  # Services with real errors (not barrier-related)
+        barrier_failed_services = []  # Services that failed due to broken barrier
+        
         for name, result in zip(buildable_services.keys(), results):
             if isinstance(result, Exception):
-                logger.error(f"[ServiceHandler] Service '{name}' failed: {result}")
-                raise result
+                failed_services.append((name, result))
+                # Distinguish between root cause errors and cascading barrier errors
+                error_msg = str(result)
+                if "barrier synchronization failed: another service encountered an error" in error_msg:
+                    barrier_failed_services.append((name, result))
+                else:
+                    # This is a real error, not a cascading barrier error
+                    root_cause_services.append((name, result))
+                    logger.error(f"[ServiceHandler] Service '{name}' failed with exception:")
+                    logger.error(f"  Exception type: {type(result).__name__}")
+                    logger.error(f"  Exception message: {result}")
+                    if hasattr(result, '__traceback__'):
+                        tb_lines = traceback.format_tb(result.__traceback__)
+                        logger.error(f"  Traceback:\n{''.join(tb_lines)}")
+        
+        # If any service failed, abort the barrier and raise a comprehensive error
+        if failed_services:
+            if barrier:
+                try:
+                    barrier.abort()
+                except Exception as e:
+                    logger.debug(f"[ServiceHandler] Barrier already aborted or broken: {e}")
+            
+            # Report summary with emphasis on root causes
+            if root_cause_services:
+                logger.error(f"[ServiceHandler] {len(root_cause_services)} service(s) failed with errors:")
+                for name, exc in root_cause_services:
+                    logger.error(f"  - {name}: {type(exc).__name__}: {exc}")
+                if barrier_failed_services:
+                    logger.info(f"[ServiceHandler] {len(barrier_failed_services)} additional service(s) failed due to barrier synchronization")
+                # Raise the first root cause exception
+                raise root_cause_services[0][1]
+            else:
+                # All failures are barrier-related (shouldn't happen but handle it)
+                logger.error(f"[ServiceHandler] All {len(failed_services)} service(s) failed due to barrier issues")
+                raise failed_services[0][1]
         
         compose_services = {
             name: result 

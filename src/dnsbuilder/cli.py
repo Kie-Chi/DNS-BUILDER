@@ -570,9 +570,14 @@ def cli(ctx, debug, log_levels, log_file):
 @click.option('-g', '--graph', help='Generate a DOT file for the network topology graph')
 @click.option('-w', '--workdir', help="Working directory (use '@config' for config dir, default: cwd)")
 @click.option('--vfs', is_flag=True, help='Enable virtual file system')
+@click.option('--debug', is_flag=True, help='Enable debug logging for this command')
+@click.option('-f', '--log-file', help='Path to log file')
 @click.pass_context
-def build(ctx, config_file, incremental, graph, workdir, vfs):
+def build(ctx, config_file, incremental, graph, workdir, vfs, debug, log_file):
     """Build DNS infrastructure from config file"""
+    # Apply debug setting if provided
+    if debug and not ctx.obj.get('debug'):
+        setup_logging(debug=True, log_levels=None, log_file=log_file)
     do_build(config_file, incremental, graph, workdir, vfs)
 
 
@@ -600,8 +605,10 @@ def clean(ctx, config_file, all_images, workdir):
 @click.option('--vfs', is_flag=True, help='Enable virtual file system')
 @click.option('-d', '--detach', is_flag=True, help='Run containers in background')
 @click.option('--build', is_flag=True, help='Build images before starting')
+@click.option('--debug', is_flag=True, help='Enable debug logging for this command')
+@click.option('-f', '--log-file', help='Path to log file')
 @click.pass_context
-def run(ctx, config_file, incremental, graph, workdir, vfs, detach, build):
+def run(ctx, config_file, incremental, graph, workdir, vfs, detach, build, debug, log_file):
     """Build and run the project (build + compose up)
     
     \b
@@ -613,7 +620,11 @@ def run(ctx, config_file, incremental, graph, workdir, vfs, detach, build):
     Examples:
       dnsb run test.yml -d         Build and run in background
       dnsb run test.yml --build    Force rebuild docker images
+      dnsb run test.yml --debug    Run with debug logging
     """
+    # Apply debug setting if provided
+    if debug and not ctx.obj.get('debug'):
+        setup_logging(debug=True, log_levels=None, log_file=log_file)
     do_run(config_file, incremental, graph, workdir, vfs, detach, build)
 
 

@@ -84,12 +84,13 @@ class ServiceHandler:
     """
     Handles all artifact generation for a single service.
     """
-    def __init__(self, service_name: str, context: BuildContext, image_builder=None, barrier: threading.Barrier = None):
+    def __init__(self, service_name: str, context: BuildContext, image_builder=None, barrier: threading.Barrier = None, barrier_tracker=None):
         self.service_name = service_name
         self.context = context
         self.build_conf = context.resolved_builds[service_name]
         self.image_builder = image_builder
         self.barrier = barrier
+        self.barrier_tracker = barrier_tracker
         
         # Initialize configuration generation tracer
         self.trace = ConfigGenerationTrace(service_name=service_name, fs=context.fs)
@@ -199,13 +200,33 @@ class ServiceHandler:
 
         # Process behavior configuration
         self.trace.add_stage("process_behavior", "Process behavior configuration")
-        self._process_behavior()
+        try:
+            self._process_behavior()
+        except Exception as e:
+            # If behavior processing fails, abort barrier to prevent deadlock
+            if self.barrier:
+                logger.error(f"[{self.service_name}] Behavior processing failed, aborting barrier: {e}")
+                self.barrier.abort()
+            raise
         
         # Wait at barrier to ensure all services complete behavior processing
         if self.barrier:
+            # Track arrival before waiting
+            if self.barrier_tracker:
+                self.barrier_tracker(self.service_name)
             logger.debug(f"[{self.service_name}] Waiting at barrier before processing volumes...")
-            self.barrier.wait(timeout=10)
-            logger.debug(f"[{self.service_name}] Barrier released, proceeding to volume processing.")
+            try:
+                self.barrier.wait(timeout=30)
+                logger.debug(f"[{self.service_name}] Barrier released, proceeding to volume processing.")
+            except threading.BrokenBarrierError:
+                # This is a cascading error - another service failed first
+                # Use debug level to avoid noise, the real error will be reported elsewhere
+                logger.debug(f"[{self.service_name}] Barrier broken - another service failed during behavior processing")
+                raise BuildError(f"Service '{self.service_name}' barrier synchronization failed: another service encountered an error") from None
+            except Exception as e:
+                logger.error(f"[{self.service_name}] Barrier wait failed: {e}")
+                self.barrier.abort()  # Abort barrier to release other waiting threads
+                raise BuildError(f"Service '{self.service_name}' barrier wait timeout or error: {e}") from e
 
         # Help DNSSEC key combine
         self.trace.add_stage("dnssec_key_combine", "Combine DNSSEC keys if applicable")
