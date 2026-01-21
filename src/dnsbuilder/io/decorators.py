@@ -127,7 +127,13 @@ def fallback(errors: Tuple[Type[Exception], ...] = (FileNotFoundError, KeyError)
                     raise
                 
                 try:
-                    result = fallback_method(path, *args, **kwargs)
+                    # This ensures the fallback handler gets the correctly resolved absolute path
+                    resolved_path = path
+                    if hasattr(self, '_resolve_path'):
+                        resolved_path = self._resolve_path(path)
+                        logger.debug(f"[Fallback] Resolved path for fallback: {path} -> {resolved_path}")
+                    
+                    result = fallback_method(resolved_path, *args, **kwargs)
                     
                     if hasattr(self, '_record_fallback'):
                         self._record_fallback(path, method_name)
