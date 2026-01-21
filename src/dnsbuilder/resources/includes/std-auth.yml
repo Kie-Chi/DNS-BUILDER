@@ -4,6 +4,10 @@
 # ------------------
 name: std-auth
 
+vars:
+  std:
+    dnssec: false # default no DNSSEC
+
 images:
   def-auth:
     ref: bind:9.18.4
@@ -57,8 +61,21 @@ auto:
 
   modify: 
     - |
-      # auto add records for all auth servers
+      # auto add records for all services
+
+      # for each service, add A record to servers.net
+      servs = config.get("builds", {}).setdefault("servers", {})
+      origin = servs.get("behavior", "")
+      behavs = []
+      for srv in config.get("builds", {}).keys():
+        # add A record for this service
+        print(f"[Auto std-auth] Adding A record for service {srv} in servers.net zone")
+        behavs.append(f"servers.net master {srv} A {srv}")
       
+      servs["behavior"] = origin + "\n" + "\n".join(behavs)
+
+    - |
+      # auto set variables for std-auth build
       import re
       
       # find the auth servers by checking if they have 'master' behavior
@@ -68,14 +85,11 @@ auto:
         # Check if this service has any 'master' records (authoritative zone)
         return bool(re.search(r'\bmaster\b', behavs))
 
-      # for each auth, add A record to servers.net
-      servs = config.get("builds", {}).setdefault("servers", {})
-      origin = servs.get("behavior", "")
-      behavs = []
+      std_vars = config.get("vars", {}).get("std", {})
+      dnssec_enabled = std_vars.get("dnssec", False)
+      print(f"[Auto std-auth] Setting DNSSEC to {dnssec_enabled} for all services")
+
       for srv in config.get("builds", {}).keys():
         if is_auth(srv):
-          # add A record for this auth server
-          print(f"[Auto std-auth] Adding A record for auth server {srv} in servers.net zone")
-          behavs.append(f"servers.net master {srv} A {srv}")
-      
-      servs["behavior"] = origin + "\n" + "\n".join(behavs)
+          config["builds"][srv]["dnssec"] = dnssec_enabled
+          print(f"[Auto std-auth] Set dnssec={dnssec_enabled} for auth service {srv}")

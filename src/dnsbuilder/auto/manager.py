@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Union
 import os
 
 from .executor import ScriptExecutor
-from ..io import FileSystem
+from ..io import FileSystem, DNSBPath
 from ..exceptions import UnsupportedFeatureError
 from ..config import Config
 from ..builder.resolve import Resolver
@@ -288,6 +288,105 @@ class AutomationManager:
         
         logger.info(f"[Auto@{self.max_workers}] Restrict phase completed")
         return results
+    
+    def post(self, config: Dict[str, Any], output_dir: DNSBPath) -> None:
+        """
+        Execute the post phase after docker-compose.yml generation.
+        
+        Args:
+            config: Full configuration object
+            output_dir: Output directory path (e.g., output/proj_name)
+            
+        Returns:
+            None
+        """
+        logger.info(f"[Auto@{self.max_workers}] Starting post phase")
+        
+        # Get automation config
+        auto_config = config.get('auto', {})
+        global_post = auto_config.get('post', None)
+        
+        # Execute global post scripts
+        if global_post:
+            if isinstance(global_post, str):
+                # Single script
+                logger.info(f"[Auto@{self.max_workers}] Executing global post script: {global_post[:20]}...")
+                self.executor.execute_script(
+                    global_post,
+                    'python',
+                    config,
+                    output_dir=output_dir
+                )
+            else:
+                # List of scripts - execute serially
+                logger.info(f"[Auto@{self.max_workers}] Executing {len(global_post)} global post scripts serially")
+                for i, script in enumerate(self._normalize_scripts(global_post)):
+                    self.executor.execute_script(
+                        script.get('content', ""),
+                        script.get('type', 'python'),
+                        config,
+                        output_dir=output_dir
+                    )
+        else:
+            logger.debug(f"[Auto@{self.max_workers}] No global post script found")
+        
+        # Service-level post scripts
+        service_scripts = []
+        builds = config.get('builds', {})
+        
+        for service_name, build_config in builds.items():
+            # Skip services with build: false (templates)
+            if not build_config.get('build', True):
+                logger.debug(f"[Auto@{self.max_workers}] Skipping post for service '{service_name}' (build=false)")
+                continue
+                
+            service_auto = build_config.get('auto', {})
+            service_post = service_auto.get('post', None)
+            
+            if service_post:
+                # Calculate service-specific output directory
+                service_output_dir = output_dir / service_name
+                
+                if isinstance(service_post, str):
+                    # Single script
+                    service_scripts.append({
+                        'content': service_post,
+                        'type': 'python',
+                        'service_name': service_name,
+                        'output_dir': service_output_dir
+                    })
+                else:
+                    normal_scripts = self._normalize_scripts(service_post)
+                    service_scripts.append({
+                        'content': [script.get('content', "") for script in normal_scripts], 
+                        'type': [script.get('type', 'python') for script in normal_scripts],
+                        'service_name': service_name,
+                        'output_dir': service_output_dir,
+                        'is_list': True
+                    })
+            else:
+                logger.debug(f"[Auto@{self.max_workers}] No post script found for service: {service_name}")
+        
+        if service_scripts:
+            logger.info(f"[Auto@{self.max_workers}] Executing {len(service_scripts)} service-level post scripts in parallel")
+            
+            # Prepare scripts for executor's parallel execution
+            scripts_for_executor = []
+            for script in service_scripts:
+                service_config = builds[script['service_name']]
+                scripts_for_executor.append({
+                    'content': script['content'],
+                    'type': script['type'],
+                    'config': service_config, 
+                    'service_name': script['service_name'],
+                    'output_dir': script['output_dir'],
+                    'is_list': script.get('is_list', False)
+                })
+            
+            # Execute in parallel (post scripts don't return config modifications)
+            self.executor.parallel_post(scripts_for_executor)
+
+        logger.info(f"[Auto@{self.max_workers}] Post phase completed")
     
     def _normalize_scripts(self, scripts: List[Union[str, Dict[str, Any]]]) -> List[Dict[str, str]]:
         """

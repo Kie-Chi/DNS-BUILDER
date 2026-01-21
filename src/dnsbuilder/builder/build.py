@@ -109,6 +109,12 @@ class Builder:
         # Assemble the final docker-compose.yml file and write it to disk
         self._assemble(compose_services, context)
         
+        # Execute post phase automation
+        logger.debug("[Builder] Executing AutomationManager post phase...")
+        config_data = context.config.model.model_dump(by_alias=True, exclude_none=True)
+        config_data['builds'] = context.resolved_builds
+        self.am.post(config_data, self.output_dir)
+        
         logger.info(f"[Builder] Build finished. Files are in '{self.output_dir}'")
         if need_context:
             return context

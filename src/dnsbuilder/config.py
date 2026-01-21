@@ -23,14 +23,16 @@ class AutomationModel(BaseModel):
     """
     Class Config-Validation Model for automation scripts.
     
-    Supports setup, modify, and restrict phases with Python or Bash scripts.
+    Supports setup, modify, restrict and post phases with Python or Bash scripts.
     - setup: String or list of strings/dicts (executed serially within service)
     - modify: String or list of strings/dicts (executed serially within service)
     - restrict: String or list of strings/dicts (executed in parallel)
+    - post: String or list of strings/dicts (executed after docker-compose.yml generation)
     """
     setup: Union[str, List[Union[str, Dict[str, Any]]]] = Field(default_factory=list)
     modify: Union[str, List[Union[str, Dict[str, Any]]]] = Field(default_factory=list)
     restrict: Union[str, List[Union[str, Dict[str, Any]]]] = Field(default_factory=list)
+    post: Union[str, List[Union[str, Dict[str, Any]]]] = Field(default_factory=list)
     model_config = ConfigDict(extra="allow")
 
 
@@ -77,6 +79,7 @@ class BuildModel(BaseModel):
     cap_add: List[str] = Field(default_factory=list)
     auto: Optional[AutomationModel] = Field(default_factory=AutomationModel)
     extra_conf: Optional[str] = None
+    vars: Dict[str, Any] = Field(default_factory=dict)
     # other `docker-compose` config, we won't check
     model_config = ConfigDict(extra="allow")
 
@@ -101,8 +104,9 @@ class ConfigModel(BaseModel):
     include: Optional[Union[str, List[str]]] = None
     auto: Optional[AutomationModel] = Field(default_factory=AutomationModel)
     mirror: Dict[str, Any] = Field(default_factory=dict)
+    vars: Dict[str, Any] = Field(default_factory=dict)
     model_config = ConfigDict(extra="allow")
-
+    
     @model_validator(mode='after')
     def validate_mirror(self) -> 'ConfigModel':
         """Ensure mirror is a dictionary"""

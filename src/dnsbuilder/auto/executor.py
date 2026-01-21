@@ -28,7 +28,7 @@ class ScriptExecutor:
         self.fs = fs
     
     def exec_python(self, script_content: str, config: Dict[str, Any], 
-                            service_name: Optional[str] = None) -> Any:
+                            service_name: Optional[str] = None, output_dir: Optional[str] = None) -> Any:
         """
         Execute a Python script with the given configuration.
         
@@ -36,6 +36,7 @@ class ScriptExecutor:
             script_content: Python script content
             config: Configuration object to pass to the script
             service_name: Service name (for service-level scripts)
+            output_dir: Output directory path (for post scripts)
             
         Returns:
             For setup/modify scripts: Modified configuration
@@ -47,6 +48,7 @@ class ScriptExecutor:
             result: Result variable for restrict scripts
             fs: FileSystem object for file operations
             workdir: Working directory path (chroot) as string
+            output_dir: Output directory for post scripts (service-specific or global)
         """
         try:
             if self.fs:
@@ -65,6 +67,7 @@ class ScriptExecutor:
                     'result': None, 
                     'fs': self.fs,  # Pass FileSystem object for flexible file operations
                     'workdir': self.fs.chroot,  # Pass workdir path
+                    'output_dir': output_dir,  # Pass output directory for post scripts
                     '__name__': '__main__'
                 }
                 with self.fs.open(temp_script_path, 'r') as f:
@@ -83,6 +86,7 @@ class ScriptExecutor:
                     'result': None,  # Initialize result variable for restrict scripts
                     'fs': self.fs,
                     'workdir': str(self.fs.chroot) if self.fs and self.fs.chroot else Path.cwd(),  # Pass workdir path
+                    'output_dir': output_dir,  # Pass output directory for post scripts
                     '__name__': '__main__'
                 }
                 with open(script_path, 'r') as f:
@@ -104,7 +108,8 @@ class ScriptExecutor:
             raise
     
     def execute_script(self, script_content: str, script_type: str, 
-                      config: Dict[str, Any], service_name: Optional[str] = None) -> Any:
+                      config: Dict[str, Any], service_name: Optional[str] = None, 
+                      output_dir: Optional[DNSBPath] = None) -> Any:
         """
         Execute a Python script. All scripts are now treated as Python code.
         
@@ -113,16 +118,17 @@ class ScriptExecutor:
             script_type: Script type (only 'python' is supported now)
             config: Configuration object
             service_name: Service name (for service-level scripts)
+            output_dir: Output directory path (for post scripts)
             
         Returns:
             For setup/modify scripts: Modified configuration
             For restrict scripts: The 'result' variable set by the script, or None if not set
         """
         if script_type.lower() == 'python':
-            return self.exec_python(script_content, config, service_name)
+            return self.exec_python(script_content, config, service_name, output_dir)
         else:
             logger.warning(f"Script type '{script_type}' is not supported. Treating as Python code.")
-            return self.exec_python(script_content, config, service_name)
+            return self.exec_python(script_content, config, service_name, output_dir)
     
     def parallel(self, scripts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -225,19 +231,79 @@ class ScriptExecutor:
         
         return results
     
+    def parallel_post(self, scripts: List[Dict[str, Any]]) -> None:
+        """
+        Execute multiple post scripts in parallel.
+        
+        Args:
+            scripts: List of script definitions with 'content', 'type', 'config', 'service_name', and 'output_dir'
+                    is_list: Whether the content is a list of scripts to execute serially
+            
+        Returns:
+            None (post scripts don't modify config)
+        """
+        if not scripts:
+            return
+        
+        # For single script, execute directly
+        if len(scripts) == 1:
+            script = scripts[0]
+            if script.get('is_list', False):
+                for i, script_content in enumerate(script['content']):
+                    logger.debug(f"[Auto@{self.max_workers}] Executing post script {i+1}/{len(script['content'])} for service {script.get('service_name', 'global')}")
+                    self.execute_script(
+                        script_content,
+                        script['type'][i],
+                        script['config'],
+                        script.get('service_name'),
+                        script.get('output_dir')
+                    )
+            else:
+                # Single script, execute directly
+                logger.debug(f"[Auto@{self.max_workers}] Executing single post script for service {script.get('service_name', 'global')}")
+                self.execute_script(
+                    script['content'], 
+                    script['type'], 
+                    script['config'],
+                    script.get('service_name'),
+                    script.get('output_dir')
+                )
+            return
+        
+        # For multiple scripts, use parallel execution
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_script = {}
+            for script in scripts:
+                future = executor.submit(
+                    self._exec,
+                    script,
+                    self  # Pass the executor instance
+                )
+                future_to_script[future] = script
+            
+            for future in as_completed(future_to_script):
+                script = future_to_script[future]
+                try:
+                    future.result()
+                    logger.info(f"[Auto@{self.max_workers}] Post script executed successfully for service: {script.get('service_name', 'global')}")
+                except Exception as e:
+                    logger.error(f"[Auto@{self.max_workers}] Post script execution failed for service {script.get('service_name', 'global')}: {e}")
+                    raise
+    
     @staticmethod
     def _exec(script: Dict[str, Any], executor: Optional['ScriptExecutor'] = None) -> Any:
         """
         Worker function for parallel script execution.
         
         Args:
-            script: Script dictionary with 'content', 'type', 'config', and optional 'service_name'
+            script: Script dictionary with 'content', 'type', 'config', and optional 'service_name', 'output_dir'
                    is_list: Whether the content is a list of scripts to execute serially
             executor: ScriptExecutor instance to use (if None, creates a new one)
             
         Returns:
             For setup/modify scripts: Modified configuration
             For restrict scripts: The 'result' variable set by the script, or None if not set
+            For post scripts: None
         """
         if executor is None:
             executor = ScriptExecutor()
@@ -251,7 +317,8 @@ class ScriptExecutor:
                     script_content,
                     script['type'][i],
                     config,
-                    script.get('service_name')
+                    script.get('service_name'),
+                    script.get('output_dir')
                 )
             return config
         else:
@@ -260,7 +327,8 @@ class ScriptExecutor:
                 script['content'], 
                 script['type'], 
                 script['config'], 
-                script.get('service_name')
+                script.get('service_name'),
+                script.get('output_dir')
             )
     
     # Alias

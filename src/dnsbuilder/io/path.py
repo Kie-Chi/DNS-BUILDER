@@ -89,9 +89,11 @@ class DNSBPath(PurePosixPath):
         obj.__first_part = __first_part
         return obj
 
-    def _reconstruct(self, new_path_part: PurePosixPath) -> "DNSBPath":
+    def _reconstruct(self, new_path_part: PurePosixPath, new_fragment: str = None) -> "DNSBPath":
         """
-        Internal helper to create a new DNSBPath. Crucially, it passes the
+        Internal helper to create a new DNSBPath.
+        For git protocol, operations affect the fragment.
+        For other protocols, operations affect the path_part.
         """
         if hasattr(new_path_part, '__path__'):
             path_str = new_path_part.__path__()
@@ -104,7 +106,7 @@ class DNSBPath(PurePosixPath):
             protocol=self.protocol,
             host=self.host,
             query=self.query_str,
-            fragment=self.fragment,
+            fragment=new_fragment if new_fragment is not None else self.fragment,
         )
     
     def __init__(self, *args, **kwargs):
@@ -121,14 +123,40 @@ class DNSBPath(PurePosixPath):
     @property
     @override
     def parent(self):
+        # For git protocol, parent operation should work on fragment
+        if self.protocol == "git":
+            if self.fragment:
+                new_fragment = str(PurePosixPath(self.fragment).parent)
+                # Keep path_part unchanged, only update fragment
+                return self._reconstruct(PurePosixPath(self.__path__()), new_fragment)
+            else:
+                return self
+        # For other protocols, parent works on path_part
         return self._reconstruct(super().parent)
 
     @override
     def joinpath(self, *args):
+        # For git protocol, join should work on fragment
+        if self.protocol == "git":
+            if self.fragment:
+                new_fragment = str(PurePosixPath(self.fragment).joinpath(*args))
+            else:
+                new_fragment = str(PurePosixPath(*args))
+            return self._reconstruct(PurePosixPath(self.__path__()), new_fragment)
+        # For other protocols, join works on path_part
         return self._reconstruct(super().joinpath(*args))
 
     @override
     def __truediv__(self, other):
+        # For git protocol, join should work on fragment
+        if self.protocol == "git":
+            if self.fragment:
+                new_fragment = str(PurePosixPath(self.fragment) / other)
+            else:
+                new_fragment = str(PurePosixPath(other))
+            # Keep path_part unchanged, only update fragment
+            return self._reconstruct(PurePosixPath(self.__path__()), new_fragment)
+        # For other protocols, join works on path_part
         return self._reconstruct(super().joinpath(other))
 
     @override

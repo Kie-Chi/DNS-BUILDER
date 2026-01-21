@@ -66,7 +66,8 @@ class Preprocessor:
 
         for file_path in include_files:
             path = DNSBPath(file_path)
-            if not path.is_absolute() and base_dir.is_resource:
+            # Resolve relative paths for resource and git protocols
+            if not path.is_absolute() and base_dir.protocol in ["resource", "git"]:
                 path = base_dir / path
 
             abs_path = str(path)
