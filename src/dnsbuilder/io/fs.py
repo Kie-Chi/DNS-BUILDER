@@ -210,16 +210,17 @@ class AppFileSystem(FileSystem):
     It resolves paths against a `chroot` directory before dispatching.
     """
 
-    def __init__(self, chroot: DNSBPath = None):
+    def __init__(self, chroot: DNSBPath = None, cache_root: DNSBPath = None):
         super().__init__()
         self.chroot = self._norm(chroot)
-        logger.debug(f"[AppFS] Initializing with chroot: {self.chroot}")
+        self.cache_root = cache_root if cache_root else DNSBPath(".dnsb_cache")
+        logger.debug(f"[AppFS] Initializing with chroot: {self.chroot}, cache_root: {self.cache_root}")
         self._handlers: Dict[str, FileSystem] = {}
         self.register_handler("file", DiskFileSystem())
         self.register_handler("raw", DiskFileSystem())
         self.register_handler("temp", HyperMemoryFileSystem())
         self.register_handler("resource", ResourceFileSystem())
-        self.register_handler("git", GitFileSystem(DiskFileSystem()))
+        self.register_handler("git", GitFileSystem(DiskFileSystem(), cache_root=str(self.cache_root)))
         self.register_handler("key", HyperMemoryFileSystem())   
 
     def register_handler(self, protocol: str, handler: FileSystem):
@@ -1588,7 +1589,8 @@ class GitFileSystem(FileSystem):
 def create_app_fs(
     use_vfs: bool = False, 
     fb_en: bool = False,
-    chroot: DNSBPath = None
+    chroot: DNSBPath = None,
+    cache_root: DNSBPath = None
 ) -> "FileSystem":
     """
     Create an AppFileSystem instance with optional VFS, and chroot support.
@@ -1596,12 +1598,14 @@ def create_app_fs(
     Args:
         use_vfs: Whether to use virtual file system for 'file' protocol.
                 If True, file:// uses HyperMemoryFileSystem instead of DiskFileSystem.
-        chroot: Root directory for relative path resolution.
+        chroot: Root directory for relative path resolution
+        cache_root: Root directory for cache storage 
+                   Default: ".dnsb_cache" in current directory.
         
     Returns:
         Configured AppFileSystem instance
     """
-    app_fs = AppFileSystem(chroot=chroot)
+    app_fs = AppFileSystem(chroot=chroot, cache_root=cache_root)
     if use_vfs:
         memfs = HyperMemoryFileSystem()
         backfs = DiskFileSystem()

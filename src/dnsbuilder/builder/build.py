@@ -28,13 +28,17 @@ logger = logging.getLogger(__name__)
 
 class Builder:
 
-    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = None):
+    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = None, output_dir: DNSBPath = None):
         self.config = config
         self.graph_output = graph_output
         if fs is None:
             raise DefinitionError("FileSystem is not provided.")
-        self.fs = fs
-        self.output_dir = DNSBPath("output") / self.config.name
+        self.fs = fs        
+        if output_dir is not None:
+            self.output_dir = output_dir
+        else:
+            self.output_dir = DNSBPath("output") / self.config.name
+        
         self.pr_blds = self._load_pr_blds()
         self.ic: Dict[str, Image] = {}
         # Initialize AutomationManager without resolver dependencies (will be set later)

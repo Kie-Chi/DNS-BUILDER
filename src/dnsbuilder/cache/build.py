@@ -23,16 +23,17 @@ class CachedBuilder(Builder):
     real project directory.
     """
     
-    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = None, cache_dir: DNSBPath = DNSBPath(".dnsb_cache")):
+    def __init__(self, config: Config, graph_output: Optional[str] = None, fs: FileSystem = None, output_dir: DNSBPath = None, cache_dir: DNSBPath = DNSBPath(".dnsb_cache")):
         if fs is None:
             raise DefinitionError("FileSystem is not provided.")
-        # Init parent class with real file system
-        super().__init__(config, graph_output, fs)
+        # Init parent class with real file system and output_dir
+        super().__init__(config, graph_output, fs, output_dir=output_dir)
         self.real_fs = fs
         self.cache_manager = CacheManager(fs, cache_dir)
         
         # Create memory filesystem with fallback enabled by default
-        self.memory_fs = create_app_fs(use_vfs=True, fb_en=True, chroot=fs.chroot)
+        cache_root = getattr(fs, 'cache_root', cache_dir)
+        self.memory_fs = create_app_fs(use_vfs=True, fb_en=True, chroot=fs.chroot, cache_root=cache_root)
         
         self.project_cache: Optional[ProjectCacheView] = None
         self.memory_project_cache: Optional[ProjectCacheView] = None
@@ -107,7 +108,8 @@ class CachedBuilder(Builder):
     async def _build_in_memory(self) -> BuildContext:
         """build project in memory file system, return BuildContext"""
         logger.info("Building project in memory...")
-        memory_builder = Builder(self.config, self.graph_output, self.memory_fs)
+        memory_output_dir = DNSBPath("output") / self.config.name
+        memory_builder = Builder(self.config, self.graph_output, self.memory_fs, output_dir=memory_output_dir)
         context = await memory_builder.run(need_context=True)
         
         if hasattr(self.memory_fs, '_fallback_stats'):

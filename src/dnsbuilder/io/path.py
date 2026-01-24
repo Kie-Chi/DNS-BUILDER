@@ -119,6 +119,11 @@ class DNSBPath(PurePosixPath):
 
     def is_disk(self) -> bool:
         return self.protocol in ["file", "raw"]
+    
+    def is_readonly(self) -> bool:
+        if self.protocol in ["file", "raw", "temp", "cache"]:
+            return False
+        return True
 
     @property
     @override

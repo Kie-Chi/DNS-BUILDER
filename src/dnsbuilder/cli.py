@@ -61,33 +61,27 @@ def complete_services(ctx, param, incomplete):
         if not project_name:
             return []
         
-        # Determine workdir (prefer from context params, fallback to config parent)
+        output_dir_param = ctx.params.get('output_dir')
         workdir = ctx.params.get('workdir')
-        if workdir:
+        
+        if output_dir_param:
+            output_dir = StdPath(output_dir_param).resolve() / project_name
+        elif workdir:
             if workdir == "@config":
-                workdir = config_path.parent
+                output_dir = config_path.parent / "output" / project_name
             elif workdir == "@cwd":
-                workdir = StdPath.cwd()
+                output_dir = StdPath.cwd() / "output" / project_name
             else:
-                workdir = StdPath(workdir).resolve()
+                output_dir = StdPath(workdir).resolve() / "output" / project_name
         else:
-            workdir = config_path.parent
-        
-        # Find docker-compose.yml
-        output_dir = workdir / "output" / project_name
+            output_dir = config_path.parent / "output" / project_name
         compose_file = output_dir / "docker-compose.yml"
-        
         if not compose_file.exists():
             return []
-        
-        # Parse docker-compose.yml to get all services
         with open(compose_file, 'r') as f:
             compose_data = yaml.safe_load(f)
         
         services = compose_data.get('services', {})
-        
-        # Filter services that match incomplete input
-        # Exclude builder services (they shouldn't be interacted with)
         service_names = [
             name for name in sorted(services.keys())
             if not name.startswith('dnsb-image-builder-') and name.startswith(incomplete)
@@ -101,8 +95,20 @@ def complete_services(ctx, param, incomplete):
         return []
 
 
-def get_paths(config_file: str, workdir: str = None):
-    """Get absolute config path and workdir"""
+def get_paths(config_file: str, workdir: str = None, output_dir: str = None):
+    """Get absolute config path, config_root (for chroot), and output_dir
+    
+    Args:
+        config_file: Path to config file
+        workdir: Working directory
+        output_dir: Explicit output directory
+    
+    Returns:
+        Tuple of (abs_cfg, config_root, output_dir_path)
+        - abs_cfg: Absolute path to config file
+        - config_root: Root directory for reading config/resources (used as chroot)
+        - output_dir_path: Base directory for writing outputs
+    """
     dnsb_path = DNSBPath(config_file)
     if dnsb_path.is_absolute():
         abs_cfg = str(dnsb_path)
@@ -111,19 +117,30 @@ def get_paths(config_file: str, workdir: str = None):
         abs_cfg = str(dnsb_path)
     
     if workdir == "@config":
-        workdir = dnsb_path.parent if dnsb_path.protocol == "file" else DNSBPath(Path.cwd())
-        logging.info(f"Using config directory as workdir: {workdir}")
+        config_root = dnsb_path.parent if dnsb_path.protocol == "file" else DNSBPath(Path.cwd())
+        logging.info(f"Using config directory as config root: {config_root}")
+    elif workdir == "@cwd":
+        config_root = DNSBPath(Path.cwd())
+        logging.info(f"Using current working directory as config root: {config_root}")
     elif workdir:
         workdir_path = Path(workdir).resolve()
-        workdir = DNSBPath(workdir_path)
-        logging.info(f"Using custom workdir: {workdir}")
-    elif workdir == "@cwd":
-        workdir = DNSBPath(Path.cwd())
-        logging.info(f"Using current working directory as workdir: {workdir}")
+        config_root = DNSBPath(workdir_path)
+        logging.info(f"Using custom config root: {config_root}")
     else:
-        workdir = dnsb_path.parent if dnsb_path.protocol == "file" else DNSBPath(Path.cwd())
-        logging.debug(f"Using default workdir: {workdir}")
-    return (abs_cfg, workdir)
+        config_root = dnsb_path.parent if dnsb_path.protocol == "file" else DNSBPath(Path.cwd())
+        logging.debug(f"Using default config root: {config_root}")
+    
+    if output_dir:
+        output_dir_path = DNSBPath(Path(output_dir).resolve())
+        logging.info(f"Using explicit output directory: {output_dir_path}")
+    elif workdir and not config_root.is_readonly():
+        output_dir_path = config_root
+        logging.debug(f"Using config root as output base: {output_dir_path}")
+    else:
+        output_dir_path = DNSBPath(Path.cwd())
+        logging.debug(f"Using current directory as output base: {output_dir_path}")
+    
+    return (abs_cfg, config_root, output_dir_path)
 
 
 def setup_logging(debug: bool, log_levels: str = None, log_file: str = None):
@@ -186,26 +203,29 @@ def handle_errors(func):
 
 
 @handle_errors
-def do_build(config_file: str, incremental: bool, graph: str, workdir: str, vfs: bool):
+def do_build(config_file: str, incremental: bool, graph: str, workdir: str, output_dir: str, vfs: bool):
     """Execute build command"""
-    abs_cfg, wd = get_paths(config_file, workdir)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
     
-    cli_fs = create_app_fs(use_vfs=vfs, chroot=wd)
+    # Cache should be in the writable output_dir_base, not the potentially read-only config_root
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=vfs, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
+    actual_output_dir = output_dir_base / "output" / config.name
     
     # Choose builder based on incremental flag
     if incremental:
-        builder = CachedBuilder(config, graph_output=graph, fs=cli_fs)
+        builder = CachedBuilder(config, graph_output=graph, fs=cli_fs, output_dir=actual_output_dir, cache_dir=cache_root)
         logging.info("Using incremental build with cache")
     else:
-        builder = Builder(config, graph_output=graph, fs=cli_fs)
+        builder = Builder(config, graph_output=graph, fs=cli_fs, output_dir=actual_output_dir)
         logging.info("Using standard build")
     
     asyncio.run(builder.run())
 
 
 @handle_errors
-def do_clean(config_file: str, all_images: bool, workdir: str):
+def do_clean(config_file: str, all_images: bool, workdir: str, output_dir: str):
     """Execute clean command"""
     if all_images:
         # Clean all dnsb-* images
@@ -239,19 +259,13 @@ def do_clean(config_file: str, all_images: bool, workdir: str):
         logging.info(f"Successfully cleaned {removed}/{len(dnsb_images)} dnsb-* images.")
     
     elif config_file:
-        # Clean project-specific images
-        abs_cfg, wd = get_paths(config_file, workdir)
+        abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
         
-        cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+        cache_root = output_dir_base / ".dnsb_cache"
+        cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
         config = Config(abs_cfg, cli_fs)
-        
-        # Get project name from config
         project_name = config.name
-        
-        # Get all images
         all_imgs = docker.image.list()
-        
-        # Filter images with project name prefix
         project_images = []
         for img in all_imgs:
             if img.repo_tags and any(tag.startswith(f'{project_name}-') for tag in img.repo_tags):
@@ -280,17 +294,16 @@ def do_clean(config_file: str, all_images: bool, workdir: str):
 
 
 @handle_errors
-def do_down(config_file: str, workdir: str, remove_volumes: bool, clean_images: bool):
+def do_down(config_file: str, workdir: str, output_dir: str, remove_volumes: bool, clean_images: bool):
     """Execute down command - stop containers and clean up"""
-    abs_cfg, wd = get_paths(config_file, workdir)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
     
-    cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
-    
-    # Get project name from config
     project_name = config.name
-    output_dir = wd / "output" / project_name
-    compose_file = output_dir / "docker-compose.yml"
+    actual_output_dir = output_dir_base / "output" / project_name
+    compose_file = actual_output_dir / "docker-compose.yml"
     
     if not StdPath(str(compose_file)).exists():
         logging.error(f"docker-compose.yml not found at {compose_file}")
@@ -298,11 +311,7 @@ def do_down(config_file: str, workdir: str, remove_volumes: bool, clean_images: 
         return
     
     logging.info(f"Stopping project '{project_name}'...")
-    
-    # Use python-on-whales for compose operations
     docker_client = DockerClient(compose_files=[str(compose_file)])
-    
-    # Determine image removal strategy
     remove_images = 'local' if clean_images else None
     
     try:
@@ -324,20 +333,21 @@ def do_down(config_file: str, workdir: str, remove_volumes: bool, clean_images: 
 
 
 @handle_errors
-def do_run(config_file: str, incremental: bool, graph: str, workdir: str, vfs: bool, detach: bool, build_images: bool):
+def do_run(config_file: str, incremental: bool, graph: str, workdir: str, output_dir: str, vfs: bool, detach: bool, build_images: bool):
     """Execute run command - build and start the project"""
     # First, build the project
     logging.info("Building project...")
-    do_build(config_file, incremental, graph, workdir, vfs)
+    do_build(config_file, incremental, graph, workdir, output_dir, vfs)
     
     # Get paths for compose file
-    abs_cfg, wd = get_paths(config_file, workdir)
-    cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
     
     project_name = config.name
-    output_dir = wd / "output" / project_name
-    compose_file = output_dir / "docker-compose.yml"
+    actual_output_dir = output_dir_base / "output" / project_name
+    compose_file = actual_output_dir / "docker-compose.yml"
     
     if not StdPath(str(compose_file)).exists():
         logging.error(f"docker-compose.yml not found at {compose_file}")
@@ -374,15 +384,16 @@ def do_run(config_file: str, incremental: bool, graph: str, workdir: str, vfs: b
 
 
 @handle_errors
-def do_up(config_file: str, workdir: str, detach: bool):
+def do_up(config_file: str, workdir: str, output_dir: str, detach: bool):
     """Execute up command - start existing project without building"""
-    abs_cfg, wd = get_paths(config_file, workdir)
-    cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
     
     project_name = config.name
-    output_dir = wd / "output" / project_name
-    compose_file = output_dir / "docker-compose.yml"
+    actual_output_dir = output_dir_base / "output" / project_name
+    compose_file = actual_output_dir / "docker-compose.yml"
     
     if not StdPath(str(compose_file)).exists():
         logging.error(f"docker-compose.yml not found at {compose_file}")
@@ -416,15 +427,16 @@ def do_up(config_file: str, workdir: str, detach: bool):
 
 
 @handle_errors
-def do_exec(config_file: str, workdir: str, service: str, command: tuple, interactive: bool, user: str):
+def do_exec(config_file: str, workdir: str, output_dir: str, service: str, command: tuple, interactive: bool, user: str):
     """Execute command in a running service container"""
-    abs_cfg, wd = get_paths(config_file, workdir)
-    cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
     
     project_name = config.name
-    output_dir = wd / "output" / project_name
-    compose_file = output_dir / "docker-compose.yml"
+    actual_output_dir = output_dir_base / "output" / project_name
+    compose_file = actual_output_dir / "docker-compose.yml"
     
     if not StdPath(str(compose_file)).exists():
         logging.error(f"docker-compose.yml not found at {compose_file}")
@@ -449,15 +461,16 @@ def do_exec(config_file: str, workdir: str, service: str, command: tuple, intera
 
 
 @handle_errors
-def do_logs(config_file: str, workdir: str, services: tuple, follow: bool, tail: int):
+def do_logs(config_file: str, workdir: str, output_dir: str, services: tuple, follow: bool, tail: int):
     """Show logs from services"""
-    abs_cfg, wd = get_paths(config_file, workdir)
-    cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
     
     project_name = config.name
-    output_dir = wd / "output" / project_name
-    compose_file = output_dir / "docker-compose.yml"
+    actual_output_dir = output_dir_base / "output" / project_name
+    compose_file = actual_output_dir / "docker-compose.yml"
     
     if not StdPath(str(compose_file)).exists():
         logging.error(f"docker-compose.yml not found at {compose_file}")
@@ -480,15 +493,16 @@ def do_logs(config_file: str, workdir: str, services: tuple, follow: bool, tail:
 
 
 @handle_errors
-def do_ps(config_file: str, workdir: str):
+def do_ps(config_file: str, workdir: str, output_dir: str):
     """List containers for the project"""
-    abs_cfg, wd = get_paths(config_file, workdir)
-    cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
     
     project_name = config.name
-    output_dir = wd / "output" / project_name
-    compose_file = output_dir / "docker-compose.yml"
+    actual_output_dir = output_dir_base / "output" / project_name
+    compose_file = actual_output_dir / "docker-compose.yml"
     
     if not StdPath(str(compose_file)).exists():
         logging.error(f"docker-compose.yml not found at {compose_file}")
@@ -515,15 +529,16 @@ def do_ps(config_file: str, workdir: str):
 
 
 @handle_errors
-def do_restart(config_file: str, workdir: str, services: tuple):
+def do_restart(config_file: str, workdir: str, output_dir: str, services: tuple):
     """Restart services"""
-    abs_cfg, wd = get_paths(config_file, workdir)
-    cli_fs = create_app_fs(use_vfs=False, chroot=wd)
+    abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
+    cache_root = output_dir_base / ".dnsb_cache"
+    cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
     config = Config(abs_cfg, cli_fs)
     
     project_name = config.name
-    output_dir = wd / "output" / project_name
-    compose_file = output_dir / "docker-compose.yml"
+    actual_output_dir = output_dir_base / "output" / project_name
+    compose_file = actual_output_dir / "docker-compose.yml"
     
     if not StdPath(str(compose_file)).exists():
         logging.error(f"docker-compose.yml not found at {compose_file}")
@@ -568,25 +583,27 @@ def cli(ctx, debug, log_levels, log_file):
 @click.argument('config_file', shell_complete=complete_config_files)
 @click.option('-i', '--incremental', is_flag=True, help='Enable incremental build using cache')
 @click.option('-g', '--graph', help='Generate a DOT file for the network topology graph')
-@click.option('-w', '--workdir', help="Working directory (use '@config' for config dir, default: cwd)")
+@click.option('-w', '--workdir', help="Config root directory (use '@config' for config dir, '@cwd' for current dir)")
+@click.option('-o', '--output-dir', help='Output directory for build results (default: <workdir or cwd>/output)')
 @click.option('--vfs', is_flag=True, help='Enable virtual file system')
 @click.option('--debug', is_flag=True, help='Enable debug logging for this command')
 @click.option('-f', '--log-file', help='Path to log file')
 @click.pass_context
-def build(ctx, config_file, incremental, graph, workdir, vfs, debug, log_file):
+def build(ctx, config_file, incremental, graph, workdir, output_dir, vfs, debug, log_file):
     """Build DNS infrastructure from config file"""
     # Apply debug setting if provided
     if debug and not ctx.obj.get('debug'):
         setup_logging(debug=True, log_levels=None, log_file=log_file)
-    do_build(config_file, incremental, graph, workdir, vfs)
+    do_build(config_file, incremental, graph, workdir, output_dir, vfs)
 
 
 @cli.command()
 @click.argument('config_file', required=False, shell_complete=complete_config_files)
 @click.option('--all', 'all_images', is_flag=True, help='Clean all dnsb-generated shared images')
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.pass_context
-def clean(ctx, config_file, all_images, workdir):
+def clean(ctx, config_file, all_images, workdir, output_dir):
     """Clean docker images
     
     \b
@@ -594,21 +611,22 @@ def clean(ctx, config_file, all_images, workdir):
       dnsb clean test.yml       Clean project-specific images
       dnsb clean --all          Clean all dnsb-* shared images
     """
-    do_clean(config_file, all_images, workdir)
+    do_clean(config_file, all_images, workdir, output_dir)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
 @click.option('-i', '--incremental', is_flag=True, help='Enable incremental build')
 @click.option('-g', '--graph', help='Generate topology graph DOT file')
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.option('--vfs', is_flag=True, help='Enable virtual file system')
 @click.option('-d', '--detach', is_flag=True, help='Run containers in background')
 @click.option('--build', is_flag=True, help='Build images before starting')
 @click.option('--debug', is_flag=True, help='Enable debug logging for this command')
 @click.option('-f', '--log-file', help='Path to log file')
 @click.pass_context
-def run(ctx, config_file, incremental, graph, workdir, vfs, detach, build, debug, log_file):
+def run(ctx, config_file, incremental, graph, workdir, output_dir, vfs, detach, build, debug, log_file):
     """Build and run the project (build + compose up)
     
     \b
@@ -625,15 +643,16 @@ def run(ctx, config_file, incremental, graph, workdir, vfs, detach, build, debug
     # Apply debug setting if provided
     if debug and not ctx.obj.get('debug'):
         setup_logging(debug=True, log_levels=None, log_file=log_file)
-    do_run(config_file, incremental, graph, workdir, vfs, detach, build)
+    do_run(config_file, incremental, graph, workdir, output_dir, vfs, detach, build)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.option('-d', '--detach', is_flag=True, help='Run containers in background')
 @click.pass_context
-def up(ctx, config_file, workdir, detach):
+def up(ctx, config_file, workdir, output_dir, detach):
     """Start existing project without building
     
     Similar to 'run' but skips the build step. Use this for faster startup
@@ -643,17 +662,18 @@ def up(ctx, config_file, workdir, detach):
     Examples:
       dnsb up test.yml -d          Start project in background
     """
-    do_up(config_file, workdir, detach)
+    do_up(config_file, workdir, output_dir, detach)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
 @click.argument('service', required=False, shell_complete=complete_services)
 @click.argument('command', nargs=-1)
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.option('-u', '--user', help='User to execute as')
 @click.pass_context
-def exec(ctx, config_file, service, command, workdir, user):
+def exec(ctx, config_file, service, command, workdir, output_dir, user):
     """Execute command in a running service container
     
     If no command is provided, starts an interactive bash shell.
@@ -665,16 +685,17 @@ def exec(ctx, config_file, service, command, workdir, user):
       dnsb exec test.yml sld cat /etc/hosts     Run a command
       dnsb exec test.yml sld -u root bash       Run as root user
     """
-    do_exec(config_file, workdir, service, command, interactive=True, user=user)
+    do_exec(config_file, workdir, output_dir, service, command, interactive=True, user=user)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
 @click.argument('service', required=False, shell_complete=complete_services)
 @click.argument('shell_cmd', default='/bin/bash')
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.pass_context
-def shell(ctx, config_file, service, shell_cmd, workdir):
+def shell(ctx, config_file, service, shell_cmd, workdir, output_dir):
     """Start an interactive shell in a service container (shortcut for exec)
     
     \b
@@ -682,17 +703,18 @@ def shell(ctx, config_file, service, shell_cmd, workdir):
       dnsb shell test.yml sld          Start bash in sld
       dnsb shell test.yml sld sh       Start sh in sld
     """
-    do_exec(config_file, workdir, service, (shell_cmd,), interactive=True, user=None)
+    do_exec(config_file, workdir, output_dir, service, (shell_cmd,), interactive=True, user=None)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
 @click.argument('services', nargs=-1, shell_complete=complete_services)
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.option('-f', '--follow', is_flag=True, help='Follow log output')
 @click.option('-t', '--tail', type=int, help='Number of lines to show from the end')
 @click.pass_context
-def logs(ctx, config_file, services, workdir, follow, tail):
+def logs(ctx, config_file, services, workdir, output_dir, follow, tail):
     """Show logs from services
     
     \b
@@ -702,29 +724,31 @@ def logs(ctx, config_file, services, workdir, follow, tail):
       dnsb logs test.yml -f               Follow all logs
       dnsb logs test.yml sld -f -t 100    Follow sld logs, last 100 lines
     """
-    do_logs(config_file, workdir, services, follow, tail)
+    do_logs(config_file, workdir, output_dir, services, follow, tail)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.pass_context
-def ps(ctx, config_file, workdir):
+def ps(ctx, config_file, workdir, output_dir):
     """List containers and their status
     
     \b
     Examples:
       dnsb ps test.yml
     """
-    do_ps(config_file, workdir)
+    do_ps(config_file, workdir, output_dir)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
 @click.argument('services', nargs=-1, shell_complete=complete_services)
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.pass_context
-def restart(ctx, config_file, services, workdir):
+def restart(ctx, config_file, services, workdir, output_dir):
     """Restart services
     
     \b
@@ -732,16 +756,17 @@ def restart(ctx, config_file, services, workdir):
       dnsb restart test.yml              Restart all services
       dnsb restart test.yml sld tld      Restart specific services
     """
-    do_restart(config_file, workdir, services)
+    do_restart(config_file, workdir, output_dir, services)
 
 
 @cli.command()
 @click.argument('config_file', shell_complete=complete_config_files)
-@click.option('-w', '--workdir', help='Working directory')
+@click.option('-w', '--workdir', help='Config root directory')
+@click.option('-o', '--output-dir', help='Output directory')
 @click.option('-v', '--volumes', is_flag=True, help='Also remove volumes')
 @click.option('-c', '--clean', is_flag=True, help='Clean images after stopping')
 @click.pass_context
-def down(ctx, config_file, workdir, volumes, clean):
+def down(ctx, config_file, workdir, output_dir, volumes, clean):
     """Stop project containers and clean up resources
     
     By default, this command only stops containers and removes networks,
@@ -760,7 +785,7 @@ def down(ctx, config_file, workdir, volumes, clean):
       dnsb down test.yml -c        Stop project and clean images
       dnsb down test.yml -vc       Remove everything including volumes and images
     """
-    do_down(config_file, workdir, volumes, clean)
+    do_down(config_file, workdir, output_dir, volumes, clean)
 
 
 @cli.command()
