@@ -438,7 +438,7 @@ class AppFileSystem(FileSystem):
         logger.debug(f"[AppFS] src_handler={src_handler.__class__.__name__}, dst_handler={dst_handler.__class__.__name__}")
         
         if src_handler is dst_handler:
-            if isinstance(src_handler, (DiskFileSystem, HyperMemoryFileSystem, MemoryFileSystem)):
+            if isinstance(src_handler, (DiskFileSystem, HyperMemoryFileSystem, MemoryFileSystem, SandboxFileSystem)):
                 logger.debug(f"[AppFS] Using same-handler copytree ({src_handler.__class__.__name__})")
                 src_handler.copytree(resolved_src, resolved_dst)
                 return
@@ -453,8 +453,8 @@ class AppFileSystem(FileSystem):
             return
 
         # Generic cross-filesystem copytree for supported filesystems
-        if isinstance(src_handler, (HyperMemoryFileSystem, MemoryFileSystem, DiskFileSystem)) and \
-           isinstance(dst_handler, (HyperMemoryFileSystem, MemoryFileSystem, DiskFileSystem)):
+        if isinstance(src_handler, (HyperMemoryFileSystem, MemoryFileSystem, DiskFileSystem, SandboxFileSystem)) and \
+           isinstance(dst_handler, (HyperMemoryFileSystem, MemoryFileSystem, DiskFileSystem, SandboxFileSystem)):
             logger.debug(f"[AppFS] Using generic cross-filesystem copytree")
             self._generic_copytree(resolved_src, resolved_dst, src_handler, dst_handler)
             return
