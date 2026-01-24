@@ -196,15 +196,15 @@ class ServiceCacheView(CacheView):
         if not fs.exists(directory):
             return
         
-        # Use provided patterns or load from .dnsbignore + defaults
+        abs_directory = fs.absolute(directory) if hasattr(fs, 'absolute') else directory
         if not is_ignore:
             ignore_patterns = []
         elif ignore_patterns is None:
-            ignore_patterns = self._load_ignore_patterns(directory, fs)
+            ignore_patterns = self._load_ignore_patterns(abs_directory, fs)
         
-        for file_path in fs.rglob(directory, "**/*"):
+        for file_path in fs.rglob(abs_directory, "**/*"):
             if fs.is_file(file_path):
-                rel_path = str(fs.relative_to(file_path, directory))
+                rel_path = str(fs.relative_to(file_path, abs_directory))
                 
                 # Check if file should be ignored
                 if self._should_ignore_file(rel_path, ignore_patterns):

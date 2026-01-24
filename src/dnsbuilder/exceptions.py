@@ -143,15 +143,3 @@ class UnknownError(UnsupportedFeatureError):
     """Raised when an unknown error occurs."""
 
     pass
-
-
-# --- 6. Special Signal Codes, Should be ignored by the caller ---
-class Signal(DNSBuilderError):
-    """Raised when a special signal is encountered."""
-    def __init__(self, message: str, value=None):
-        super().__init__(message)
-        self.value = value
-
-class SignalPathNotFound(Signal):
-    """Raised when a path is not found, may be found in fallback"""
-    pass

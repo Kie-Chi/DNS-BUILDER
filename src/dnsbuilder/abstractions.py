@@ -554,12 +554,12 @@ class InternalImage(Image, ABC):
         self.fs.mkdir(shared_dir, parents=True, exist_ok=True)
         dockerfile_path = shared_dir / "Dockerfile"
         
-        # Only write if doesn't exist (avoid redundant writes)
-        if not self.fs.exists(dockerfile_path):
-            self.fs.write_text(dockerfile_path, content)
-            logger.info(f"Shared Dockerfile for '{self.name}' written to {dockerfile_path}")
-        else:
-            logger.debug(f"Shared Dockerfile for '{self.name}' already exists at {dockerfile_path}")
+        with self.fs.fallback(enable=False):
+            if not self.fs.exists(dockerfile_path):
+                self.fs.write_text(dockerfile_path, content)
+                logger.info(f"Shared Dockerfile for '{self.name}' written to {dockerfile_path}")
+            else:
+                logger.debug(f"Shared Dockerfile for '{self.name}' already exists at {dockerfile_path}")
         
         # Write a hook
         hook_path = directory / "docker.hook"

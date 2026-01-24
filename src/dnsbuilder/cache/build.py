@@ -31,34 +31,21 @@ class CachedBuilder(Builder):
         self.real_fs = fs
         self.cache_manager = CacheManager(fs, cache_dir)
         
-        self.memory_fs = create_app_fs(use_vfs=True, chroot=fs.chroot)
+        # Create memory filesystem with fallback enabled by default
+        self.memory_fs = create_app_fs(use_vfs=True, fb_en=True, chroot=fs.chroot)
         
         self.project_cache: Optional[ProjectCacheView] = None
         self.memory_project_cache: Optional[ProjectCacheView] = None
-        
-    async def run(self):
-        """run with cache"""
-        logger.info(f"Starting cached build for project '{self.config.name}'...")
-        
-        # Step 1: load existing cache
-        self._load_existing_cache()
-        
-        # Step 2: check consistency if cache exists
-        cache_consistent = self._check_cache_consistency()
-        
-        # Step 3: build in memory
-        with self.memory_fs.fallback_global(enable=True):
-            context = await self._build_in_memory()
 
-        # just disable fallback globally, double check if it's disabled
-        self.memory_fs.set_fallback_global(False)
-        assert not self.memory_fs.get_fallback_global()
-
-        # Step 4: generate memory cache view from build result
+    async def pre(self) -> bool:
+        """preparation before build"""
+        self._load_existing_cache()        
+        return self._check_cache_consistency()
+    
+    async def post(self, context: BuildContext, rebuild: bool = False) -> None:
+        """post-build actions"""
         self._generate_memory_cache_view(context)
-        
-        # Step 5: compare memory cache with existing cache
-        if cache_consistent:
+        if not rebuild:
             changes = self._compare_caches()
         else:
             logger.info("Cache inconsistent, performing full rebuild")
@@ -68,12 +55,21 @@ class CachedBuilder(Builder):
                 'docker_compose_changed': True
             }
         
-        # Step 6: sync changes to disk
         self._sync_change(changes)
-        
-        # Step 7: save updated cache
         self._save_updated_cache()
         
+    async def run(self):
+        """run with cache"""
+        logger.info(f"Starting cached build for project '{self.config.name}'...")
+        
+        csis = await self.pre()
+        
+        # build in memory
+        with self.memory_fs.fallback(enable=True):
+            context = await self._build_in_memory()
+        
+        with self.memory_fs.fallback(enable=False):
+            await self.post(context, rebuild=not csis)
         logger.info(f"Cached build finished. Files are in '{self.output_dir}'")
     
     def _check_cache_consistency(self) -> bool:

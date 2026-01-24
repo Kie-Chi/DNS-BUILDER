@@ -13,15 +13,14 @@ import hashlib
 import threading
 from ..utils import override
 from .path import DNSBPath, Path
-from .decorators import wrap_io_error, fb_check, auto, read_only, signal
+from .decorators import wrap_io_error, read_only
+from contextlib import contextmanager
 from ..exceptions import (
     ProtocolError,
     InvalidPathError,
-    Signal,
     UnsupportedFeatureError,
     ReadOnlyError,
     DNSBPathNotFoundError,
-    SignalPathNotFound
 )
 
 logger = logging.getLogger(__name__)
@@ -41,72 +40,14 @@ logger = logging.getLogger(__name__)
 # Abstract FileSystem
 #
 # --------------------
-class _Fallback:
-    def __init__(self, enable: bool = False):
-        import threading
-        self._global = bool(enable)
-        self._local = threading.local()
-    def get_global(self) -> bool:
-        return self._global
-    def set_global(self, val: bool):
-        self._global = bool(val)
-    def get_local(self):
-        return getattr(self._local, "enable", None)
-    def set_local(self, val: bool):
-        self._local.enable = bool(val)
-    def reset_local(self):
-        if hasattr(self._local, "enable"):
-            del self._local.enable
-    @property
-    def enable(self) -> bool:
-        v = self.get_local()
-        return self._global if v is None else v
-    @enable.setter
-    def enable(self, val: bool):
-        self.set_local(val)
-    def context(self, enable: bool):
-        fb = self
-        class _Ctx:
-            def __init__(self, val: bool):
-                self.val = val
-                self.prev = None
-            def __enter__(self):
-                self.prev = fb.get_local()
-                fb.set_local(self.val)
-                return fb
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                if self.prev is None:
-                    fb.reset_local()
-                else:
-                    fb.set_local(self.prev)
-                return False
-        return _Ctx(enable)
-    def context_global(self, enable: bool):
-        fb = self
-        class _GCtx:
-            def __init__(self, val: bool):
-                self.val = val
-                self.prev = None
-            def __enter__(self):
-                self.prev = fb.get_global()
-                fb.set_global(self.val)
-                return fb
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                fb.set_global(self.prev)
-                return False
-        return _GCtx(enable)
 
 class FileSystem(ABC):
     """DNSB File System Abstract Base Class"""
 
-    def __init__(self, fallback: _Fallback = _Fallback()):
+    def __init__(self):
         """
         Initialize filesystem.
-        
-        Args:
-            fallback: Fallback mechanism for operations
         """
-        self._fallback = fallback
 
     @abstractmethod
     def read_text(self, path: DNSBPath) -> str:
@@ -173,23 +114,6 @@ class FileSystem(ABC):
         """Remove a directory recursively"""
         pass
 
-    # Special methods
-    # Fallback methods
-    def fallback(self, enable: bool = True):
-        return self._fallback.context(enable)
-    def fallback_global(self, enable: bool = True):
-        return self._fallback.context_global(enable)
-    def set_fallback_global(self, enable: bool):
-        self._fallback.set_global(enable)
-    def get_fallback_global(self) -> bool:
-        return self._fallback.get_global()
-    def set_fallback_local(self, enable: bool):
-        self._fallback.set_local(enable)
-    def get_fallback_local(self):
-        return self._fallback.get_local()
-    def reset_fallback_local(self):
-        self._fallback.reset_local()
-
     # Helper methods for path conversion
     def str2path(self, path_str: str, base_path: DNSBPath) -> DNSBPath:
         """
@@ -251,6 +175,15 @@ class FileSystem(ABC):
     def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
         """Open a file"""
         return NotImplemented
+
+    # Magic Method for some FileSystem
+    @contextmanager
+    def fallback(self, enable: bool): # ==> SandboxFileSystem/DiskFileSystem
+        """Context manager to enable/disable fallback behavior"""
+        try:
+            yield
+        finally:
+            pass
     
 
 # --------------------------------------------------------
@@ -269,82 +202,25 @@ class FileSystem(ABC):
 #
 # --------------------
 
-FB_OVERRIDES = {
-    # no fallback for none operations
-}
-
-@auto(fallback_overrides=FB_OVERRIDES)
 class AppFileSystem(FileSystem):
     """
     Multi-protocol file system dispatcher.
     
-    This class automatically delegates all FileSystem methods to protocol-specific handlers.
+    This class explicitly delegates all FileSystem methods to protocol-specific handlers.
+    It resolves paths against a `chroot` directory before dispatching.
     """
 
-    def __init__(self, chroot: DNSBPath = None, fallback: _Fallback = _Fallback()):
-        # Initialize parent without chroot
-        super().__init__(fallback=fallback)
-        # Normalize and store chroot at AppFileSystem level
+    def __init__(self, chroot: DNSBPath = None):
+        super().__init__()
         self.chroot = self._norm(chroot)
         logger.debug(f"[AppFS] Initializing with chroot: {self.chroot}")
-        
-        # register default file system handlers
         self._handlers: Dict[str, FileSystem] = {}
         self.register_handler("file", DiskFileSystem())
         self.register_handler("raw", DiskFileSystem())
         self.register_handler("temp", HyperMemoryFileSystem())
         self.register_handler("resource", ResourceFileSystem())
         self.register_handler("git", GitFileSystem(DiskFileSystem()))
-        self.register_handler("key", HyperMemoryFileSystem())
-        
-        # fallback mechanism
-        self._fallback_handler = self._handlers["raw"]
-        
-        # fallback statistics
-        self._fallback_stats = {
-            'count': 0,
-            'paths': set(),
-            'operations': {}
-        }
-        
-    def _record_fallback(self, path: DNSBPath, method_name: str):
-        """Record fallback usage statistics."""
-        if hasattr(self, '_fallback_stats'):
-            self._fallback_stats['count'] += 1
-            self._fallback_stats['paths'].add(str(path))
-            self._fallback_stats['operations'][method_name] = \
-                self._fallback_stats['operations'].get(method_name, 0) + 1
-    
-    @override
-    def fallback(self, enable: bool = True):
-        """
-        Temporarily change fallback behavior.
-        """
-        return super().fallback(enable)
-        
-    @override
-    def fallback_global(self, enable: bool = True):
-        return super().fallback_global(enable)
-
-    @override
-    def set_fallback_global(self, enable: bool):
-        return super().set_fallback_global(enable)
-
-    @override
-    def get_fallback_global(self) -> bool:
-        return super().get_fallback_global()
-
-    @override
-    def set_fallback_local(self, enable: bool):
-        return super().set_fallback_local(enable)
-
-    @override
-    def get_fallback_local(self):
-        return super().get_fallback_local()
-
-    @override
-    def reset_fallback_local(self):
-        return super().reset_fallback_local()
+        self.register_handler("key", HyperMemoryFileSystem())   
 
     def register_handler(self, protocol: str, handler: FileSystem):
         """Register a file system handler for a specific protocol."""
@@ -361,17 +237,12 @@ class AppFileSystem(FileSystem):
         Normalize chroot to ensure consistency.
         """
         if not chroot:
-            # No chroot provided, use current working directory
             result = DNSBPath(Path.cwd())
             logger.debug(f"[AppFS] No chroot provided, using cwd: {result}")
             return result
-        
-        # If already absolute, return as-is
         if chroot.is_absolute():
             logger.debug(f"[AppFS] Chroot is already absolute: {chroot}")
             return chroot
-        
-        # For disk paths (file:// or no protocol), make absolute
         if chroot.is_disk():
             result = DNSBPath(Path(chroot.__path__()).absolute())
             logger.debug(f"[AppFS] Normalized relative disk chroot to absolute: {result}")
@@ -393,44 +264,18 @@ class AppFileSystem(FileSystem):
         # If no chroot or path is already absolute, return as-is
         if not self.chroot or path.is_absolute():
             return path
-        
-        # Path is relative - resolve against chroot
         if self.chroot.protocol == "git":
-            # Git chroot: join maintains git protocol with updated fragment
             return self.chroot / path
         elif self.chroot.protocol == "resource":
-            # Resource chroot: join maintains resource protocol
             return self.chroot / path
         elif self.chroot.is_disk():
-            # Disk chroot: join and make absolute
             if path.is_disk():
                 resolved = self.chroot / path
                 return DNSBPath(Path(resolved.__path__()).absolute())
             else:
-                # Cross-protocol: relative path has a protocol, use it
                 return path
         else:
-            # Other protocols: simple join
             return self.chroot / path
-
-    @classmethod
-    def _delegator(cls, method_name: str):
-        """        
-        Delegate the method to the appropriate handler.
-        Resolves paths against chroot before delegation.
-        """
-        def decorator(self, path: DNSBPath, *args, **kwargs):
-            # Resolve path against chroot if needed
-            resolved_path = self._resolve_path(path)
-            handler = self._get_handler(resolved_path)
-            method = getattr(handler, method_name, None)
-            if method is None:
-                raise NotImplementedError(
-                    f"FileSystem handler for protocol '{resolved_path.protocol}' "
-                    f"does not support '{method_name}'"
-                )
-            return method(resolved_path, *args, **kwargs)
-        return decorator
 
     def _get_handler(self, path: DNSBPath) -> 'FileSystem':
         """Get the file system handler for a specific path."""
@@ -441,11 +286,126 @@ class AppFileSystem(FileSystem):
                 f"No filesystem handler registered for protocol: '{protocol}'"
             )
         return handler
-
     
+    def _delegate(self, method_name: str, path: DNSBPath, *args, **kwargs):
+        """
+        Delegate a FileSystem method based on path protocol.
+        """
+        resolved_path = self._resolve_path(path)
+        handler = self._get_handler(resolved_path)
+        method = getattr(handler, method_name, None)
+        if method is None:
+            raise NotImplementedError(
+                f"FileSystem handler for protocol '{resolved_path.protocol}' "
+                f"does not support '{method_name}'"
+            )
+        return method(resolved_path, *args, **kwargs)
+
     @override
     @wrap_io_error
-    @fb_check
+    def read_text(self, path: DNSBPath) -> str:
+        return self._delegate("read_text", path)
+
+    @override
+    @wrap_io_error
+    def read_bytes(self, path: DNSBPath) -> bytes:
+        return self._delegate("read_bytes", path)
+
+    @override
+    @wrap_io_error
+    def write_text(self, path: DNSBPath, content: str):
+        return self._delegate("write_text", path, content)
+
+    @override
+    @wrap_io_error
+    def write_bytes(self, path: DNSBPath, content: bytes):
+        return self._delegate("write_bytes", path, content)
+
+    @override
+    @wrap_io_error
+    def append_text(self, path: DNSBPath, content: str):
+        return self._delegate("append_text", path, content)
+
+    @override
+    @wrap_io_error
+    def append_bytes(self, path: DNSBPath, content: bytes):
+        return self._delegate("append_bytes", path, content)
+
+    @override
+    @wrap_io_error
+    def exists(self, path: DNSBPath) -> bool:
+        return self._delegate("exists", path)
+
+    @override
+    @wrap_io_error
+    def is_dir(self, path: DNSBPath) -> bool:
+        return self._delegate("is_dir", path)
+
+    @override
+    @wrap_io_error
+    def is_file(self, path: DNSBPath) -> bool:
+        return self._delegate("is_file", path)
+
+    @override
+    @wrap_io_error
+    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
+        return self._delegate("mkdir", path, parents=parents, exist_ok=exist_ok)
+
+    @override
+    @wrap_io_error
+    def rmtree(self, path: DNSBPath):
+        return self._delegate("rmtree", path)
+
+    @override
+    @wrap_io_error
+    def listdir(self, path: DNSBPath) -> List[DNSBPath]:
+        return self._delegate("listdir", path)
+
+    @override
+    @wrap_io_error
+    def remove(self, path: DNSBPath):
+        return self._delegate("remove", path)
+
+    @override
+    @wrap_io_error
+    def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        return self._delegate("glob", path, pattern)
+
+    @override
+    @wrap_io_error
+    def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        return self._delegate("rglob", path, pattern)
+
+    @override
+    @wrap_io_error
+    def absolute(self, path: DNSBPath) -> DNSBPath:
+        return self._delegate("absolute", path)
+
+    @override
+    @wrap_io_error
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        return self._delegate("relative_to", path, other)
+
+    @override
+    @wrap_io_error
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        return self._delegate("stat", path)
+
+    @override
+    @wrap_io_error
+    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
+        return self._delegate("open", path, mode, **kwargs)
+
+    @override
+    def fallback(self, enable: bool):
+        handler = self._handlers.get("file")
+        if handler is None:
+            raise ProtocolError("No handler registered for 'file' protocol.")
+        return handler.fallback(enable)
+
+
+    @override
+    @wrap_io_error
     def copy(self, src: DNSBPath, dst: DNSBPath):
         # Resolve both paths against chroot
         resolved_src = self._resolve_path(src)
@@ -466,7 +426,6 @@ class AppFileSystem(FileSystem):
     
     @override
     @wrap_io_error
-    @fb_check
     def copytree(self, src: DNSBPath, dst: DNSBPath):
         logger.debug(f"[AppFS] copytree: {src} -> {dst}")
         
@@ -519,6 +478,296 @@ class AppFileSystem(FileSystem):
                 dst_item = dst / item_name
                 self._generic_copytree(src_item, dst_item, src_handler, dst_handler)
 
+
+from contextlib import contextmanager
+import threading
+class SandboxFileSystem(FileSystem):
+    """
+    A filesystem that composites a primary (e.g., memory) and a secondary 
+    (e.g., disk) filesystem, providing a sandboxed environment with optional
+    fallback to the secondary layer.
+    - **Write Operations**: All modifications (write, mkdir, remove, etc.) are
+      *always* directed exclusively to the primary filesystem. The secondary
+      filesystem is never modified.
+    - **Read/Check Operations**: These operations first check the primary
+      filesystem. If the path is not found, they can *optionally* fall back
+      to the secondary filesystem for read-only access.
+    - **Controllable Fallback**: The fallback behavior is controlled by the
+      `fb_en` property and the `fallback()` context manager,
+      allowing for dynamic switching between sandboxed and transparent modes.
+    """
+
+    def __init__(self, pri_fs: FileSystem, sec_fs: FileSystem, fb_en: bool = True):
+        super().__init__()
+        self.primary = pri_fs
+        self.secondary = sec_fs
+        self._def_fb_en = fb_en
+        self._local = threading.local()
+        self.name = f"SandboxFS({getattr(pri_fs, 'name', 'primary')}, {getattr(sec_fs, 'name', 'secondary')})"
+        logger.debug(f"[{self.name}] Initialized with fb_en={fb_en}")
+
+    @property
+    def fb_en(self) -> bool:
+        """Controls whether read operations can fall back to the secondary FS."""
+        return getattr(self._local, 'fb_en', self._def_fb_en)
+
+    @contextmanager
+    def fallback(self, enable: bool):
+        """
+        A context manager to temporarily change the fallback behavior.
+        """
+        has = hasattr(self._local, 'fb_en')
+        prev = getattr(self._local, 'fb_en', None)
+        self._local.fb_en = enable
+        
+        try:
+            yield
+        finally:
+            if has:
+                self._local.fb_en = prev
+            else:
+                del self._local.fb_en
+
+    @override
+    def read_text(self, path: DNSBPath) -> str:
+        try:
+            return self.primary.read_text(path)
+        except (DNSBPathNotFoundError, FileNotFoundError):
+            if self.fb_en:
+                logger.debug(f"[{self.name}] Fallback read_text for {path}")
+                return self.secondary.read_text(path)
+            raise
+
+    @override
+    def read_bytes(self, path: DNSBPath) -> bytes:
+        try:
+            return self.primary.read_bytes(path)
+        except (DNSBPathNotFoundError, FileNotFoundError):
+            if self.fb_en:
+                logger.debug(f"[{self.name}] Fallback read_bytes for {path}")
+                return self.secondary.read_bytes(path)
+            raise
+
+    @override
+    def write_text(self, path: DNSBPath, content: str):
+        logger.debug(f"[{self.name}] Writing text to primary: {path}")
+        self.primary.write_text(path, content)
+
+    @override
+    def write_bytes(self, path: DNSBPath, content: bytes):
+        logger.debug(f"[{self.name}] Writing bytes to primary: {path}")
+        self.primary.write_bytes(path, content)
+
+    @override
+    def append_text(self, path: DNSBPath, content: str):
+        logger.debug(f"[{self.name}] Appending text to primary: {path}")
+        self.primary.append_text(path, content)
+
+    @override
+    def append_bytes(self, path: DNSBPath, content: bytes):
+        logger.debug(f"[{self.name}] Appending bytes to primary: {path}")
+        self.primary.append_bytes(path, content)
+
+    @override
+    def mkdir(self, path: DNSBPath, parents: bool = False, exist_ok: bool = False):
+        logger.debug(f"[{self.name}] Mkdir on primary: {path}")
+        self.primary.mkdir(path, parents=parents, exist_ok=exist_ok)
+
+    @override
+    def rmtree(self, path: DNSBPath):
+        logger.debug(f"[{self.name}] Rmtree on primary: {path}")
+        self.primary.rmtree(path)
+
+    @override
+    def remove(self, path: DNSBPath):
+        logger.debug(f"[{self.name}] Remove on primary: {path}")
+        self.primary.remove(path)
+
+
+    @override
+    def exists(self, path: DNSBPath) -> bool:
+        if self.primary.exists(path):
+            return True
+        logger.debug(f"[{self.name}] fb_en={self.fb_en}, exists for {path}")
+        return self.fb_en and self.secondary.exists(path)
+
+    @override
+    def is_dir(self, path: DNSBPath) -> bool:
+        if self.primary.exists(path):
+            return self.primary.is_dir(path)
+        if self.fb_en:
+            logger.debug(f"[{self.name}] fb_en={self.fb_en}, is_dir for {path}")
+            return self.secondary.is_dir(path)
+        return False
+
+    @override
+    def is_file(self, path: DNSBPath) -> bool:
+        if self.primary.exists(path):
+            return self.primary.is_file(path)
+        if self.fb_en:
+            logger.debug(f"[{self.name}] fb_en={self.fb_en}, is_file for {path}")
+            return self.secondary.is_file(path)
+        return False
+
+    @override
+    def listdir(self, path: DNSBPath) -> List[DNSBPath]:
+        """
+        Lists directory contents, merging results from primary and secondary.
+        """
+        primary_names = set()
+        try:
+            primary_names.update(p.name for p in self.primary.listdir(path))
+        except DNSBPathNotFoundError:
+            # If dir doesn't exist in primary, that's fine, we might find it in secondary
+            if not self.fb_en or not self.secondary.is_dir(path):
+                raise
+
+        if not self.fb_en:
+            return [path / name for name in primary_names]
+            
+        secondary_names = set()
+        try:
+            secondary_names.update(p.name for p in self.secondary.listdir(path))
+        except DNSBPathNotFoundError:
+            if not primary_names:
+                raise
+        all_names = primary_names.union(secondary_names)
+        return [path / name for name in sorted(list(all_names))]
+
+    @override
+    def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        """
+        Globs for a pattern, merging results. Primary results shadow secondary.
+        """
+        results = {str(p): p for p in self.primary.glob(path, pattern)}
+        
+        if self.fb_en:
+            abs_path = self.secondary.absolute(path) if hasattr(self.secondary, 'absolute') else path
+            secondary_results = self.secondary.glob(abs_path, pattern)
+            for sec_p in secondary_results:
+                try:
+                    if hasattr(self.secondary, 'relative_to'):
+                        rel = self.secondary.relative_to(sec_p, abs_path)
+                        primary_equiv = path / rel
+                        str_key = str(primary_equiv)
+                        if str_key not in results:
+                            results[str_key] = primary_equiv
+                except (ValueError, InvalidPathError):
+                    logger.debug(f"[{self.name}] Skipping secondary path that can't be relativized: {sec_p}")
+                    
+        return list(results.values())
+
+    @override
+    def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
+        """
+        Recursively globs for a pattern, merging results. Primary results shadow secondary.
+        Returns paths normalized to primary filesystem's structure.
+        """
+        results = {str(p): p for p in self.primary.rglob(path, pattern)}
+        
+        if self.fb_en:
+            # Get absolute version of path to properly query secondary
+            abs_path = self.secondary.absolute(path) if hasattr(self.secondary, 'absolute') else path
+            logger.debug(f"[{self.name}] rglob: path={path}, abs_path={abs_path}")
+            secondary_results = self.secondary.rglob(abs_path, pattern)
+            logger.debug(f"[{self.name}] rglob: found {len(secondary_results)} results from secondary")
+            
+            # Convert secondary paths to relative paths matching primary structure
+            for sec_p in secondary_results:
+                try:
+                    if hasattr(self.secondary, 'relative_to'):
+                        rel = self.secondary.relative_to(sec_p, abs_path)
+                        # Reconstruct as primary path
+                        primary_equiv = path / rel
+                        str_key = str(primary_equiv)
+                        if str_key not in results:
+                            logger.debug(f"[{self.name}] rglob: mapped {sec_p} -> {primary_equiv}")
+                            results[str_key] = primary_equiv
+                except (ValueError, InvalidPathError) as e:
+                    # If can't make relative, skip this path
+                    logger.warning(f"[{self.name}] Failed to relativize path {sec_p} to {abs_path}: {e}")
+                except Exception as e:
+                    logger.error(f"[{self.name}] Unexpected error processing {sec_p}: {e}")
+                    
+        return list(results.values())
+
+    @override
+    def absolute(self, path: DNSBPath) -> DNSBPath:
+        """Returns the absolute path, calculated relative to the primary filesystem."""
+        return self.primary.absolute(path)
+
+    @override
+    def relative_to(self, path: DNSBPath, other: DNSBPath) -> DNSBPath:
+        """Calculates the relative path, assuming the primary filesystem's structure."""
+        # Normalize both paths to absolute before delegating
+        abs_path = self.absolute(path)
+        abs_other = self.absolute(other)
+        logger.debug(f"[{self.name}] relative_to: path={path} -> abs={abs_path}, other={other} -> abs={abs_other}")
+        return self.primary.relative_to(abs_path, abs_other)
+
+    @override
+    def stat(self, path: DNSBPath) -> os.stat_result:
+        """Gets file status, falling back to secondary if necessary."""
+        try:
+            return self.primary.stat(path)
+        except DNSBPathNotFoundError:
+            if self.fb_en:
+                return self.secondary.stat(path)
+            raise
+
+    @override
+    def open(self, path: DNSBPath, mode: str = "rb", **kwargs) -> IO:
+        """
+        Opens a file. Write modes are restricted to the primary FS.
+        Read modes can fall back to the secondary FS.
+        """
+        is_write_mode = 'w' in mode or 'a' in mode or '+' in mode
+        
+        if is_write_mode:
+            logger.debug(f"[{self.name}] Opening for write on primary: {path}")
+            return self.primary.open(path, mode, **kwargs)
+        else:
+            try:
+                return self.primary.open(path, mode, **kwargs)
+            except DNSBPathNotFoundError:
+                if self.fb_en:
+                    logger.debug(f"[{self.name}] Fallback open for read on secondary: {path}")
+                    return self.secondary.open(path, mode, **kwargs)
+                raise
+
+
+    @override
+    def copy(self, src: DNSBPath, dst: DNSBPath):
+        """
+        Copies a file. The destination is always in the primary FS.
+        The source can be read from either primary or secondary (with fallback).
+        """
+        logger.debug(f"[{self.name}] Copying {src} -> {dst}")
+        content = self.read_bytes(src)
+        self.primary.write_bytes(dst, content)
+
+    @override
+    def copytree(self, src: DNSBPath, dst: DNSBPath):
+        """
+        Recursively copies a directory tree. The destination is always in the
+        primary FS. The source tree is read as a merged view of primary and
+        secondary filesystems.
+        """
+        logger.debug(f"[{self.name}] Copying tree {src} -> {dst}")
+        if not self.is_dir(src):
+            raise NotADirectoryError(f"Source path for copytree is not a directory: {src}")
+
+        self.primary.mkdir(dst, parents=True, exist_ok=True)
+        
+        for item in self.listdir(src):
+            src_item_path = src / item.name
+            dst_item_path = dst / item.name
+            
+            if self.is_dir(src_item_path):
+                self.copytree(src_item_path, dst_item_path)
+            else:
+                self.copy(src_item_path, dst_item_path)
+
 # --------------------
 #
 # Generic FileSystem
@@ -528,7 +777,7 @@ class AppFileSystem(FileSystem):
 class GenericFileSystem(FileSystem, ABC):
     """Generic File System base class for fsspec and morefs implementations"""
 
-    def __init__(self, fs_instance, name=None, fallback: _Fallback = _Fallback()):
+    def __init__(self, fs_instance, name=None):
         """
         Initialize with a filesystem instance
         
@@ -536,7 +785,7 @@ class GenericFileSystem(FileSystem, ABC):
             fs_instance: The underlying filesystem instance (fsspec or morefs)
             name: Optional name for logging purposes
         """
-        super().__init__(fallback=fallback)
+        super().__init__()
         self.fs = fs_instance
         self.name = name or f"{type(fs_instance).__name__}"
 
@@ -597,17 +846,14 @@ class GenericFileSystem(FileSystem, ABC):
         self.fs.cp(self.path2str(src), self.path2str(dst), recursive=True)
 
     @override
-    @signal(SignalPathNotFound)
     def exists(self, path: DNSBPath) -> bool:
         return self.fs.exists(self.path2str(path))
 
     @override
-    @signal(SignalPathNotFound)
     def is_dir(self, path: DNSBPath) -> bool:
         return self.fs.isdir(self.path2str(path))
 
     @override
-    @signal(SignalPathNotFound)
     def is_file(self, path: DNSBPath) -> bool:
         return self.fs.isfile(self.path2str(path))
 
@@ -631,12 +877,10 @@ class GenericFileSystem(FileSystem, ABC):
         self.fs.rm(self.path2str(path))
 
     @override
-    @signal(SignalPathNotFound)
     def glob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
         return [self.str2path(p, path) for p in self.fs.glob(self.path2str(path / pattern))]
 
     @override
-    @signal(SignalPathNotFound)
     def rglob(self, path: DNSBPath, pattern: str) -> List[DNSBPath]:
         return [self.str2path(p, path) for p in self.fs.glob(self.path2str(path / f"**/{pattern}"))]
 
@@ -655,9 +899,9 @@ class GenericFileSystem(FileSystem, ABC):
 class FsspecFileSystem(GenericFileSystem):
     """fsspec-based File System"""
 
-    def __init__(self, protocol="file", fallback: _Fallback = _Fallback()):
+    def __init__(self, protocol="file"):
         fs_instance = fsspec.filesystem(protocol)
-        super().__init__(fs_instance, name=f"{protocol}FS", fallback=fallback)
+        super().__init__(fs_instance, name=f"{protocol}FS")
         self.protocol = protocol
 
     @override
@@ -701,7 +945,7 @@ class FsspecFileSystem(GenericFileSystem):
 class MorefsFileSystem(GenericFileSystem):
     """morefs-based File System"""
 
-    def __init__(self, fs_type="dict", fallback: _Fallback = _Fallback()):
+    def __init__(self, fs_type="dict"):
         """
         Initialize morefs filesystem
 
@@ -714,7 +958,7 @@ class MorefsFileSystem(GenericFileSystem):
             fs_instance = MemFS()
         else:
             raise ValueError(f"Unsupported morefs type: {fs_type}")
-        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS", fallback=fallback)
+        super().__init__(fs_instance, name=f"Morefs{fs_type.title()}FS")
         self.fs_type = fs_type
 
     @override
@@ -778,8 +1022,8 @@ class MorefsFileSystem(GenericFileSystem):
 class DiskFileSystem(FsspecFileSystem):
     """Local disk file system using fsspec"""
 
-    def __init__(self, fallback: _Fallback = _Fallback()):
-        super().__init__(protocol="file", fallback=fallback)
+    def __init__(self):
+        super().__init__(protocol="file")
 
     @override
     def path2str(self, path: DNSBPath) -> str:
@@ -833,8 +1077,8 @@ class DiskFileSystem(FsspecFileSystem):
 class NetworkFileSystem(FsspecFileSystem):
     """Network file system using fsspec"""
 
-    def __init__(self, protocol, fallback: _Fallback = _Fallback()):
-        super().__init__(protocol=protocol, fallback=fallback)
+    def __init__(self, protocol: str):
+        super().__init__(protocol=protocol)
 
 
 # --------------------------------------------------------
@@ -1003,8 +1247,8 @@ class MemoryFileSystem(FsspecFileSystem):
     """
     in-memory filesystem using fsspec
     """
-    def __init__(self, fallback: _Fallback = _Fallback()):
-        super().__init__(protocol="memory", fallback=fallback)
+    def __init__(self):
+        super().__init__(protocol="memory")
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -1034,8 +1278,8 @@ class HyperMemoryFileSystem(MorefsFileSystem):
     """
     High-performance in-memory filesystem
     """
-    def __init__(self, fs_type="mem", fallback: _Fallback = _Fallback()):
-        super().__init__(fs_type=fs_type, fallback=fallback)
+    def __init__(self, fs_type="mem"):
+        super().__init__(fs_type=fs_type)
     
     @override
     def absolute(self, path: DNSBPath) -> DNSBPath:
@@ -1075,13 +1319,6 @@ class GitFileSystem(FileSystem):
     Handles 'git://' URIs, clones repositories into a local cache,
     and allows reading files from specific branches, tags, or commits.
     """
-
-    _IGNORE_ERRNOS = (
-        DNSBPathNotFoundError,
-        InvalidPathError,
-        ValueError,
-        Signal,
-    )
 
     def __init__(self, cache_fs: FileSystem, cache_root: str = ".dnsb_cache"):
         super().__init__()
@@ -1237,8 +1474,6 @@ class GitFileSystem(FileSystem):
         try:
             full_path = self._get_synced_repo_path(path)
             return self.cache_fs.exists(full_path)
-        except GitFileSystem._IGNORE_ERRNOS:
-            return False
         except Exception as e:
             logger.error(f"[{self.name}] Error checking existence for '{path}': {e}")
             return False
@@ -1264,8 +1499,6 @@ class GitFileSystem(FileSystem):
         try:
             full_path = self._get_synced_repo_path(path)
             return self.cache_fs.is_dir(full_path)
-        except GitFileSystem._IGNORE_ERRNOS:
-            return False
         except Exception as e:
             logger.error(f"[{self.name}] Error in is_dir for '{path}': {e}")
             return False
@@ -1275,8 +1508,6 @@ class GitFileSystem(FileSystem):
         try:
             full_path = self._get_synced_repo_path(path)
             return self.cache_fs.is_file(full_path)
-        except GitFileSystem._IGNORE_ERRNOS:
-            return False
         except Exception as e:
             logger.error(f"[{self.name}] Error in is_file for '{path}': {e}")
             return False
@@ -1356,23 +1587,24 @@ class GitFileSystem(FileSystem):
 
 def create_app_fs(
     use_vfs: bool = False, 
-    enable_fallback: bool = False,
+    fb_en: bool = False,
     chroot: DNSBPath = None
 ) -> "FileSystem":
     """
-    Create an AppFileSystem instance with optional VFS, fallback, and chroot support.
+    Create an AppFileSystem instance with optional VFS, and chroot support.
     
     Args:
         use_vfs: Whether to use virtual file system for 'file' protocol.
                 If True, file:// uses HyperMemoryFileSystem instead of DiskFileSystem.
-        enable_fallback: Whether to enable fallback mechanism for read operations.
         chroot: Root directory for relative path resolution.
         
     Returns:
         Configured AppFileSystem instance
     """
-    _fallback = _Fallback(enable_fallback)
-    app_fs = AppFileSystem(chroot=chroot, fallback=_fallback)
+    app_fs = AppFileSystem(chroot=chroot)
     if use_vfs:
-        app_fs.register_handler("file", HyperMemoryFileSystem(fallback=_fallback))
+        memfs = HyperMemoryFileSystem()
+        backfs = DiskFileSystem()
+        sfs = SandboxFileSystem(memfs, backfs, fb_en=fb_en)
+        app_fs.register_handler("file", sfs)
     return app_fs

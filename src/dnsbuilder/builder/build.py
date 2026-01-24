@@ -22,6 +22,7 @@ from ..config import Config
 from ..io import DNSBPath, FileSystem
 from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError, DefinitionError
 from ..auto import AutomationManager
+from ..utils.fstree import print_tree, count_files
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,9 @@ class Builder:
         self.am.post(config_data, self.output_dir)
         
         logger.info(f"[Builder] Build finished. Files are in '{self.output_dir}'")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("[Builder] Final project structure:")
+            self.show_tree(max_depth=5, show_size=True)
         if need_context:
             return context
         return None
@@ -424,3 +428,54 @@ class Builder:
         content = yaml.dump(compose_config, default_flow_style=False, sort_keys=False)
         self.fs.write_text(file_path, content)
         logger.info(f"[Builder] {constants.DOCKER_COMPOSE_FILENAME} successfully generated at {file_path}")
+
+    def show_tree(self, max_depth: int = -1, show_size: bool = False):
+        """
+        Display the generated project structure as a tree.
+        
+        Args:
+            max_depth: Maximum depth to display (-1 for unlimited)
+            show_size: Whether to show file sizes
+        """
+        logger.debug(f"Project Structure: {self.config.name}")
+        
+        # Disable fallback to only show actually generated content
+        with self.fs.fallback(enable=False):
+            if not self.fs.exists(self.output_dir):
+                logger.debug(f"Output directory does not exist: {self.output_dir}")
+                return
+            
+            print_tree(self.fs, self.output_dir, max_depth=max_depth, show_size=show_size)
+            
+            # Show statistics
+            counts = count_files(self.fs, self.output_dir, recursive=True)
+            logger.debug(f"Total: {counts['dirs']} directories, {counts['files']} files")
+    
+    def get_build_summary(self) -> Dict:
+        """
+        Get a summary of the build output.
+        
+        Returns:
+            Dict with structure information
+        """
+        with self.fs.fallback(enable=False):
+            if not self.fs.exists(self.output_dir):
+                return {'exists': False}
+            
+            counts = count_files(self.fs, self.output_dir, recursive=True)
+            
+            services = []
+            try:
+                for item in self.fs.listdir(self.output_dir):
+                    if self.fs.is_dir(item) and item.name not in ['.images']:
+                        services.append(item.name)
+            except Exception as e:
+                logger.debug(f"Failed to list services: {e}")
+            
+            return {
+                'exists': True,
+                'output_dir': str(self.output_dir),
+                'total_dirs': counts['dirs'],
+                'total_files': counts['files'],
+                'services': sorted(services)
+            }
