@@ -91,5 +91,5 @@ auto:
 
       for srv in config.get("builds", {}).keys():
         if is_auth(srv):
-          config["builds"][srv]["dnssec"] = dnssec_enabled
+          config["builds"][srv]["dnssec"] = {"enable": dnssec_enabled}
           print(f"[Auto std-auth] Set dnssec={dnssec_enabled} for auth service {srv}")

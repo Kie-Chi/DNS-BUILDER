@@ -36,6 +36,19 @@ class AutomationModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class DNSSECModel(BaseModel):
+    """
+    Class Config-Validation Model for DNSSEC configuration.
+    
+    Supports enabling DNSSEC and importing additional DNSSEC records.
+    - enable: Boolean to enable/disable DNSSEC signing
+    - include: String or list of strings for importing key, rrsig, ds, dnskey records
+    """
+    enable: bool = False
+    include: Union[str, List[str]] = Field(default_factory=list)
+    model_config = ConfigDict(extra="allow")
+
+
 class ImageModel(BaseModel):
     """
         Class Config-Validation Model describe `images`
@@ -72,7 +85,7 @@ class BuildModel(BaseModel):
     behavior: Optional[str] = None
     mixins: List[str] = Field(default_factory=list)
     build: bool = True
-    dnssec: bool = False
+    dnssec: Union[bool, DNSSECModel] = False
     files: Dict[str, str] = Field(default_factory=dict)
     volumes: List[str] = Field(default_factory=list)
     mounts: List[str] = Field(default_factory=list)

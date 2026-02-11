@@ -133,7 +133,10 @@ def get_paths(config_file: str, workdir: str = None, output_dir: str = None):
     if output_dir:
         output_dir_path = DNSBPath(Path(output_dir).resolve())
         logging.info(f"Using explicit output directory: {output_dir_path}")
-    elif workdir and not config_root.is_readonly():
+    elif workdir:
+        output_dir_path = config_root
+        logging.debug(f"Using config root as output base: {output_dir_path}")
+    elif not config_root.is_readonly():
         output_dir_path = config_root
         logging.debug(f"Using config root as output base: {output_dir_path}")
     else:

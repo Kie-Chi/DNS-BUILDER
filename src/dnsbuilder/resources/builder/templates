@@ -24,14 +24,14 @@
     },
     "unbound": {
         "recursor": {
-            "command": "unbound -d",
+            "command": "unbound -d -c /usr/local/etc/unbound/unbound.conf",
             "volumes": [
                 "resource:/configs/unbound_recursor_base.conf:/usr/local/etc/unbound/unbound.conf",
                 "resource:/images/controls/unbound:/usr/local/var/unbound:rw"
             ]
         },
         "forwarder": {
-            "command": "unbound -d",
+            "command": "unbound -d -c /usr/local/etc/unbound/unbound.conf",
             "volumes": [    
                 "resource:/configs/unbound_forwarder_base.conf:/usr/local/etc/unbound/unbound.conf"
             ]

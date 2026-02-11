@@ -23,6 +23,7 @@ from .reflection import (
     gen_exports,
 )
 from .fstree import print_tree, count_files, get_tree_string, list_all_files
+from .dnssec import get_dnssec_config, is_dnssec_enabled, get_dnssec_includes
 
 __all__ = [
     'setup_logger',
@@ -42,5 +43,9 @@ __all__ = [
     'count_files',
     'get_tree_string',
     'list_all_files',
+    # DNSSEC utilities
+    'get_dnssec_config',
+    'is_dnssec_enabled',
+    'get_dnssec_includes',
 ]
 

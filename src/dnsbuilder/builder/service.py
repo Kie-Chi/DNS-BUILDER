@@ -14,6 +14,7 @@ from .zone import ZoneGenerator
 from .. import constants
 from ..io import DNSBPath, FileSystem
 from ..exceptions import BuildError, BehaviorError, DNSBPathNotFoundError, VolumeError, BuildDefinitionError
+from ..utils import get_dnssec_config
 
 logger = logging.getLogger(__name__)
 
@@ -486,8 +487,7 @@ class ServiceHandler:
         gen_vol_dir = self.tmp_dir / constants.GENERATED_ZONES_SUBDIR
         self.context.fs.mkdir(gen_vol_dir, exist_ok=True)
 
-        # Check if DNSSEC is enabled for this build
-        enable_dnssec = self.build_conf.get('dnssec', False)
+        enable_dnssec, dnssec_includes = get_dnssec_config(self.build_conf)
 
         # 2. Generate zone files and artifacts for each aggregated zone
         for zone, records in records_by_zone.items():
