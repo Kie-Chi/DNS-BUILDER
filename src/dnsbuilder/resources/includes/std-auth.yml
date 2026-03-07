@@ -68,6 +68,18 @@ auto:
       origin = servs.get("behavior", "")
       behavs = []
       for srv in config.get("builds", {}).keys():
+        srv_config = config["builds"][srv]
+        network_mode = srv_config.get("network_mode", "")
+        address = srv_config.get("address", None)
+        
+        if network_mode == "host":
+          print(f"[Auto std-auth] Skipping service {srv}: uses host network mode")
+          continue
+        
+        if address == "":
+          print(f"[Auto std-auth] Skipping service {srv}: has empty address")
+          continue
+        
         # add A record for this service
         print(f"[Auto std-auth] Adding A record for service {srv} in servers.net zone")
         behavs.append(f"servers.net master {srv} A {srv}")

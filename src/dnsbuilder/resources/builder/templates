@@ -63,7 +63,7 @@
             "volumes": [
                 "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
                 "${origin}./${name}/contents/tmp:/tmp/kresd_test",
-                "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+                "resource:/configs/knot/noroot.hints:/etc/knot-resolver/root.hints"
             ]
         },
         "forwarder": {
@@ -71,7 +71,7 @@
             "volumes": [
                 "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
                 "${origin}./${name}/contents/tmp:/tmp/kresd_test",
-                "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+                "resource:/configs/knot/noroot.hints:/etc/knot-resolver/root.hints"
             ]
         }
     },
