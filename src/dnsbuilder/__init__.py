@@ -40,6 +40,7 @@ from .exceptions import (
     BuildError,
     DefinitionError,
 )
+from .attribute import AttributeLoader
 
 __version__ = "0.11.2"
 

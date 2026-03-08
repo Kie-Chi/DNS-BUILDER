@@ -210,10 +210,17 @@ def do_build(config_file: str, incremental: bool, graph: str, workdir: str, outp
     """Execute build command"""
     abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
     
+    # Get the actual workdir path for .dnsbattribute loading
+    # config_root is a DNSBPath, we need to convert it to a real path
+    if config_root.protocol == "file":
+        workdir_for_attrs = str(config_root)
+    else:
+        workdir_for_attrs = None
+    
     # Cache should be in the writable output_dir_base, not the potentially read-only config_root
     cache_root = output_dir_base / ".dnsb_cache"
     cli_fs = create_app_fs(use_vfs=vfs, chroot=config_root, cache_root=cache_root)
-    config = Config(abs_cfg, cli_fs)
+    config = Config(abs_cfg, cli_fs, workdir=workdir_for_attrs)
     actual_output_dir = output_dir_base / "output" / config.name
     
     # Choose builder based on incremental flag
@@ -264,9 +271,15 @@ def do_clean(config_file: str, all_images: bool, workdir: str, output_dir: str):
     elif config_file:
         abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
         
+        # Get the actual workdir path for .dnsbattribute loading
+        if config_root.protocol == "file":
+            workdir_for_attrs = str(config_root)
+        else:
+            workdir_for_attrs = None
+        
         cache_root = output_dir_base / ".dnsb_cache"
         cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
-        config = Config(abs_cfg, cli_fs)
+        config = Config(abs_cfg, cli_fs, workdir=workdir_for_attrs)
         project_name = config.name
         all_imgs = docker.image.list()
         project_images = []
@@ -301,9 +314,15 @@ def do_down(config_file: str, workdir: str, output_dir: str, remove_volumes: boo
     """Execute down command - stop containers and clean up"""
     abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
     
+    # Get the actual workdir path for .dnsbattribute loading
+    if config_root.protocol == "file":
+        workdir_for_attrs = str(config_root)
+    else:
+        workdir_for_attrs = None
+    
     cache_root = output_dir_base / ".dnsb_cache"
     cli_fs = create_app_fs(use_vfs=False, chroot=config_root, cache_root=cache_root)
-    config = Config(abs_cfg, cli_fs)
+    config = Config(abs_cfg, cli_fs, workdir=workdir_for_attrs)
     project_name = config.name
     actual_output_dir = output_dir_base / "output" / project_name
     compose_file = actual_output_dir / "docker-compose.yml"

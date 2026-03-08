@@ -34,9 +34,11 @@ class HintBehavior(Behavior):
         Generate hint file content for all targets.
         
         For service names: uses {service}.servers.net.
-        For IP addresses: uses A.ROOT-SERVERS.NET., B.ROOT-SERVERS.NET., etc.
+        For IP addresses: uses letter-based naming starting from ROOT constant
         """
         target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
+        start_letter = constants.ROOT[0].upper() if constants.ROOT else 'A'
+        start_idx = self.LETTERS.index(start_letter) if start_letter in self.LETTERS else 0
         
         lines = []
         for idx, (target_name, target_ip) in enumerate(zip(self.targets, target_ips)):
@@ -44,7 +46,8 @@ class HintBehavior(Behavior):
             try:
                 ipaddress.ip_address(target_name)
                 # Pure IP address: use letter-based naming
-                letter = self.LETTERS[idx % len(self.LETTERS)]
+                letter_idx = (start_idx + idx) % len(self.LETTERS)
+                letter = self.LETTERS[letter_idx]
                 ns_name = f"{letter}.ROOT-SERVERS.NET."
             except ValueError:
                 # Service name: use service-based naming
