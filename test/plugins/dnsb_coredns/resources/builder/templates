@@ -1,0 +1,22 @@
+{
+    "coredns": {
+        "auth": {
+            "command": "coredns -conf /etc/coredns/Corefile",
+            "volumes": [
+                "${origin}./${name}/contents:/etc/coredns:rw"
+            ]
+        },
+        "forwarder": {
+            "command": "coredns -conf /etc/coredns/Corefile",
+            "volumes": [
+                "${origin}./${name}/contents:/etc/coredns:rw"
+            ]
+        },
+        "recursor": {
+            "command": "coredns -conf /etc/coredns/Corefile",
+            "volumes": [
+                "${origin}./${name}/contents:/etc/coredns:rw"
+            ]
+        }
+    }
+}

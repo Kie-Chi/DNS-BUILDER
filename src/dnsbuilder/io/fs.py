@@ -1110,13 +1110,42 @@ class ResourceFileSystem(FileSystem):
         super().__init__()
 
     def _get_resource_traversable(self, path: DNSBPath) -> resources.abc.Traversable:
-        """ get Traversable object for resource"""
+        """
+        Get Traversable object for resource.
+
+        First checks if the path is registered by a plugin,
+        then falls back to the built-in dnsbuilder.resources package.
+        """
         if path.protocol != "resource":
             raise ProtocolError(f"Only resource protocol path is supported, got {path.protocol}")
 
+        # Build the path string (without "resource:/" prefix)
+        path_parts = path.parts[1:]  # Skip the empty first part
+        path_str = "/".join(path_parts)
+
+        # Check if this path is provided by a plugin
+        from ..plugins.base import get_plugin_resource_package
+        plugin_package = get_plugin_resource_package(path_str)
+
+        if plugin_package:
+            # Load from plugin's resource package
+            logger.debug(f"[ResourceFS] Loading '{path_str}' from plugin package: {plugin_package}")
+            try:
+                package = resources.files(plugin_package)
+                traversable = package
+                for part in path_parts:
+                    traversable = traversable.joinpath(part)
+                return traversable
+            except (ModuleNotFoundError, FileNotFoundError) as e:
+                logger.warning(
+                    f"[ResourceFS] Plugin package '{plugin_package}' not found for path '{path_str}': {e}"
+                )
+                # Fall through to built-in resources
+
+        # Load from built-in dnsbuilder.resources
         package = resources.files("dnsbuilder.resources")
         traversable = package
-        for part in path.parts[1:]:
+        for part in path_parts:
             traversable = traversable.joinpath(part)
         return traversable
 

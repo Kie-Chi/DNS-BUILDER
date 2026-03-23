@@ -8,7 +8,7 @@ Dependencies:
 - abstractions: For abstract base classes used in discovery
 """
 
-from typing import Dict, Type, Set, Optional, Tuple, TypeVar, Generic
+from typing import Dict, Type, Set, Optional, Tuple, TypeVar, Generic, List
 from abc import ABC, abstractmethod
 import logging
 
@@ -154,23 +154,39 @@ image_registry = ImageRegistry()
 includer_registry = IncluderRegistry()
 
 
-def initialize_registries():
+def initialize_registries(
+    load_plugins: bool = True,
+    plugin_config: Optional[List[str]] = None
+):
     """
     Initialize the global registries with auto-discovery.
+
     This should be called once during application startup.
+
+    Args:
+        load_plugins: Whether to load plugins (default: True)
+        plugin_config: Optional list of plugin specs from configuration
     """
     logger.debug("Initializing behavior, image, and includer registries...")
-    
-    # Auto-discover behaviors
+
+    # Auto-discover built-in behaviors
     behavior_registry.discover()
-    
-    # Auto-discover images  
+
+    # Auto-discover built-in images
     image_registry.discover()
-    
-    # Auto-discover includers
+
+    # Auto-discover built-in includers
     includer_registry.discover()
-    
+
     logger.debug(f"Discovered {len(behavior_registry.registry)} behavior implementations")
     logger.debug(f"Discovered {len(image_registry.registry)} image implementations")
     logger.debug(f"Discovered {len(includer_registry.registry)} includer implementations")
     logger.debug(f"Supported software types: {behavior_registry.get_supports()}")
+
+    # Load plugins after built-in discovery
+    if load_plugins:
+        from .plugins import init_plugins
+        loaded = init_plugins(plugin_config)
+        if loaded:
+            logger.info(f"Loaded plugins: {loaded}")
+            logger.debug(f"After plugins - Supported software types: {behavior_registry.get_supports()}")

@@ -7,7 +7,8 @@ import yaml
 from python_on_whales import DockerClient, docker
 from pathlib import Path as StdPath
 
-from .config import Config
+from .config import Config, load_plugins_from_config
+from .registry import initialize_registries
 from .builder import Builder, CachedBuilder
 from .utils import setup_logger
 from .io import create_app_fs, DNSBPath, Path
@@ -161,6 +162,28 @@ def setup_logging(debug: bool, log_levels: str = None, log_file: str = None):
     setup_logger(debug=debug, module_levels=module_levels, log_file=log_file)
 
 
+def init_with_plugins(config_path: str, fs=None):
+    """
+    Initialize registries with plugins from config file.
+
+    This should be called before creating a Config object.
+
+    Args:
+        config_path: Path to the config file
+        fs: Filesystem to use (optional)
+
+    Returns:
+        True if initialization succeeded
+    """
+    # Load plugins list from config
+    plugins = load_plugins_from_config(config_path, fs)
+
+    # Initialize registries with plugins
+    initialize_registries(plugin_config=plugins)
+
+    return True
+
+
 def handle_errors(func):
     """Decorator to handle common exceptions"""
     def wrapper(*args, **kwargs):
@@ -209,10 +232,14 @@ def handle_errors(func):
 def do_build(config_file: str, incremental: bool, graph: str, workdir: str, output_dir: str, vfs: bool):
     """Execute build command"""
     abs_cfg, config_root, output_dir_base = get_paths(config_file, workdir, output_dir)
-    
+
     # Cache should be in the writable output_dir_base, not the potentially read-only config_root
     cache_root = output_dir_base / ".dnsb_cache"
     cli_fs = create_app_fs(use_vfs=vfs, chroot=config_root, cache_root=cache_root)
+
+    # Initialize registries with plugins from config BEFORE creating Config
+    init_with_plugins(abs_cfg, cli_fs)
+
     config = Config(abs_cfg, cli_fs)
     actual_output_dir = output_dir_base / "output" / config.name
     

@@ -414,9 +414,21 @@ class Builder:
             templates_text = self.fs.read_text(templates_path)
             templates = json.loads(templates_text)
             logger.debug("Predefined build templates loaded successfully.")
-            return templates
         except (FileNotFoundError, json.JSONDecodeError) as e:
             raise BuildError(f"Failed to load or parse template file: {e}")
+
+        # Merge plugin build templates
+        from ..plugins.base import get_plugin_build_templates
+        plugin_templates = get_plugin_build_templates()
+        if plugin_templates:
+            logger.debug(f"Merging {len(plugin_templates)} plugin template(s)...")
+            for software, software_templates in plugin_templates.items():
+                if software not in templates:
+                    templates[software] = {}
+                templates[software].update(software_templates)
+            logger.debug(f"Plugin templates merged: {list(plugin_templates.keys())}")
+
+        return templates
 
     def _setup(self):
         with self.fs.fallback(enable=False):

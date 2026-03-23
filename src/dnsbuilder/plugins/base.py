@@ -1,0 +1,525 @@
+"""
+DNS Builder Plugin System - Base Classes
+
+This module provides the core abstractions for the plugin system:
+- Plugin: Base class for all plugins
+- PluginRegistry: Registry for plugin extensions (Image, Behavior, Includer, Resources)
+- PluginInfo: Data class for plugin metadata
+"""
+
+from abc import ABC, abstractmethod
+from typing import Dict, Type, Set, Any, Optional, List
+from dataclasses import dataclass, field
+import logging
+
+from ..protocols import ImageProtocol, BehaviorProtocol, IncluderProtocol
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PluginInfo:
+    """
+    Plugin metadata container.
+    """
+    name: str
+    version: str
+    description: str = ""
+    author: str = ""
+    dependencies: List[str] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        return f"PluginInfo(name={self.name!r}, version={self.version!r})"
+
+
+# Global registry for plugin resources
+# Maps: resource_subpath -> package_name
+# e.g., "images/templates/coredns" -> "dnsb_coredns.resources"
+_PLUGIN_RESOURCES: Dict[str, str] = {}
+
+# Global registry for plugin build templates
+# Maps: (software, template_name) -> template_dict
+# e.g., ("coredns", "auth") -> {"command": "...", "volumes": [...]}
+_PLUGIN_BUILD_TEMPLATES: Dict[tuple, Dict[str, Any]] = {}
+
+
+def get_plugin_resource_package(path: str) -> Optional[str]:
+    """
+    Get the package that provides a resource path.
+
+    Args:
+        path: Resource path (e.g., "images/templates/coredns")
+
+    Returns:
+        Package name if found, None otherwise
+    """
+    # Check for exact match first
+    if path in _PLUGIN_RESOURCES:
+        return _PLUGIN_RESOURCES[path]
+
+    # Check for parent directory match
+    parts = path.split("/")
+    for i in range(len(parts), 0, -1):
+        parent = "/".join(parts[:i])
+        if parent in _PLUGIN_RESOURCES:
+            return _PLUGIN_RESOURCES[parent]
+
+    return None
+
+
+def register_plugin_resource(path: str, package: str) -> None:
+    """
+    Register a plugin's resource package.
+
+    Args:
+        path: Resource path prefix (e.g., "images/templates/coredns")
+        package: Python package name (e.g., "dnsb_coredns.resources")
+    """
+    _PLUGIN_RESOURCES[path] = package
+    logger.debug(f"Registered plugin resource: {path} -> {package}")
+
+
+def get_plugin_build_templates() -> Dict[str, Dict[str, Any]]:
+    """
+    Get all plugin build templates.
+
+    Returns:
+        Dictionary mapping software -> template_name -> template_dict
+    """
+    result: Dict[str, Dict[str, Any]] = {}
+    for (software, template_name), template in _PLUGIN_BUILD_TEMPLATES.items():
+        if software not in result:
+            result[software] = {}
+        result[software][template_name] = template
+    return result
+
+
+def register_plugin_build_template(
+    software: str,
+    template_name: str,
+    template: Dict[str, Any]
+) -> None:
+    """
+    Register a build template for a software.
+
+    Args:
+        software: Software identifier (e.g., "coredns")
+        template_name: Template name (e.g., "auth", "forwarder")
+        template: Template dictionary with keys like "command", "volumes", etc.
+    """
+    _PLUGIN_BUILD_TEMPLATES[(software, template_name)] = template
+    logger.debug(f"Registered build template: {software}:{template_name}")
+
+
+class Plugin(ABC):
+    """
+    Base class for all DNS Builder plugins.
+
+    Plugins can extend DNS Builder by registering custom:
+    - Image implementations (new DNS server types)
+    - Behavior implementations (how DNS servers behave)
+    - Includer implementations (config file include patterns)
+    """
+
+    # Plugin metadata - subclasses MUST override these
+    name: str = ""
+    version: str = "0.0.0"
+    description: str = ""
+    author: str = ""
+
+    # Priority for load order (lower = earlier)
+    priority: int = 100
+
+    @abstractmethod
+    def on_load(self, registry: "PluginRegistry") -> None:
+        """
+        Called when the plugin is loaded.
+        Implement this method to register your extensions with the registry.
+        Args:
+            registry: The plugin registry for registering extensions
+
+        Example:
+            def on_load(self, registry):
+                registry.register_image("mydns", MyDNSImage)
+                registry.register_behavior("mydns", "forward", MyDNSForwardBehavior)
+        """
+        pass
+
+    def on_unload(self) -> None:
+        """
+        Called when the plugin is unloaded.
+
+        Override this to clean up resources when the plugin is unloaded.
+        Default implementation does nothing.
+        """
+        pass
+
+    def on_config_load(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Hook called when configuration is loaded.
+        Override this to modify or validate the configuration.
+        Args:
+            config: The raw configuration dictionary
+        """
+        return config
+
+    def get_info(self) -> PluginInfo:
+        """
+        Get plugin metadata.
+        """
+        return PluginInfo(
+            name=self.name,
+            version=self.version,
+            description=self.description,
+            author=self.author,
+        )
+
+
+class PluginRegistry:
+    """
+    Registry for plugin extensions.
+    """
+
+    # Class variable to track current loading plugin context
+    _current_plugin: Optional[str] = None
+
+    def __init__(
+        self,
+        image_registry: "ImageRegistry",
+        behavior_registry: "BehaviorRegistry",
+        includer_registry: "IncluderRegistry"
+    ):
+        """
+        Initialize the plugin registry.
+
+        Args:
+            image_registry: The core image registry
+            behavior_registry: The core behavior registry
+            includer_registry: The core includer registry
+        """
+        self._images = image_registry
+        self._behaviors = behavior_registry
+        self._includers = includer_registry
+        # Maps: software -> plugin_name
+        self._plugin_images: Dict[str, str] = {}
+        # Maps: (software, behavior_type) -> plugin_name
+        self._plugin_behaviors: Dict[tuple, str] = {}
+        # Maps: software -> plugin_name
+        self._plugin_includers: Dict[str, str] = {}
+        # Maps: plugin_name -> Plugin instance
+        self._loaded_plugins: Dict[str, Plugin] = {}
+
+    # =========================================================================
+    #
+    # Image Registration
+    #
+    # =========================================================================
+
+    def register_image(
+        self,
+        software: str,
+        image_class: Type[ImageProtocol],
+        override: bool = False
+    ) -> None:
+        """
+        Register an Image implementation.
+
+        Args:
+            software: Software identifier (e.g., "coredns", "dnsmasq")
+            image_class: The Image class to register
+            override: If True, replace existing registration; if False, raise error on conflict
+        """
+        if software in self._images.registry and not override:
+            existing_plugin = self._plugin_images.get(software, "built-in")
+            raise ValueError(
+                f"Image '{software}' already registered by '{existing_plugin}'. "
+                f"Use override=True to replace."
+            )
+
+        self._images.register(software, image_class)
+        self._plugin_images[software] = self._current_plugin or "unknown"
+
+        logger.debug(
+            f"Registered image '{software}' from plugin '{self._current_plugin or 'unknown'}'"
+        )
+
+    def unregister_image(self, software: str) -> bool:
+        """
+        Unregister an Image implementation.
+        Only plugins can unregister their own registrations.
+
+        Args:
+            software: Software identifier to unregister
+        """
+        if software in self._plugin_images:
+            if software in self._images._registry:
+                del self._images._registry[software]
+            del self._plugin_images[software]
+            logger.debug(f"Unregistered image '{software}'")
+            return True
+        return False
+
+    # =========================================================================
+    #
+    # Behavior Registration
+    #
+    # =========================================================================
+
+    def register_behavior(
+        self,
+        software: str,
+        behavior_type: str,
+        behavior_class: Type[BehaviorProtocol],
+        override: bool = False
+    ) -> None:
+        """
+        Register a Behavior implementation.
+
+        Args:
+            software: Software identifier (e.g., "coredns")
+            behavior_type: Behavior type (e.g., "forward", "stub", "hint", "master")
+            behavior_class: The Behavior class to register
+            override: If True, replace existing registration
+        """
+        key = (software, behavior_type)
+
+        if key in self._behaviors.registry and not override:
+            existing_plugin = self._plugin_behaviors.get(key, "built-in")
+            raise ValueError(
+                f"Behavior ({software}, {behavior_type}) already registered by '{existing_plugin}'. "
+                f"Use override=True to replace."
+            )
+
+        self._behaviors.register(key, behavior_class)
+        self._plugin_behaviors[key] = self._current_plugin or "unknown"
+
+        logger.debug(
+            f"Registered behavior ({software}, {behavior_type}) from plugin '{self._current_plugin or 'unknown'}'"
+        )
+
+    def unregister_behavior(self, software: str, behavior_type: str) -> bool:
+        """
+        Unregister a Behavior implementation.
+
+        Args:
+            software: Software identifier
+            behavior_type: Behavior type to unregister
+        """
+        key = (software, behavior_type)
+        if key in self._plugin_behaviors:
+            if key in self._behaviors._registry:
+                del self._behaviors._registry[key]
+            del self._plugin_behaviors[key]
+            logger.debug(f"Unregistered behavior ({software}, {behavior_type})")
+            return True
+        return False
+
+    # =========================================================================
+    #
+    # Includer Registration
+    #
+    # =========================================================================
+
+    def register_includer(
+        self,
+        software: str,
+        includer_class: Type[IncluderProtocol],
+        override: bool = False
+    ) -> None:
+        """
+        Register an Includer implementation.
+
+        Args:
+            software: Software identifier
+            includer_class: The Includer class to register
+            override: If True, replace existing registration
+        """
+        if software in self._includers.registry and not override:
+            existing_plugin = self._plugin_includers.get(software, "built-in")
+            raise ValueError(
+                f"Includer '{software}' already registered by '{existing_plugin}'. "
+                f"Use override=True to replace."
+            )
+
+        self._includers.register(software, includer_class)
+        self._plugin_includers[software] = self._current_plugin or "unknown"
+
+        logger.debug(
+            f"Registered includer '{software}' from plugin '{self._current_plugin or 'unknown'}'"
+        )
+
+    def unregister_includer(self, software: str) -> bool:
+        """
+        Unregister an Includer implementation.
+
+        Args:
+            software: Software identifier to unregister
+        """
+        if software in self._plugin_includers:
+            if software in self._includers._registry:
+                del self._includers._registry[software]
+            del self._plugin_includers[software]
+            logger.debug(f"Unregistered includer '{software}'")
+            return True
+        return False
+
+    # =========================================================================
+    #
+    # Resource Registration
+    #
+    # =========================================================================
+
+    def register_resources(
+        self,
+        software: str,
+        package: str,
+        templates: bool = True,
+        defaults: bool = True,
+        controls: bool = True,
+        scripts: bool = False
+    ) -> None:
+        """
+        Register plugin resources for a software type.
+
+        This allows plugins to provide their own templates, defaults, and
+        control files that will be loaded by the ResourceFileSystem.
+
+        Args:
+            software: Software identifier (e.g., "coredns")
+            package: Python package containing resources (e.g., "dnsb_coredns.resources")
+            templates: Whether to register templates path
+            defaults: Whether to register defaults path
+            controls: Whether to register controls path
+            scripts: Whether to register scripts path
+
+        Example:
+            def on_load(self, registry):
+                registry.register_resources("coredns", "dnsb_coredns.resources")
+        """
+        plugin_name = self._current_plugin or "unknown"
+
+        if templates:
+            path = f"images/templates/{software}"
+            register_plugin_resource(path, package)
+            logger.debug(
+                f"Registered templates resource: {path} -> {package} (from {plugin_name})"
+            )
+
+        if defaults:
+            path = f"images/defaults/{software}"
+            register_plugin_resource(path, package)
+            logger.debug(
+                f"Registered defaults resource: {path} -> {package} (from {plugin_name})"
+            )
+
+        if controls:
+            path = f"images/controls/{software}"
+            register_plugin_resource(path, package)
+            logger.debug(
+                f"Registered controls resource: {path} -> {package} (from {plugin_name})"
+            )
+
+        if scripts:
+            path = f"scripts/{software}"
+            register_plugin_resource(path, package)
+            logger.debug(
+                f"Registered scripts resource: {path} -> {package} (from {plugin_name})"
+            )
+
+        logger.info(
+            f"Registered resources for '{software}' from plugin '{plugin_name}'"
+        )
+
+    def register_build_template(
+        self,
+        software: str,
+        template_name: str,
+        template: Dict[str, Any],
+        override: bool = False
+    ) -> None:
+        """
+        Register a build template for a software.
+
+        Build templates are used with `ref: std:<template_name>` in builds.
+
+        Args:
+            software: Software identifier (e.g., "coredns")
+            template_name: Template name (e.g., "auth", "forwarder")
+            template: Template dictionary with keys like:
+                - command: Command to run
+                - volumes: List of volume mounts
+                - files: Dict of files to create
+                - build: Whether to build the image (default True)
+            override: Whether to override existing template
+
+        Example:
+            def on_load(self, registry):
+                registry.register_build_template("coredns", "auth", {
+                    "command": "coredns -conf /etc/coredns/Corefile",
+                    "volumes": ["${origin}./${name}/contents:/etc/coredns:rw"]
+                })
+        """
+        key = (software, template_name)
+
+        if key in _PLUGIN_BUILD_TEMPLATES and not override:
+            logger.warning(
+                f"Build template {software}:{template_name} already exists. "
+                f"Use override=True to replace."
+            )
+            return
+
+        register_plugin_build_template(software, template_name, template)
+        plugin_name = self._current_plugin or "unknown"
+        logger.info(
+            f"Registered build template: {software}:{template_name} from '{plugin_name}'"
+        )
+
+    # =========================================================================
+    #
+    # Plugin Management
+    #
+    # =========================================================================
+
+    def register_plugin_instance(self, plugin: Plugin) -> None:
+        """Register a loaded plugin instance."""
+        self._loaded_plugins[plugin.name] = plugin
+
+    def unregister_plugin_instance(self, name: str) -> bool:
+        """Unregister a plugin instance."""
+        if name in self._loaded_plugins:
+            del self._loaded_plugins[name]
+            return True
+        return False
+
+    def get_loaded_plugins(self) -> Dict[str, PluginInfo]:
+        """
+        Get information about all loaded plugins.
+        """
+        return {name: plugin.get_info() for name, plugin in self._loaded_plugins.items()}
+
+    def get_plugin_instance(self, name: str) -> Optional[Plugin]:
+        """
+        Get a loaded plugin instance by name.
+
+        Args:
+            name: Plugin name
+        """
+        return self._loaded_plugins.get(name)
+
+    # =========================================================================
+    #
+    # Introspection
+    #
+    # =========================================================================
+
+    def get_images_by_plugin(self, plugin_name: str) -> Set[str]:
+        """Get all image software types registered by a specific plugin."""
+        return {sw for sw, pn in self._plugin_images.items() if pn == plugin_name}
+
+    def get_behaviors_by_plugin(self, plugin_name: str) -> Set[tuple]:
+        """Get all behaviors registered by a specific plugin."""
+        return {key for key, pn in self._plugin_behaviors.items() if pn == plugin_name}
+
+    def get_includers_by_plugin(self, plugin_name: str) -> Set[str]:
+        """Get all includers registered by a specific plugin."""
+        return {sw for sw, pn in self._plugin_includers.items() if pn == plugin_name}

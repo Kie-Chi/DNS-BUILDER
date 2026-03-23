@@ -14,10 +14,40 @@ from .exceptions import (
     ConfigParsingError,
     ConfigFileMissingError,
     ConfigValidationError,
+    DefinitionError,
 )
 
 
 logger = logging.getLogger(__name__)
+
+
+def load_plugins_from_config(config_path: str, fs: FileSystem = None) -> List[str]:
+    """
+    Load the plugins list from a config file before full validation.
+    Args:
+        config_path: Path to the config file
+        fs: Filesystem to use (optional)
+    """
+    if fs is None:
+        from .io import create_app_fs
+        fs = create_app_fs()
+
+    try:
+        content = fs.read_text(DNSBPath(config_path))
+        config_data = yaml.safe_load(content)
+
+        if not isinstance(config_data, dict):
+            return []
+
+        plugins = config_data.get("plugins", [])
+        if isinstance(plugins, list):
+            # Filter out empty strings
+            return [p for p in plugins if p]
+        return []
+
+    except Exception as e:
+        logger.debug(f"Could not load plugins from config: {e}")
+        return []
 
 class AutomationModel(BaseModel):
     """
@@ -113,8 +143,9 @@ class ConfigModel(BaseModel):
     name: str
     inet: IPv4Network
     images: Dict[str, ImageModel] = Field(default_factory=dict)
-    builds: Dict[str, BuildModel]
+    builds: Dict[str, BuildModel] = Field(default_factory=dict)
     include: Optional[Union[str, List[str]]] = None
+    plugins: List[str] = Field(default_factory=list)
     auto: Optional[AutomationModel] = Field(default_factory=AutomationModel)
     mirror: Dict[str, Any] = Field(default_factory=dict)
     vars: Dict[str, Any] = Field(default_factory=dict)
@@ -264,3 +295,8 @@ class Config:
     @property
     def mirror(self) -> Dict[str, Any]:
         return self.model.mirror if self.model.mirror else {}
+
+    @property
+    def plugins_config(self) -> List[str]:
+        """Get the list of plugin specs from configuration."""
+        return self.model.plugins if self.model.plugins else []
