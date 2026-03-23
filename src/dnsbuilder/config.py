@@ -241,11 +241,20 @@ class Config:
     Loads and validates the config.yml file using Pydantic models.
     It is the sole gatekeeper for configuration.
     """
-    def __init__(self, config_path: str, fs: FileSystem = None):
+    def __init__(self, config_path: str, fs: FileSystem = None, workdir: str = None):
         self.path = config_path
+        self.workdir = workdir
         if fs is None:
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
+        if workdir:
+            from .attribute import AttributeLoader
+            from pathlib import Path
+            workdir_path = Path(workdir)
+            attrs = AttributeLoader.load(workdir_path)
+            if attrs:
+                AttributeLoader.apply(constants, attrs)
+        
         logger.info(f"Loading configuration from '{self.path}'...")
         raw_data = self._load_raw_config()
 

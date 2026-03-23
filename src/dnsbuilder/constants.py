@@ -125,7 +125,7 @@ RECOGNIZED_PATTERNS = {
 
 # --- Behavior Sections ---
 
-BEHAVIOR_TYPES = {"Forward", "Stub", "Master", "Hint", "Slave"}
+BEHAVIOR_TYPES = {"Forward", "Stub", "Master", "Hint"}
 
 class BehaviorSection(str, Enum):
     SERVER = "server"
@@ -321,4 +321,4 @@ SOFT_PACKAGE_MANAGERS = {
 }
 
 # --- config about behavior generate
-ROOT = "A.ROOT-SERVERS.NET." # root server hostname
+ROOT = "A" # iterate from `ROOT`.ROOT-SERVERS.NET.  for root server hostname
