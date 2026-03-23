@@ -1,0 +1,23 @@
+{
+    "recursor": {
+        "user": "root",
+        "command": "named -g -c /usr/local/etc/named.conf",
+        "volumes": [
+            "resource:/configs/bind/recursor.conf:/usr/local/etc/named.conf:rw",
+            "resource:/configs/bind/recursor.conf.options:/usr/local/etc/named.conf.options:rw",
+            "resource:/images/controls/bind:/usr/local/var/bind:rw"
+        ]
+    },
+    "auth": {
+        "command": "named -g -c /usr/local/etc/named.conf",
+        "volumes": [
+            "resource:/configs/bind_auth_base.conf:/usr/local/etc/named.conf:rw"
+        ]
+    },
+    "forwarder": {
+        "command": "named -g -c /usr/local/etc/named.conf",
+        "volumes": [
+            "resource:/configs/bind_forwarder_base.conf:/usr/local/etc/named.conf:rw"
+        ]
+    }
+}

@@ -408,25 +408,40 @@ class Builder:
         self._compose(compose_config)
 
     def _load_pr_blds(self) -> Dict[str, Dict]:
+        """
+        Load predefined build templates from templates directory.
+        """
         logger.debug("Loading predefined build templates...")
-        try:
-            templates_path = DNSBPath("resource:/builder/templates")
-            templates_text = self.fs.read_text(templates_path)
-            templates = json.loads(templates_text)
-            logger.debug("Predefined build templates loaded successfully.")
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            raise BuildError(f"Failed to load or parse template file: {e}")
+        templates: Dict[str, Dict] = {}
 
-        # Merge plugin build templates
-        from ..plugins.base import get_plugin_build_templates
-        plugin_templates = get_plugin_build_templates()
-        if plugin_templates:
-            logger.debug(f"Merging {len(plugin_templates)} plugin template(s)...")
-            for software, software_templates in plugin_templates.items():
-                if software not in templates:
-                    templates[software] = {}
-                templates[software].update(software_templates)
-            logger.debug(f"Plugin templates merged: {list(plugin_templates.keys())}")
+        # Load from built-in templates directory
+        templates_dir = DNSBPath("resource:/builder/templates")
+        try:
+            # List all template files in the directory
+            template_files = self.fs.listdir(templates_dir)
+            for template_path in template_files:
+                # Get the filename from the path
+                template_file = template_path.name
+                # Skip __init__.py and other non-template files
+                if template_file.startswith("__") or template_file.startswith("."):
+                    continue
+
+                try:
+                    content = self.fs.read_text(template_path)
+                    software_templates = json.loads(content)
+                    # Use filename as software name
+                    software_name = template_file
+                    templates[software_name] = software_templates
+                    logger.debug(f"Loaded templates for '{software_name}' from {template_path}")
+                except (json.JSONDecodeError, Exception) as e:
+                    logger.warning(f"Failed to load template '{template_file}': {e}")
+
+            logger.debug(f"Loaded {len(templates)} built-in template(s): {list(templates.keys())}")
+
+        except FileNotFoundError:
+            logger.debug("No templates directory found, skipping built-in templates")
+        except Exception as e:
+            logger.warning(f"Error loading built-in templates: {e}")
 
         return templates
 

@@ -1,5 +1,3 @@
 """
-CoreDNS Builder Templates
+CoreDNS Plugin Resources - Builder Package
 """
-
-__all__ = []

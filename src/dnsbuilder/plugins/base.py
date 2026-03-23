@@ -33,82 +33,58 @@ class PluginInfo:
 
 
 # Global registry for plugin resources
-# Maps: resource_subpath -> package_name
-# e.g., "images/templates/coredns" -> "dnsb_coredns.resources"
-_PLUGIN_RESOURCES: Dict[str, str] = {}
-
-# Global registry for plugin build templates
-# Maps: (software, template_name) -> template_dict
-# e.g., ("coredns", "auth") -> {"command": "...", "volumes": [...]}
-_PLUGIN_BUILD_TEMPLATES: Dict[tuple, Dict[str, Any]] = {}
+# Maps: resource_subpath -> list of package_names
+# e.g., "builder/templates" -> ["dnsb_coredns.resources", "dnsb_powerdns.resources"]
+# Multiple plugins can register the same path, all will be included.
+_PLUGIN_RESOURCES: Dict[str, List[str]] = {}
 
 
-def get_plugin_resource_package(path: str) -> Optional[str]:
+def get_plugin_resource_packages(path: str) -> List[str]:
     """
-    Get the package that provides a resource path.
+    Get all packages that provide a resource path.
 
     Args:
-        path: Resource path (e.g., "images/templates/coredns")
-
-    Returns:
-        Package name if found, None otherwise
+        path: Resource path (e.g., "builder/templates")
     """
     # Check for exact match first
     if path in _PLUGIN_RESOURCES:
-        return _PLUGIN_RESOURCES[path]
+        return _PLUGIN_RESOURCES[path].copy()
 
     # Check for parent directory match
     parts = path.split("/")
     for i in range(len(parts), 0, -1):
         parent = "/".join(parts[:i])
         if parent in _PLUGIN_RESOURCES:
-            return _PLUGIN_RESOURCES[parent]
+            return _PLUGIN_RESOURCES[parent].copy()
 
-    return None
+    return []
+
+
+def get_plugin_resource_package(path: str) -> Optional[str]:
+    """
+    Get the first package that provides a resource path.
+    Deprecated: Use get_plugin_resource_packages() to get all packages.
+    
+    Args:
+        path: Resource path (e.g., "images/templates/coredns")
+    """
+    packages = get_plugin_resource_packages(path)
+    return packages[0] if packages else None
 
 
 def register_plugin_resource(path: str, package: str) -> None:
     """
     Register a plugin's resource package.
+    Multiple plugins can register the same path; all will be included
+    when listing directory contents.
 
-    Args:
-        path: Resource path prefix (e.g., "images/templates/coredns")
-        package: Python package name (e.g., "dnsb_coredns.resources")
     """
-    _PLUGIN_RESOURCES[path] = package
-    logger.debug(f"Registered plugin resource: {path} -> {package}")
+    if path not in _PLUGIN_RESOURCES:
+        _PLUGIN_RESOURCES[path] = []
 
-
-def get_plugin_build_templates() -> Dict[str, Dict[str, Any]]:
-    """
-    Get all plugin build templates.
-
-    Returns:
-        Dictionary mapping software -> template_name -> template_dict
-    """
-    result: Dict[str, Dict[str, Any]] = {}
-    for (software, template_name), template in _PLUGIN_BUILD_TEMPLATES.items():
-        if software not in result:
-            result[software] = {}
-        result[software][template_name] = template
-    return result
-
-
-def register_plugin_build_template(
-    software: str,
-    template_name: str,
-    template: Dict[str, Any]
-) -> None:
-    """
-    Register a build template for a software.
-
-    Args:
-        software: Software identifier (e.g., "coredns")
-        template_name: Template name (e.g., "auth", "forwarder")
-        template: Template dictionary with keys like "command", "volumes", etc.
-    """
-    _PLUGIN_BUILD_TEMPLATES[(software, template_name)] = template
-    logger.debug(f"Registered build template: {software}:{template_name}")
+    if package not in _PLUGIN_RESOURCES[path]:
+        _PLUGIN_RESOURCES[path].append(package)
+        logger.debug(f"Registered plugin resource: {path} -> {package}")
 
 
 class Plugin(ABC):
@@ -119,6 +95,7 @@ class Plugin(ABC):
     - Image implementations (new DNS server types)
     - Behavior implementations (how DNS servers behave)
     - Includer implementations (config file include patterns)
+    - Constants overrides (via attributes class attribute)
     """
 
     # Plugin metadata - subclasses MUST override these
@@ -129,6 +106,19 @@ class Plugin(ABC):
 
     # Priority for load order (lower = earlier)
     priority: int = 100
+
+    # Constants to override/extend when plugin loads
+    # Uses same merge logic as .dnsbattribute
+    # Example:
+    #   attributes = {
+    #       "DNS_SOFTWARE_BLOCKS": {
+    #           "coredns": {"global"}
+    #       },
+    #       "RECOGNIZED_PATTERNS": {
+    #           "coredns": [r"\bcoredns\b"]
+    #       }
+    #   }
+    attributes: Dict[str, Any] = {}
 
     @abstractmethod
     def on_load(self, registry: "PluginRegistry") -> None:
@@ -376,7 +366,8 @@ class PluginRegistry:
         templates: bool = True,
         defaults: bool = True,
         controls: bool = True,
-        scripts: bool = False
+        scripts: bool = False,
+        configs: bool = True
     ) -> None:
         """
         Register plugin resources for a software type.
@@ -391,6 +382,7 @@ class PluginRegistry:
             defaults: Whether to register defaults path
             controls: Whether to register controls path
             scripts: Whether to register scripts path
+            configs: Whether to register configs path (for base config files)
 
         Example:
             def on_load(self, registry):
@@ -426,52 +418,25 @@ class PluginRegistry:
                 f"Registered scripts resource: {path} -> {package} (from {plugin_name})"
             )
 
-        logger.info(
-            f"Registered resources for '{software}' from plugin '{plugin_name}'"
+        if configs:
+            # Register configs path for base configuration files
+            # This allows resource:/configs/coredns_xxx_base.conf to work
+            path = "configs"
+            register_plugin_resource(path, package)
+            logger.debug(
+                f"Registered configs resource: {path} -> {package} (from {plugin_name})"
+            )
+
+        # Register builder templates for this software
+        # This allows resource:/builder/templates.d/coredns to work
+        path = "builder/templates"
+        register_plugin_resource(path, package)
+        logger.debug(
+            f"Registered builder templates resource: {path} -> {package} (from {plugin_name})"
         )
 
-    def register_build_template(
-        self,
-        software: str,
-        template_name: str,
-        template: Dict[str, Any],
-        override: bool = False
-    ) -> None:
-        """
-        Register a build template for a software.
-
-        Build templates are used with `ref: std:<template_name>` in builds.
-
-        Args:
-            software: Software identifier (e.g., "coredns")
-            template_name: Template name (e.g., "auth", "forwarder")
-            template: Template dictionary with keys like:
-                - command: Command to run
-                - volumes: List of volume mounts
-                - files: Dict of files to create
-                - build: Whether to build the image (default True)
-            override: Whether to override existing template
-
-        Example:
-            def on_load(self, registry):
-                registry.register_build_template("coredns", "auth", {
-                    "command": "coredns -conf /etc/coredns/Corefile",
-                    "volumes": ["${origin}./${name}/contents:/etc/coredns:rw"]
-                })
-        """
-        key = (software, template_name)
-
-        if key in _PLUGIN_BUILD_TEMPLATES and not override:
-            logger.warning(
-                f"Build template {software}:{template_name} already exists. "
-                f"Use override=True to replace."
-            )
-            return
-
-        register_plugin_build_template(software, template_name, template)
-        plugin_name = self._current_plugin or "unknown"
         logger.info(
-            f"Registered build template: {software}:{template_name} from '{plugin_name}'"
+            f"Registered resources for '{software}' from plugin '{plugin_name}'"
         )
 
     # =========================================================================

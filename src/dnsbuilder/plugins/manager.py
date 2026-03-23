@@ -161,7 +161,8 @@ class PluginManager:
         """
         Load a single plugin instance.
 
-        Sets the plugin context and calls on_load.
+        Sets the plugin context and calls on_load, then applies
+        any constants overrides defined in plugin.attributes.
 
         Args:
             plugin: The plugin instance to load
@@ -177,9 +178,32 @@ class PluginManager:
             self._registry.register_plugin_instance(plugin)
             self._plugins[plugin.name] = plugin
 
+            # Apply plugin attributes (constants overrides)
+            if plugin.attributes:
+                self._apply_plugin_attributes(plugin)
+
         finally:
             # Always clear context
             PluginRegistry._current_plugin = None
+
+    def _apply_plugin_attributes(self, plugin: Plugin) -> None:
+        """
+        Apply plugin's attributes to constants module.
+
+        Uses the same merge logic as .dnsbattribute file.
+
+        Args:
+            plugin: The plugin whose attributes to apply
+        """
+        from .. import constants
+        from ..attribute import AttributeLoader
+
+        logger.debug(
+            f"[PluginManager] Applying attributes from plugin '{plugin.name}': "
+            f"{list(plugin.attributes.keys())}"
+        )
+
+        AttributeLoader.apply(constants, plugin.attributes)
 
     def unload_plugin(self, name: str) -> bool:
         """

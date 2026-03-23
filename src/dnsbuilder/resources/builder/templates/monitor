@@ -1,0 +1,72 @@
+{
+    "influxdb": {
+        "build": false,
+        "image": "tutum/influxdb",
+        "ports": [
+            "8083:8083",
+            "8086:8086"
+        ],
+        "volumes": [
+            "${origin}./${name}/contents:/data"
+        ]
+    },
+    "cadvisor": {
+        "build": false,
+        "image": "google/cadvisor",
+        "ports": [
+            "8080:8080"
+        ],
+        "volumes": [
+            "/:/rootfs:ro",
+            "/var/run:/var/run:rw",
+            "/sys:/sys:ro",
+            "/var/lib/docker/:/var/lib/docker:ro"
+        ]
+    },
+    "grafana": {
+        "build": false,
+        "image": "grafana/grafana",
+        "user": "104",
+        "ports": [
+            "3000:3000"
+        ],
+        "volumes": [
+            "${origin}./${name}/contents:/var/lib/grafana"
+        ]
+    },
+    "traffic": {
+        "cap_add": [
+            "NET_ADMIN",
+            "NET_RAW"
+        ],
+        "network_mode": "host",
+        "address": "",
+        "environment": {
+            "ENABLE_PROMETHEUS_EXPORTER": "true",
+            "INET": "${project.inet}",
+            "FILTER": "udp and port 53",
+            "ANAME": "${required}",
+            "ATTACKER": "${services.${environment.ANAME}.ip}",
+            "RNAME": "${required}",
+            "RECURSOR": "${services.${environment.RNAME}.ip}",
+            "SOFTWARE": "${services.${environment.RNAME}.image.software}"
+        },
+        "volumes": [
+            "resource:/scripts/sh/pcap.sh:/usr/local/etc/pcap.sh",
+            "resource:/scripts/configs/supervisord.conf:/usr/local/etc/supervisord.conf",
+            "${origin}./${name}/contents:/usr/local/etc",
+            "resource:/scripts/py/trace.py:/usr/local/etc/trace.py",
+            "resource:/scripts/py/${environment.SOFTWARE}.py:/usr/local/etc/${environment.SOFTWARE}.py",
+            "resource:/scripts/py/stat.py:/usr/local/etc/stat.py",
+            "resource:/images/controls/${environment.SOFTWARE}:/usr/local/var/${environment.SOFTWARE}:rw"
+        ],
+        "command": [
+            "bash",
+            "/usr/local/etc/pcap.sh"
+        ],
+        "expose": [
+            "53",
+            "9153"
+        ]
+    }
+}

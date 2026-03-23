@@ -1109,12 +1109,16 @@ class ResourceFileSystem(FileSystem):
     def __init__(self):
         super().__init__()
 
-    def _get_resource_traversable(self, path: DNSBPath) -> resources.abc.Traversable:
+    def _get_resource_traversables(self, path: DNSBPath) -> List[resources.abc.Traversable]:
         """
-        Get Traversable object for resource.
+        Get Traversable objects for resource from all sources.
 
-        First checks if the path is registered by a plugin,
-        then falls back to the built-in dnsbuilder.resources package.
+        Returns a list of Traversable objects in order:
+        1. All plugin packages that registered this path
+        2. Built-in dnsbuilder.resources package
+
+        Callers can iterate through the list to find the first valid match,
+        or merge results from all sources (e.g., for listdir).
         """
         if path.protocol != "resource":
             raise ProtocolError(f"Only resource protocol path is supported, got {path.protocol}")
@@ -1123,35 +1127,75 @@ class ResourceFileSystem(FileSystem):
         path_parts = path.parts[1:]  # Skip the empty first part
         path_str = "/".join(path_parts)
 
-        # Check if this path is provided by a plugin
-        from ..plugins.base import get_plugin_resource_package
-        plugin_package = get_plugin_resource_package(path_str)
+        traversables: List[resources.abc.Traversable] = []
+        from ..plugins.base import get_plugin_resource_packages
+        plugin_packages = get_plugin_resource_packages(path_str)
 
-        if plugin_package:
-            # Load from plugin's resource package
-            logger.debug(f"[ResourceFS] Loading '{path_str}' from plugin package: {plugin_package}")
+        for plugin_package in plugin_packages:
+            # Load from each plugin's resource package
             try:
                 package = resources.files(plugin_package)
                 traversable = package
                 for part in path_parts:
                     traversable = traversable.joinpath(part)
-                return traversable
+                traversables.append(traversable)
+                logger.debug(f"[ResourceFS] Added plugin traversable from '{plugin_package}' for '{path_str}'")
             except (ModuleNotFoundError, FileNotFoundError) as e:
-                logger.warning(
+                logger.debug(
                     f"[ResourceFS] Plugin package '{plugin_package}' not found for path '{path_str}': {e}"
                 )
-                # Fall through to built-in resources
 
-        # Load from built-in dnsbuilder.resources
-        package = resources.files("dnsbuilder.resources")
-        traversable = package
-        for part in path_parts:
-            traversable = traversable.joinpath(part)
-        return traversable
+        # Also add built-in dnsbuilder.resources
+        try:
+            package = resources.files("dnsbuilder.resources")
+            traversable = package
+            for part in path_parts:
+                traversable = traversable.joinpath(part)
+            traversables.append(traversable)
+            logger.debug(f"[ResourceFS] Added built-in traversable for '{path_str}'")
+        except (ModuleNotFoundError, FileNotFoundError) as e:
+            logger.debug(
+                f"[ResourceFS] Built-in resources not found for path '{path_str}': {e}"
+            )
+
+        return traversables
+
+    def _get_resource_traversable(self, path: DNSBPath) -> resources.abc.Traversable:
+        """
+        Get the first valid Traversable object for resource.
+
+        This is a convenience method for single-file operations (read, exists, etc.).
+        Returns the first traversable that exists (plugin first, then built-in).
+        """
+        for traversable in self._get_resource_traversables(path):
+            if traversable.is_file() or traversable.is_dir():
+                return traversable
+        # If nothing found, return the last one (for error messages)
+        traversables = self._get_resource_traversables(path)
+        if traversables:
+            return traversables[0]
+        raise FileNotFoundError(f"Resource not found: {path}")
 
     @override
     def listdir(self, path: DNSBPath) -> List[DNSBPath]:
-        return [path / DNSBPath(p).name for p in self._get_resource_traversable(path).iterdir()]
+        """
+        List directory contents, merging results from all sources.
+        """
+        all_items: Dict[str, DNSBPath] = {}
+
+        for traversable in self._get_resource_traversables(path):
+            if traversable.is_dir():
+                for item in traversable.iterdir():
+                    item_name = item.name
+                    if item_name not in all_items:
+                        all_items[item_name] = path / item_name
+
+        if not all_items:
+            # If no items found, check if the path exists at all
+            if not self.exists(path):
+                raise DNSBPathNotFoundError(f"Directory not found: {path}")
+
+        return list(all_items.values())
 
     @override
     def read_text(self, path: DNSBPath, encoding: str = "utf-8") -> str:

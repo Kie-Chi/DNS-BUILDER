@@ -294,6 +294,16 @@ class CoreDNSPlugin(Plugin):
     author = "DNS Builder Team"
     priority = 50  # Higher priority (lower number = earlier load)
 
+    # Constants to override/extend when plugin loads
+    attributes = {
+        "DNS_SOFTWARE_BLOCKS": {
+            "coredns": {"global"}
+        },
+        "RECOGNIZED_PATTERNS": {
+            "coredns": [r"\bcoredns\b"]
+        }
+    }
+
     def on_load(self, registry: PluginRegistry):
         """
         Register CoreDNS implementations.
@@ -323,40 +333,26 @@ class CoreDNSPlugin(Plugin):
         # Register Includer
         registry.register_includer("coredns", CoreDNSIncluder)
 
-        # Register Resources (templates, defaults, controls)
+        # Register Resources (templates, defaults, controls, configs, builder templates)
+        # This automatically registers:
+        # - images/templates/coredns (Dockerfile templates)
+        # - images/controls/coredns (control files)
+        # - configs/ (base config files)
+        # - builder/templates.d/coredns (build templates for ref: std:auth, etc.)
         registry.register_resources(
             "coredns",
             "dnsb_coredns.resources",
             templates=True,
             defaults=False,  # CoreDNS doesn't need defaults
             controls=True,
-            scripts=False
+            scripts=False,
+            configs=True
         )
-
-        # Register Build Templates (for ref: std:auth, std:forwarder, etc.)
-        registry.register_build_template("coredns", "auth", {
-            "command": "coredns -conf /etc/coredns/Corefile",
-            "volumes": [
-                "${origin}./${name}/contents:/etc/coredns:rw"
-            ]
-        })
-        registry.register_build_template("coredns", "forwarder", {
-            "command": "coredns -conf /etc/coredns/Corefile",
-            "volumes": [
-                "${origin}./${name}/contents:/etc/coredns:rw"
-            ]
-        })
-        registry.register_build_template("coredns", "recursor", {
-            "command": "coredns -conf /etc/coredns/Corefile",
-            "volumes": [
-                "${origin}./${name}/contents:/etc/coredns:rw"
-            ]
-        })
 
         logger.info(
             "[CoreDNSPlugin] Registered: image=coredns, "
             "behaviors=[forward, stub, hint, master], "
-            "includer=enabled, resources=enabled, build_templates=[auth, forwarder, recursor]"
+            "includer=enabled, resources=enabled (templates, configs, builder_templates)"
         )
 
     def on_unload(self):

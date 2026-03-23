@@ -1,0 +1,22 @@
+{
+    "recursor": {
+        "command": "kresd -v -c /usr/local/etc/kresd.yml",
+        "volumes": [
+            "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+            "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+        ],
+        "files": {
+            "/usr/local/etc/kresd.yml": "lua:\n  script: |\n    dofile('/usr/local/etc/kresd.conf')"
+        }
+    },
+    "forwarder": {
+        "command": "kresd -v -c /usr/local/etc/kresd.yml",
+        "volumes": [
+            "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+            "${origin}./${name}/contents/zones/noroot.hints:/etc/knot-resolver/root.hints"
+        ],
+        "files": {
+            "/usr/local/etc/kresd.yml": "lua:\n  script: |\n    dofile('/usr/local/etc/kresd.conf')"
+        }
+    }
+}

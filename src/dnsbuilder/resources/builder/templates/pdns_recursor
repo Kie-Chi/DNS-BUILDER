@@ -1,0 +1,20 @@
+{
+    "recursor": {
+        "command": "/usr/local/sbin/pdns_recursor --config-dir=/usr/local/etc",
+        "volumes": [
+            "resource:/configs/pdns_recursor_base.conf:/usr/local/etc/recursor.conf:rw"
+        ]
+    },
+    "forwarder": {
+        "command": "/usr/local/sbin/pdns_recursor --config-dir=/usr/local/etc",
+        "volumes": [
+            "resource:/configs/pdns_recursor_base.conf:/usr/local/etc/recursor.conf:rw"
+        ]
+    },
+    "auth": {
+        "command": "/usr/local/sbin/pdns_recursor --config-dir=/usr/local/etc",
+        "volumes": [
+            "resource:/configs/pdns_recursor_base.conf:/usr/local/etc/recursor.conf:rw"
+        ]
+    }
+}

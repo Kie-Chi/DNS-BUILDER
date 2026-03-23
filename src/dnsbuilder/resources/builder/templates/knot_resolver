@@ -1,0 +1,18 @@
+{
+    "recursor": {
+        "command": "kresd -v -c /usr/local/etc/kresd.conf /tmp/kresd_test",
+        "volumes": [
+            "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+            "${origin}./${name}/contents/tmp:/tmp/kresd_test",
+            "resource:/configs/knot/noroot.hints:/etc/knot-resolver/root.hints"
+        ]
+    },
+    "forwarder": {
+        "command": "kresd -v -c /usr/local/etc/kresd.conf /tmp/kresd_test",
+        "volumes": [
+            "resource:/configs/kresd_recursor_base.conf:/usr/local/etc/kresd.conf:rw",
+            "${origin}./${name}/contents/tmp:/tmp/kresd_test",
+            "resource:/configs/knot/noroot.hints:/etc/knot-resolver/root.hints"
+        ]
+    }
+}
