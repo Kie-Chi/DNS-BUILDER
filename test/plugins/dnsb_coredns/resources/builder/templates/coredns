@@ -1,20 +1,20 @@
 {
     "auth": {
-        "command": "coredns -conf /etc/coredns/Corefile",
+        "command": "coredns -conf /etc/coredns/coredns.conf",
         "volumes": [
-            "resource:/configs/coredns_auth_base.conf:/etc/coredns/Corefile:rw"
+            "resource:/configs/coredns_auth_base.conf:/etc/coredns/coredns.conf:rw"
         ]
     },
     "forwarder": {
-        "command": "coredns -conf /etc/coredns/Corefile",
+        "command": "coredns -conf /etc/coredns/coredns.conf",
         "volumes": [
-            "resource:/configs/coredns_forwarder_base.conf:/etc/coredns/Corefile:rw"
+            "resource:/configs/coredns_forwarder_base.conf:/etc/coredns/coredns.conf:rw"
         ]
     },
     "recursor": {
-        "command": "coredns -conf /etc/coredns/Corefile",
+        "command": "coredns -conf /etc/coredns/coredns.conf",
         "volumes": [
-            "resource:/configs/coredns_recursor_base.conf:/etc/coredns/Corefile:rw"
+            "resource:/configs/coredns_recursor_base.conf:/etc/coredns/coredns.conf:rw"
         ]
     }
 }
