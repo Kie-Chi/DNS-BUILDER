@@ -101,10 +101,10 @@ class DNSSECResigner:
             logger.debug(f"[DNSSEC-Resigner] Built dependency graph with {len(zone_graph)} zone(s)")
             logger.debug(f"[DNSSEC-Resigner] Zone graph: {zone_graph}")
 
-            # Execute pre-resign hooks for all zones
-            # Users can modify key:/ filesystem to inject fake DS records
+            # Execute mid hooks for all zones
+            # All zone keys are now in key:/, users can modify DS records or keys
             for zone_name, zone_info in zone_graph.items():
-                self._execute_hook('pre-resign', zone_info['service'], zone_name, {
+                self._execute_hook('mid', zone_info['service'], zone_name, {
                     'zone_graph': zone_graph
                 })
 
@@ -140,9 +140,10 @@ class DNSSECResigner:
 
             logger.info(f"[DNSSEC-Resigner] Re-signing completed: {success_count} success, {skip_count} skipped (leaf zones)")
 
-            # Execute post-resign hooks for all zones
+            # Execute post hooks for all zones
+            # Re-signing is complete, users can modify final signed zones in temp:/
             for zone_name, zone_info in zone_graph.items():
-                self._execute_hook('post-resign', zone_info['service'], zone_name, {
+                self._execute_hook('post', zone_info['service'], zone_name, {
                     'zone_graph': zone_graph
                 })
 

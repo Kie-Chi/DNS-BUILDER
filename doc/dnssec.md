@@ -112,15 +112,49 @@ builds:
 
 ## DNSSEC Hooks
 
-DNSSEC Hooks 允许在签名过程的关键节点注入自定义 Python 脚本，主要用于 DNS 漏洞复现场景，例如：
+DNSSEC Hooks 允许在签名过程的关键节点注入自定义 Python 脚本，主要用于 DNS 漏洞复现场景。
 
-- 在 Re-Sign 之前注入额外的 DS 记录
-- 添加额外的密钥模拟密钥泄露场景
-- 修改签名参数模拟算法弱点
+### 签名流程
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        DNSSEC 签名流程                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. 首次签名阶段 (每个 zone 独立执行)                            │
+│     ┌──────────────┐                                            │
+│     │ 生成 zone 文件 │                                           │
+│     └──────┬───────┘                                            │
+│            ↓                                                    │
+│     ┌──────────────┐                                            │
+│     │   pre hook   │  ← 可修改: unsigned_content                 │
+│     └──────┬───────┘                                            │
+│            ↓                                                    │
+│     ┌──────────────┐                                            │
+│     │  DNSSEC 签名  │                                            │
+│     └──────┬───────┘                                            │
+│            ↓                                                    │
+│     ┌──────────────┐                                            │
+│     │ 写入 key:/   │  ← 密钥、DS 记录写入 key:/ 文件系统          │
+│     └──────────────┘                                            │
+│                                                                 │
+│  2. Re-signing 阶段 (建立信任链，父 zone 签名子 zone 的 DS)       │
+│     ┌──────────────┐                                            │
+│     │   mid hook   │  ← 可修改: key:/ (注入伪造 DS、修改密钥)     │
+│     └──────┬───────┘                                            │
+│            ↓                                                    │
+│     ┌──────────────┐                                            │
+│     │  Re-signing  │  ← 父 zone 重新签名，包含子 zone 的 DS       │
+│     └──────┬───────┘                                            │
+│            ↓                                                    │
+│     ┌──────────────┐                                            │
+│     │  post hook   │  ← 可修改: temp:/services/... (最终签名结果) │
+│     └──────────────┘                                            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### 配置格式
-
-在服务配置中使用 `dnssec.hooks` 字段：
 
 ```yaml
 builds:
@@ -130,123 +164,128 @@ builds:
     dnssec:
       enable: true
       hooks:
-        pre-sign: |
-          print(f"About to sign zone: {zone_name}")
+        pre: |
+          # 修改未签名的 zone 内容
+          print(f"Zone: {zone_name}")
+          # unsigned_content = "modified..."
 
-        pre-resign: |
-          # 注入额外的 DS 记录
-          extra_ds = "example.com. IN DS 12345 13 2 ABCDEF..."
-          fs.write_text(f"key:/{service_name}/extra.ds", extra_ds)
-
-        post-sign: |
-          print(f"Zone signed: {zone_name}")
-          print(f"DS record: {ds_content}")
-```
-
-### 可用的 Hooks
-
-| Hook | 执行时机 | 可用变量 | 用途 |
-|------|----------|----------|------|
-| `pre-sign` | 首次签名之前 | `zone_name`, `unsigned_content`, `service_name`, `fs` | 修改签名前的区域内容 |
-| `post-sign` | 首次签名完成之后 | `zone_name`, `signed_content`, `ksk_key`, `zsk_key`, `ds_content` | 检查或修改签名结果 |
-| `pre-resign` | Re-Sign 流程开始前 | `zone_name`, `zone_graph`, `fs` | **修改 key:/ 注入伪造 DS** |
-| `post-resign` | Re-Sign 流程完成后 | `zone_name`, `zone_graph`, `fs` | 检查最终结果 |
-
-### DS 注入机制
-
-`pre-resign` hook 在整个 re-signing 流程开始前执行，你可以直接修改 `key:/` 文件系统：
-
-```yaml
-builds:
-  root:
-    image: bind
-    dnssec:
-      enable: true
-      hooks:
-        pre-resign: |
-          # 写入伪造的 DS 文件到 key:/
-          fake_ds = "malicious.com. IN DS 99999 13 2 DEADBEEF123456..."
+        mid: |
+          # 注入伪造的 DS 记录到 key:/
+          fake_ds = "malicious.com. IN DS 99999 13 2 DEADBEEF..."
           fs.write_text("key:/root/malicious.ds", fake_ds)
 
-          # 或修改已有的 DS 文件
-          # existing = fs.read_text("key:/tld/com.ds")
-          # fs.write_text("key:/tld/com.ds", existing + "\n" + fake_ds)
+        post: |
+          # 修改最终的签名结果
+          signed_path = f"temp:/services/{service_name}/zones/db.{zone_name_clean}"
+          content = fs.read_text(signed_path)
+          # fs.write_text(signed_path, modified_content)
 ```
 
-系统会在 re-signing 时读取 `key:/` 下所有的 `.ds` 文件。
+### Hooks 详细说明
 
-### Hook 变量说明
+| Hook | 执行时机 | 可修改内容 | 执行次数 |
+|------|----------|------------|----------|
+| `pre` | 单个 zone 签名前 | `unsigned_content` (未签名的 zone 文件) | 每个 zone 一次 |
+| `mid` | 所有 zone 签名完成后，re-signing 前 | `key:/` 文件系统 (DS 记录、密钥) | 每个 zone 一次 |
+| `post` | Re-signing 完成后 | `temp:/services/...` 文件系统 (最终签名结果) | 每个 zone 一次 |
 
-每个 hook 都可以访问以下变量：
+### 可用变量
+
+所有 hooks 都可以访问以下变量：
 
 | 变量名 | 类型 | 说明 |
 |--------|------|------|
-| `zone_name` | `str` | 当前处理的区域名（如 `example.com.`） |
+| `zone_name` | `str` | 当前区域名（如 `example.com.`） |
 | `zone_name_clean` | `str` | 清理后的区域名（如 `example.com`） |
 | `service_name` | `str` | 服务名称 |
-| `fs` | `FileSystem` | 文件系统对象，用于读写文件 |
+| `fs` | `FileSystem` | 文件系统对象 |
 | `workdir` | `DNSBPath` | 工作目录路径 |
 | `config` | `dict` | 当前服务的完整配置 |
 
-### 漏洞复现示例
+`pre` hook 额外变量：
+| 变量名 | 类型 | 说明 |
+|--------|------|------|
+| `unsigned_content` | `str` | 未签名的 zone 文件内容，**可修改** |
 
-#### 1. 注入伪造的 DS 记录
+`mid` hook 额外变量：
+| 变量名 | 类型 | 说明 |
+|--------|------|------|
+| `zone_graph` | `dict` | 所有 zone 的依赖关系图 |
+
+`post` hook 额外变量：
+| 变量名 | 类型 | 说明 |
+|--------|------|------|
+| `zone_graph` | `dict` | 所有 zone 的依赖关系图 |
+
+### 文件系统路径
+
+| 路径 | 用途 | 可用阶段 |
+|------|------|----------|
+| `key:/<service>/<zone>.ksk.key` | KSK 公钥 | mid, post |
+| `key:/<service>/<zone>.ksk.private` | KSK 私钥 | mid, post |
+| `key:/<service>/<zone>.zsk.key` | ZSK 公钥 | mid, post |
+| `key:/<service>/<zone>.zsk.private` | ZSK 私钥 | mid, post |
+| `key:/<service>/<zone>.ds` | DS 记录 | mid, post |
+| `temp:/services/<service>/zones/db.<zone>` | 签名后的 zone 文件 | post |
+| `temp:/services/<service>/zones/db.<zone>.unsigned` | 未签名的 zone 文件 | post |
+
+### 使用场景
+
+#### 1. 修改签名前的 zone 内容 (pre)
 
 ```yaml
-builds:
-  root:
-    image: bind
-    dnssec:
-      enable: true
-      hooks:
-        pre-resign: |
-          # 在 re-signing 前写入伪造的 DS 记录
-          fake_ds = "malicious.com. IN DS 99999 13 2 DEADBEEF..."
-          fs.write_text("key:/root/malicious.ds", fake_ds)
+hooks:
+  pre: |
+    # 缩短所有 TTL 值
+    lines = unsigned_content.split('\n')
+    modified = [line.replace('3600', '300') for line in lines]
+    unsigned_content = '\n'.join(modified)
 ```
 
-#### 2. 密钥泄露模拟
+#### 2. 注入伪造的 DS 记录 (mid)
 
 ```yaml
-builds:
-  compromised_zone:
-    image: bind
-    dnssec:
-      enable: true
-      hooks:
-        post-sign: |
-          # 将私钥暴露到特定位置，模拟密钥泄露
-          import os
-          leak_dir = f"temp:/leaked_keys/{service_name}"
-          fs.mkdir(leak_dir, exist_ok=True)
-          # KSK 私钥已在 key:/ 中，可以复制到其他位置
-          ksk_private = fs.read_text(f"key:/{service_name}/{zone_name_clean}.ksk.private")
-          fs.write_text(f"{leak_dir}/leaked_ksk.private", ksk_private)
-          print(f"[WARNING] Key leaked to {leak_dir}")
+hooks:
+  mid: |
+    # 写入伪造的 DS 记录
+    fake_ds = "malicious.com. IN DS 99999 13 2 DEADBEEF123456..."
+    fs.write_text("key:/root/malicious.ds", fake_ds)
+
+    # 或修改已有的 DS 文件
+    # existing = fs.read_text("key:/tld/com.ds")
+    # fs.write_text("key:/tld/com.ds", existing + "\n" + fake_ds)
 ```
 
-#### 3. 签名参数修改
+#### 3. 修改最终签名结果 (post)
 
 ```yaml
-builds:
-  weak_zone:
-    image: bind
-    dnssec:
-      enable: true
-      hooks:
-        pre-sign: |
-          # 可以在这里修改区域内容，例如缩短 TTL
-          print(f"Original zone content length: {len(unsigned_content)}")
-          # 可以修改 unsigned_content 然后写回
-          # 注意：这只是示例，实际修改需要谨慎
+hooks:
+  post: |
+    # 读取签名后的 zone 文件
+    signed_path = f"temp:/services/{service_name}/zones/db.{zone_name_clean}"
+    content = fs.read_text(signed_path)
+
+    # 进行修改（例如添加额外的记录）
+    # modified = content + "\nextra.example.com. IN A 1.2.3.4"
+    # fs.write_text(signed_path, modified)
+```
+
+#### 4. 密钥泄露模拟 (mid)
+
+```yaml
+hooks:
+  mid: |
+    # 将私钥复制到临时目录，模拟泄露
+    ksk_private = fs.read_text(f"key:/{service_name}/{zone_name_clean}.ksk.private")
+    fs.write_text(f"temp:/leaked_keys/{zone_name_clean}.ksk.private", ksk_private)
+    print(f"[WARNING] Key leaked to temp:/leaked_keys/")
 ```
 
 ### 注意事项
 
-1. **执行顺序**：Hooks 按照配置顺序执行，同一 hook 类型可以配置多个脚本（列表格式）
+1. **执行顺序**：Hooks 按照 pre → mid → post 的顺序执行
 2. **错误处理**：如果 hook 执行失败，整个签名过程会停止
-3. **文件路径**：使用 `key:/` 路径访问密钥文件，使用 `temp:/` 访问临时文件
-4. **安全性**：Hooks 具有完整的文件系统访问权限，请谨慎使用
+3. **安全性**：Hooks 具有完整的文件系统访问权限，请谨慎使用
 
 ## 相关文档
 

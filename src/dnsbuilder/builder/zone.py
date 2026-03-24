@@ -223,8 +223,8 @@ class ZoneGenerator:
             raise
 
     def _sign_zone(self, unsigned_content: str) -> Optional[Tuple[str, str, str, str, str, str, str, str]]:
-        # Execute pre-sign hook before signing
-        hook_result = self._execute_hook('pre-sign', {
+        # Execute pre hook before signing
+        hook_result = self._execute_hook('pre', {
             'unsigned_content': unsigned_content,
             'temp_path': None  # Will be set inside temp context if needed
         })
@@ -328,14 +328,6 @@ class ZoneGenerator:
                     logger.warning(f"DS record file not found: {dsset_file}")
 
                 logger.debug(f"DNSSEC signing succeeded for '{self.zone_name}'")
-
-                # Execute post-sign hook after successful signing
-                self._execute_hook('post-sign', {
-                    'signed_content': signed_content,
-                    'ksk_key': ksk_key_content,
-                    'zsk_key': zsk_key_content,
-                    'ds_content': ds_content
-                })
 
                 return (signed_content, ksk_key_content, zsk_key_content, ds_content,
                         ksk_private_content, zsk_private_content, ksk_basename, zsk_basename)

@@ -78,10 +78,14 @@ def get_dnssec_hooks(build_conf: Dict[str, Any]) -> Dict[str, Any]:
     Get DNSSEC hooks configuration.
 
     DNSSEC hooks allow injecting custom scripts at specific points during
+    the DNSSEC signing process.
+
     Available hooks:
-        - pre_sign: Executed before initial zone signing
-        - pre_resign: Executed before re-signing parent zones (DS injection point)
-        - post_sign: Executed after zone signing completes
+        - pre: Executed before zone signing, can modify unsigned_content
+        - mid: Executed after all zones are signed and key:/ is populated,
+               can modify key:/ filesystem (inject fake DS, modify keys)
+        - post: Executed after re-signing completes, can modify final
+                signed zones in temp:/services/... filesystem
 
     Args:
         build_conf: The build configuration dictionary
@@ -96,15 +100,15 @@ def get_dnssec_hook(build_conf: Dict[str, Any], hook_name: str) -> Optional[str]
 
     Args:
         build_conf: The build configuration dictionary
-        hook_name: Name of the hook (e.g., 'pre_sign', 'pre_resign', 'post_sign')
+        hook_name: Name of the hook ('pre', 'mid', 'post')
 
     Returns:
         Hook script content as string, or None if not found
 
     Examples:
-        >>> get_dnssec_hook({'dnssec': {'hooks': {'pre_sign': 'pass'}}}, 'pre_sign')
+        >>> get_dnssec_hook({'dnssec': {'hooks': {'pre': 'pass'}}}, 'pre')
         'pass'
-        >>> get_dnssec_hook({'dnssec': {'hooks': {'pre_sign': 'pass'}}}, 'nonexistent')
+        >>> get_dnssec_hook({'dnssec': {'hooks': {'pre': 'pass'}}}, 'nonexistent')
         None
     """
     hooks = get_dnssec_hooks(build_conf)
