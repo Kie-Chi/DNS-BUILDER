@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import logging
 
 from . import constants
-from .protocols import BehaviorProtocol, ImageProtocol, IncluderProtocol
+from .protocols import BehaviorProtocol, ImageProtocol, IncluderProtocol, ZoneGeneratorProtocol
 from .abstractions import Behavior, Includer, InternalImage
 from .utils import discover_classes, extract_bhv_info, extract_img_info, extract_inc_info, override
 
@@ -134,7 +134,7 @@ class IncluderRegistry(Registry[str, Type[IncluderProtocol]]):
     """
     package = "dnsbuilder.bases.includers"
     base_class = Includer
-    
+
     @override
     def _register_item(self, class_name: str, discovered_class: Type[IncluderProtocol]):
         software = extract_inc_info(class_name)
@@ -148,10 +148,41 @@ class IncluderRegistry(Registry[str, Type[IncluderProtocol]]):
         return set(self.registry.keys())
 
 
+class ZoneGeneratorRegistry(Registry[str, Type[ZoneGeneratorProtocol]]):
+    """
+    Registry for managing zone generator implementations.
+
+    Unlike other registries, this does NOT auto-discover - zone generators
+    are registered manually by plugins or the default is used.
+
+    This allows different DNS software to provide custom zone file formats.
+    """
+    package = None  # No auto-discovery
+    base_class = None  # No auto-discovery
+
+    def __init__(self):
+        # Bypass the parent __init__ which requires package and base_class
+        self._registry: Dict[str, Type[ZoneGeneratorProtocol]] = {}
+        logger.debug(f"Initialized {self.__class__.__name__}")
+
+    def _register_item(self, class_name: str, discovered_class: Type[ZoneGeneratorProtocol]):
+        """Not used - manual registration only."""
+        pass
+
+    def generator(self, software: str) -> Optional[Type[ZoneGeneratorProtocol]]:
+        """Get a zone generator class by software type."""
+        return self.get(software)
+
+    def get_supports(self) -> Set[str]:
+        """Get all software types with registered zone generators."""
+        return set(self.registry.keys())
+
+
 # Global registries
 behavior_registry = BehaviorRegistry()
 image_registry = ImageRegistry()
 includer_registry = IncluderRegistry()
+zone_generator_registry = ZoneGeneratorRegistry()
 
 
 def initialize_registries(
@@ -178,6 +209,10 @@ def initialize_registries(
     # Auto-discover built-in includers
     includer_registry.discover()
 
+    # Zone generator registry does not auto-discover
+    # It is populated by plugins registering their custom generators
+    # If no plugin registers a generator for a software, the default is used
+
     logger.debug(f"Discovered {len(behavior_registry.registry)} behavior implementations")
     logger.debug(f"Discovered {len(image_registry.registry)} image implementations")
     logger.debug(f"Discovered {len(includer_registry.registry)} includer implementations")
@@ -190,3 +225,4 @@ def initialize_registries(
         if loaded:
             logger.info(f"Loaded plugins: {loaded}")
             logger.debug(f"After plugins - Supported software types: {behavior_registry.get_supports()}")
+            logger.debug(f"After plugins - Zone generators: {zone_generator_registry.get_supports()}")

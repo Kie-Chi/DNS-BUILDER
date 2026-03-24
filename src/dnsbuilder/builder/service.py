@@ -491,11 +491,31 @@ class ServiceHandler:
 
         # 2. Generate zone files and artifacts for each aggregated zone
         for zone, records in records_by_zone.items():
-            generator = ZoneGenerator(
-                self.context, zone, self.service_name, records,
-                enable_dnssec=enable_dnssec,
-                build_conf=self.build_conf
+            # Check if there's a custom ZoneGenerator for this software
+            from ..plugins import get_plugin_manager
+            plugin_manager = get_plugin_manager()
+            custom_generator_class = plugin_manager.registry.get_zone_generator(
+                self.image_obj.software
             )
+
+            if custom_generator_class:
+                # Use custom ZoneGenerator from plugin
+                generator = custom_generator_class(
+                    self.context, zone, self.service_name, records,
+                    enable_dnssec=enable_dnssec,
+                    build_conf=self.build_conf
+                )
+                logger.debug(
+                    f"Using custom ZoneGenerator '{custom_generator_class.__name__}' "
+                    f"for software '{self.image_obj.software}'"
+                )
+            else:
+                # Use default BIND-style ZoneGenerator
+                generator = ZoneGenerator(
+                    self.context, zone, self.service_name, records,
+                    enable_dnssec=enable_dnssec,
+                    build_conf=self.build_conf
+                )
             artifacts = generator.generate()  # Returns List[ZoneArtifact]
             
             # Find the primary zone file for config generation

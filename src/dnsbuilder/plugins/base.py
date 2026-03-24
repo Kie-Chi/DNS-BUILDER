@@ -12,7 +12,7 @@ from typing import Dict, Type, Set, Any, Optional, List
 from dataclasses import dataclass, field
 import logging
 
-from ..protocols import ImageProtocol, BehaviorProtocol, IncluderProtocol
+from ..protocols import ImageProtocol, BehaviorProtocol, IncluderProtocol, ZoneGeneratorProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,8 @@ class PluginRegistry:
         self,
         image_registry: "ImageRegistry",
         behavior_registry: "BehaviorRegistry",
-        includer_registry: "IncluderRegistry"
+        includer_registry: "IncluderRegistry",
+        zone_generator_registry: "ZoneGeneratorRegistry" = None
     ):
         """
         Initialize the plugin registry.
@@ -186,16 +187,20 @@ class PluginRegistry:
             image_registry: The core image registry
             behavior_registry: The core behavior registry
             includer_registry: The core includer registry
+            zone_generator_registry: The core zone generator registry
         """
         self._images = image_registry
         self._behaviors = behavior_registry
         self._includers = includer_registry
+        self._zone_generators = zone_generator_registry
         # Maps: software -> plugin_name
         self._plugin_images: Dict[str, str] = {}
         # Maps: (software, behavior_type) -> plugin_name
         self._plugin_behaviors: Dict[tuple, str] = {}
         # Maps: software -> plugin_name
         self._plugin_includers: Dict[str, str] = {}
+        # Maps: software -> plugin_name
+        self._plugin_zone_generators: Dict[str, str] = {}
         # Maps: plugin_name -> Plugin instance
         self._loaded_plugins: Dict[str, Plugin] = {}
 
@@ -355,6 +360,82 @@ class PluginRegistry:
 
     # =========================================================================
     #
+    # Zone Generator Registration
+    #
+    # =========================================================================
+
+    def register_zone_generator(
+        self,
+        software: str,
+        generator_class: Type[ZoneGeneratorProtocol],
+        override: bool = False
+    ) -> None:
+        """
+        Register a ZoneGenerator implementation.
+
+        This allows plugins to provide custom zone file formats for different
+        DNS software. If no generator is registered for a software, the default
+        BIND-style ZoneGenerator is used.
+
+        Args:
+            software: Software identifier (e.g., "coredns", "mydns")
+            generator_class: The ZoneGenerator class to register
+            override: If True, replace existing registration
+        """
+        if self._zone_generators is None:
+            logger.warning(
+                f"ZoneGeneratorRegistry not available, cannot register generator for '{software}'"
+            )
+            return
+
+        if software in self._zone_generators.registry and not override:
+            existing_plugin = self._plugin_zone_generators.get(software, "built-in")
+            raise ValueError(
+                f"ZoneGenerator '{software}' already registered by '{existing_plugin}'. "
+                f"Use override=True to replace."
+            )
+
+        self._zone_generators.register(software, generator_class)
+        self._plugin_zone_generators[software] = self._current_plugin or "unknown"
+
+        logger.debug(
+            f"Registered zone_generator '{software}' from plugin '{self._current_plugin or 'unknown'}'"
+        )
+
+    def unregister_zone_generator(self, software: str) -> bool:
+        """
+        Unregister a ZoneGenerator implementation.
+
+        Args:
+            software: Software identifier to unregister
+        """
+        if self._zone_generators is None:
+            return False
+
+        if software in self._plugin_zone_generators:
+            if software in self._zone_generators._registry:
+                del self._zone_generators._registry[software]
+            del self._plugin_zone_generators[software]
+            logger.debug(f"Unregistered zone_generator '{software}'")
+            return True
+        return False
+
+    def get_zone_generator(self, software: str) -> Optional[Type[ZoneGeneratorProtocol]]:
+        """
+        Get a ZoneGenerator class by software type.
+
+        Args:
+            software: Software identifier
+
+        Returns:
+            ZoneGenerator class or None if not found
+        """
+        if self._zone_generators is None:
+            return None
+        return self._zone_generators.generator(software)
+
+    # =========================================================================
+    #
     # Resource Registration
     #
     # =========================================================================
@@ -488,3 +569,7 @@ class PluginRegistry:
     def get_includers_by_plugin(self, plugin_name: str) -> Set[str]:
         """Get all includers registered by a specific plugin."""
         return {sw for sw, pn in self._plugin_includers.items() if pn == plugin_name}
+
+    def get_zone_generators_by_plugin(self, plugin_name: str) -> Set[str]:
+        """Get all zone generators registered by a specific plugin."""
+        return {sw for sw, pn in self._plugin_zone_generators.items() if pn == plugin_name}

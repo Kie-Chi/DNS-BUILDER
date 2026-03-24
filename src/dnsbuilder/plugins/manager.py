@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Type hints for registries (avoid circular imports)
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..registry import ImageRegistry, BehaviorRegistry, IncluderRegistry
+    from ..registry import ImageRegistry, BehaviorRegistry, IncluderRegistry, ZoneGeneratorRegistry
 
 
 class PluginManager:
@@ -65,13 +65,15 @@ class PluginManager:
         from ..registry import (
             behavior_registry,
             image_registry,
-            includer_registry
+            includer_registry,
+            zone_generator_registry
         )
 
         self._registry = PluginRegistry(
             image_registry=image_registry,
             behavior_registry=behavior_registry,
-            includer_registry=includer_registry
+            includer_registry=includer_registry,
+            zone_generator_registry=zone_generator_registry
         )
         self._plugins: Dict[str, Plugin] = {}
         self._loaded = False

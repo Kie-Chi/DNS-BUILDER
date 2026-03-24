@@ -19,11 +19,53 @@ logger = logging.getLogger(__name__)
 
 class ZoneGenerator:
     """
-    Generates the content for a DNS zone file using dnslib.
+    Default BIND-style zone file generator.
+
+    Generates standard BIND zone file format with SOA, NS, and user records.
     Supports DNSSEC signing with KSK and ZSK key generation.
     Supports DNSSEC hooks for vulnerability reproduction scenarios.
     Supports including pre-generated keys from external directories.
+
+    Plugins can create custom ZoneGenerator implementations to generate
+    different zone file formats for their DNS software.
+
+    To create a custom ZoneGenerator:
+        1. Subclass this class (or create a new class with the same interface)
+        2. Override the `generate()` method
+        3. Return a list of ZoneArtifact objects
+
+    Example custom generator:
+
+        class MyDNSZoneGenerator(ZoneGenerator):
+            def generate(self) -> List[ZoneArtifact]:
+                # Generate custom format
+                lines = []
+                for record in self.records:
+                    lines.append(f"{record.rname} {QTYPE.get(record.rtype)} {record.rdata}")
+                content = "\\n".join(lines)
+
+                return [ZoneArtifact(
+                    filename=f"{self.zone_name.rstrip('.')}.txt",
+                    content=content,
+                    container_path=f"/etc/mydns/{self.zone_name.rstrip('.')}.txt",
+                    is_primary=True
+                )]
+
+    Attributes:
+        context: BuildContext containing all build information
+        zone_name: The zone name (e.g., "example.com.")
+        ip: The service IP address
+        service_name: The service name with trailing dot
+        service_name_raw: The service name without modification
+        records: List of RR (Resource Record) objects to include in the zone
+        enable_dnssec: Whether DNSSEC signing is enabled
+        build_conf: Build configuration dictionary
+        dnssec_hooks: DNSSEC hook scripts (if enabled)
+        dnssec_includes: DNSSEC include directories (if enabled)
     """
+
+    # Default container path for zone files
+    DEFAULT_ZONE_CONTAINER_PATH = "/usr/local/etc/zones"
 
     def __init__(
         self,
@@ -34,6 +76,17 @@ class ZoneGenerator:
         enable_dnssec: bool = False,
         build_conf: Optional[Dict[str, Any]] = None
     ):
+        """
+        Initialize the zone generator.
+
+        Args:
+            context: BuildContext containing all build information
+            zone_name: The zone name (e.g., "example.com")
+            service_name: The service name
+            records: List of RR (Resource Record) objects
+            enable_dnssec: Whether to enable DNSSEC signing
+            build_conf: Build configuration dictionary
+        """
         self.context = context
         self.zone_name = zone_name.rstrip(".") + "."
         self.ip = self.context.service_ips.get(service_name)

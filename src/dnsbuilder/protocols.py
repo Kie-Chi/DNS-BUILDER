@@ -6,7 +6,7 @@ This module contains all Protocol definitions for the DNSBuilder framework.
 Protocols are the foundation layer with zero dependencies on other dnsbuilder modules.
 """
 
-from typing import Protocol, Dict, Any, List, Optional, runtime_checkable
+from typing import Protocol, Dict, Any, List, Optional, Type, runtime_checkable
 
 
 # ============================================================================
@@ -214,15 +214,55 @@ class ImageRegistryProtocol(Protocol):
 class IncluderRegistryProtocol(Protocol):
     """
     Protocol for includer registries.
-    
+
     Registries manage discovery and registration of includer implementations.
     """
-    
+
     def register(self, software: str, includer_class: Any) -> None:
         """Register an includer class."""
         ...
-    
+
     def includer(self, software: str) -> Optional[Any]:
         """Get an includer class by software type."""
+        ...
+
+
+# ============================================================================
+# Zone Generator Protocols
+# ============================================================================
+
+@runtime_checkable
+class ZoneGeneratorProtocol(Protocol):
+    """
+    Protocol for zone file generator implementations.
+
+    Zone generators create zone file artifacts for different DNS software.
+    Different DNS software may require different zone file formats.
+    """
+
+    def generate(self) -> List[Any]:
+        """
+        Generate zone file artifacts.
+
+        Returns:
+            List of ZoneArtifact objects containing zone file content and metadata
+        """
+        ...
+
+
+@runtime_checkable
+class ZoneGeneratorRegistryProtocol(Protocol):
+    """
+    Protocol for zone generator registries.
+
+    Registries manage discovery and registration of zone generator implementations.
+    """
+
+    def register(self, software: str, generator_class: Type[ZoneGeneratorProtocol]) -> None:
+        """Register a zone generator class."""
+        ...
+
+    def get(self, software: str) -> Optional[Type[ZoneGeneratorProtocol]]:
+        """Get a zone generator class by software type."""
         ...
 
