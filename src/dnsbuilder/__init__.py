@@ -33,6 +33,7 @@ from .registry import initialize_registries
 from .config import Config, ConfigModel
 from .builder import Builder, CachedBuilder
 from .io import DNSBPath, FileSystem, AppFileSystem, create_app_fs
+from .utils import Zone
 from .exceptions import (
     DNSBuilderError,
     ConfigurationError,
@@ -70,6 +71,8 @@ __all__ = [
     'FileSystem',
     'AppFileSystem',
     'create_app_fs',
+    # Utils
+    'Zone',
     # Exceptions
     'DNSBuilderError',
     'ConfigurationError',
