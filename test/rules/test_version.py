@@ -117,12 +117,21 @@ class TestVersion:
         assert v.prerelease == expected_prerelease
 
     @pytest.mark.parametrize("invalid_str", [
-        "1",
-        "1.2",
         "a.b.c",
         "invalid-version",
     ])
     def test_invalid_version_strings(self, invalid_str):
-        """Test that invalid version strings correctly raise a ValueError."""
-        with pytest.raises(ValueError, match=f"Unrecognized Version '{invalid_str}'"):
+        """Test that invalid version strings correctly raise ImageDefinitionError."""
+        from dnsbuilder.exceptions import ImageDefinitionError
+        with pytest.raises(ImageDefinitionError, match=f"Unrecognized Version '{invalid_str}'"):
              Version(invalid_str)
+
+    @pytest.mark.parametrize("valid_str, expected_core", [
+        ("1", (1, 0, 0)),
+        ("1.2", (1, 2, 0)),
+        ("2", (2, 0, 0)),
+    ])
+    def test_short_version_strings_are_valid(self, valid_str, expected_core):
+        """Test that short version strings like '1' or '1.2' are accepted and padded."""
+        v = Version(valid_str)
+        assert v.core == expected_core

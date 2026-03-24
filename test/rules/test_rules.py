@@ -76,25 +76,26 @@ class TestRule:
         assert ("1.2.3" in rule) is False
         assert (123 in rule) is False
         assert (None in rule) is False
-        
+
     @pytest.mark.parametrize("invalid_rule_str", [
-        "",           # Empty string
-        "1.0.0",      # Your Rule parser supports this, but let's imagine it's an invalid rule context
-        "[1.0.0]",    # Incomplete range
-        "==1.0.0",    # Unsupported operator
-        ">= 1.0.0, < 2.0.0", # Multiple rules in one string
-        "garbage",    # Not a valid version or rule format
+        "",             # Empty string
+        "[1.0.0]",      # Incomplete range (missing comma)
+        "[1.0, 2.0, 3.0]", # Too many items in range
+        "==1.0.0",      # Unsupported operator (double equals)
+        "<>1.0.0",      # Invalid operator
+        "garbage",      # Not a valid version
     ])
     def test_invalid_rule_string_parsing(self, invalid_rule_str):
-        """
-        Test that invalid rule strings raise an exception.
-        """
-        invalid_cases = [
-            "[1.0.0]",
-            "==1.0.0",
-            "[1.0, 2.0, 3.0]", # too many items
-            "<>1.0.0"
-        ]
-        for case in invalid_cases:
-            with pytest.raises(Exception):
-                Rule(case)
+        """Test that invalid rule strings raise an exception."""
+        from dnsbuilder.exceptions import ImageDefinitionError
+        with pytest.raises((ImageDefinitionError, Exception)):
+            Rule(invalid_rule_str)
+
+    @pytest.mark.parametrize("valid_rule_str", [
+        "1.0.0",        # Exact version match is valid
+        ">= 1.0.0",     # Comparison with space is valid
+    ])
+    def test_valid_rule_strings(self, valid_rule_str):
+        """Test that these rule strings are actually valid."""
+        rule = Rule(valid_rule_str)
+        assert rule is not None
