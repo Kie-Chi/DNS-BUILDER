@@ -149,6 +149,8 @@ PLACEHOLDER = {
 # --- Alias Variable ---
 ALIAS_MAP = {
     "address": "ip",
+    "r": "rip",
+    "rsrvip": "rip",
     "s": "services",
     "img": "image",
     "svc": "services",

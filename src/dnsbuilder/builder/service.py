@@ -138,9 +138,9 @@ class ServiceHandler:
                 "docker",
                 "Image is docker, will use image method"
             )
+        self.sip = context.service_ips.get(service_name)
+        self.ip = context.reserved_ips.get(service_name, self.sip)
 
-        self.ip = context.service_ips.get(service_name)
-        
         # Record IP allocation decisions
         if self.ip:
             self.trace.add_decision(

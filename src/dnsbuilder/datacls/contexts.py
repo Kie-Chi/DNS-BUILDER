@@ -33,6 +33,7 @@ class BuildContext(BaseModel):
     
     resolved_builds: Dict[str, Dict] = Field(default_factory=dict)
     service_ips: Dict[str, str] = Field(default_factory=dict)
+    reserved_ips: Dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def init_dependent_factories(self) -> "BuildContext":

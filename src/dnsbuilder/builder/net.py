@@ -1,6 +1,6 @@
 import ipaddress
 import logging
-from typing import Dict
+from typing import Dict, Tuple
 
 from .. import constants
 from ..exceptions import NetworkDefinitionError
@@ -17,12 +17,15 @@ class NetworkManager:
         next(self.ip_allocator, None)
         next(self.ip_allocator, None)
         self.service_ips: Dict[str, str] = {}
+        self.reserved_ips: Dict[str, str] = {} # if static IP is external, then we alloc a reserved ip for it.
         self.subnet = subnet_str
 
-    def plan(self, resolved_builds: Dict) -> Dict[str, str]:
+    def plan(self, resolved_builds: Dict) -> Tuple[Dict[str, str], Dict[str, str]]:
         """Allocates an IP for each service, validating any static assignments."""
         logger.info(f"Planning network for subnet {self.network}...")
         for service_name, build_conf in resolved_builds.items():
+            need_reserved = False
+            reserved_ip = ""
             if not build_conf.get('build', True):
                 logger.debug(f"Skipping IP allocation for service '{service_name}' as it has 'build: false'.")
                 continue
@@ -37,7 +40,13 @@ class NetworkManager:
             if ip_address:
                 logger.debug(f"[Network] Service '{service_name}' requested static IP: {ip_address}.")
                 if ipaddress.ip_address(ip_address) not in self.network:
-                    raise NetworkDefinitionError(f"Static IP '{ip_address}' for '{service_name}' is not in subnet '{self.network}'.")
+                    logger.warning(f"Static IP '{ip_address}' for '{service_name}' is not in subnet '{self.network}'.")
+                    try:
+                        reserved_ip = str(next(self.ip_allocator))
+                        logger.debug(f"[Network] Allocating next available dynamic IP to '{service_name}': {reserved_ip}.")
+                    except StopIteration:
+                        raise NetworkDefinitionError(f"Subnet {self.network} is out of available IP addresses.")
+                    need_reserved = True
                 if ip_address in self.service_ips.values():
                     raise NetworkDefinitionError(f"Static IP '{ip_address}' for '{service_name}' is already allocated.")
             else:
@@ -48,8 +57,10 @@ class NetworkManager:
                     raise NetworkDefinitionError(f"Subnet {self.network} is out of available IP addresses.")
             
             self.service_ips[service_name] = ip_address
+            if need_reserved:
+                self.reserved_ips[service_name] = reserved_ip
         logger.debug(f"Final allocated IPs: {self.service_ips}")
-        return self.service_ips
+        return self.service_ips, self.reserved_ips
     
     def compose(self) -> Dict:
         """Generates the 'networks' block for the docker-compose.yml file."""

@@ -1,9 +1,8 @@
 import yaml
 import logging
 import json
-from typing import Dict, Optional
+from typing import Dict, Tuple, Optional
 import asyncio
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from ..abstractions import Image
@@ -73,8 +72,8 @@ class Builder:
 
         # Plan network addresses for all services
         logger.debug("[Builder] Invoking NetworkManager for IP planning...")
-        service_ips = self._plan_net(context)
-        context = context.model_copy(update={"service_ips": service_ips})
+        service_ips, reserved_ips = self._plan_net(context)
+        context = context.model_copy(update={"service_ips": service_ips, "reserved_ips": reserved_ips})
 
         # Substitute variables (like ${name}, ${ip}) in the entire config
         logger.debug("[Builder] Invoking VariableSubstitutor for variable replacement...")
@@ -157,13 +156,13 @@ class Builder:
         logger.debug("[Resolver] Build resolution complete.")
         return resolved_builds
 
-    def _plan_net(self, context: BuildContext) -> Dict[str, str]:
+    def _plan_net(self, context: BuildContext) -> Tuple[Dict[str, str], Dict[str, str]]:
         """Allocates IP addresses to services."""
         logger.debug("[NetworkManager] Planning network addresses...")
         nm = NetworkManager(self.config.inet)
-        service_ips = nm.plan(context.resolved_builds)
+        service_ips, reserved_ips = nm.plan(context.resolved_builds)
         logger.debug("[NetworkManager] Network planning complete.")
-        return service_ips
+        return service_ips, reserved_ips
 
     def _sub_var(self, context: BuildContext) -> Dict:
         """Performs variable substitution across the entire config including builds and top-level extra fields."""
@@ -177,6 +176,7 @@ class Builder:
             config=context.config, 
             images=context.images, 
             service_ips=context.service_ips,
+            reserved_ips=context.reserved_ips,
             resolved_builds=context.resolved_builds
         )
         substituted_config = substitutor.run(config_data)

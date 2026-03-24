@@ -48,10 +48,18 @@ class VariableSubstitutor:
     Handles the substitution of variables within resolved build configurations.
     """
     
-    def __init__(self, config: Config, images: Dict[str, Image], service_ips: Dict[str, str], resolved_builds: Dict[str, Dict]):
+    def __init__(
+            self, 
+            config: Config, 
+            images: Dict[str, Image], 
+            service_ips: Dict[str, str], 
+            reserved_ips: Dict[str, str],
+            resolved_builds: Dict[str, Dict]
+    ):
         self.config = config
         self.images = images
         self.service_ips = service_ips
+        self.reserved_ips = reserved_ips
         self.resolved_builds = resolved_builds
 
     def _norm(self, key: str) -> str:
@@ -116,6 +124,7 @@ class VariableSubstitutor:
             # Service-level
             "name": service_name,
             "ip": self.service_ips.get(service_name, ""),
+            "rip": self.reserved_ips.get(service_name, ""),
             "address": self.service_ips.get(service_name, ""),
             # Project-level
             "project.name": self.config.name,
