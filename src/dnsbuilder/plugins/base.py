@@ -444,8 +444,10 @@ class PluginRegistry:
         self,
         software: str,
         package: str,
-        templates: bool = True,
+        templates: bool = False,
         defaults: bool = True,
+        image_templates: bool = True,
+        build_templates: bool = True,
         rules: bool = False,
         controls: bool = True,
         scripts: bool = False,
@@ -460,7 +462,9 @@ class PluginRegistry:
         Args:
             software: Software identifier (e.g., "coredns")
             package: Python package containing resources (e.g., "dnsb_coredns.resources")
-            templates: Whether to register templates path
+            templates: Whether to register all templates path
+            image_templates: Whether to register image templates path
+            build_templates: Whether to register builder templates path
             defaults: Whether to register defaults path
             controls: Whether to register controls path
             scripts: Whether to register scripts path
@@ -472,7 +476,7 @@ class PluginRegistry:
         """
         plugin_name = self._current_plugin or "unknown"
 
-        if templates:
+        if templates or image_templates:
             path = f"images/templates/{software}"
             register_plugin_resource(path, package)
             logger.debug(
@@ -516,13 +520,14 @@ class PluginRegistry:
                 f"Registered configs resource: {path} -> {package} (from {plugin_name})"
             )
 
-        # Register builder templates for this software
-        # This allows resource:/builder/templates.d/coredns to work
-        path = "builder/templates"
-        register_plugin_resource(path, package)
-        logger.debug(
-            f"Registered builder templates resource: {path} -> {package} (from {plugin_name})"
-        )
+        if templates or build_templates:
+            # Register builder templates for this software
+            # This allows resource:/builder/templates.d/coredns to work
+            path = "builder/templates"
+            register_plugin_resource(path, package)
+            logger.debug(
+                f"Registered builder templates resource: {path} -> {package} (from {plugin_name})"
+            )
 
         logger.info(
             f"Registered resources for '{software}' from plugin '{plugin_name}'"
