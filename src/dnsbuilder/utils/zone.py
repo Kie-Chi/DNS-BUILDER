@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 ZONE_ATTRIBUTE = (
     "parts",
     "is_root",
+    "FQDN",
     "fqdn",
     "label",
     "filename",
@@ -74,6 +75,11 @@ class Zone:
     def is_root(self) -> bool:
         """Check if this is the root zone."""
         return len(self.parts) == 0
+
+    @property
+    def FQDN(self) -> str:
+        """Get FQDN format (e.g., 'example.com.', '.' for root)."""
+        return self.fqdn
 
     @property
     def fqdn(self) -> str:
