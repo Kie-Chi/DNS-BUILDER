@@ -487,11 +487,15 @@ class ServiceHandler:
         gen_vol_dir = self.tmp_dir / constants.GENERATED_ZONES_SUBDIR
         self.context.fs.mkdir(gen_vol_dir, exist_ok=True)
 
-        enable_dnssec, dnssec_includes = get_dnssec_config(self.build_conf)
+        enable_dnssec, dnssec_includes, dnssec_hooks = get_dnssec_config(self.build_conf)
 
         # 2. Generate zone files and artifacts for each aggregated zone
         for zone, records in records_by_zone.items():
-            generator = ZoneGenerator(self.context, zone, self.service_name, records, enable_dnssec=enable_dnssec)
+            generator = ZoneGenerator(
+                self.context, zone, self.service_name, records,
+                enable_dnssec=enable_dnssec,
+                build_conf=self.build_conf
+            )
             artifacts = generator.generate()  # Returns List[ZoneArtifact]
             
             # Find the primary zone file for config generation

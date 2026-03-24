@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 import dns.rdata
 import dns.rdatatype
 import dns.rdataclass
@@ -9,6 +9,7 @@ import hashlib
 from pathlib import Path
 from ..datacls import BuildContext
 from ..io import DNSBPath
+from ..utils.dnssec import get_dnssec_hooks
 
 logger = logging.getLogger(__name__)
 
@@ -16,73 +17,135 @@ logger = logging.getLogger(__name__)
 class DNSSECResigner:
     """
     Handles DNSSEC re-signing operations to establish trust chain.
-    
+
     This class analyzes zone dependencies, injects DS records from child zones
     into parent zones, and re-signs parent zones to complete the DNSSEC chain.
+    Supports DNSSEC hooks for vulnerability reproduction scenarios.
     """
-    
+
     def __init__(self, context: BuildContext):
         """
         Initialize the DNSSEC re-signer.
-        
+
         Args:
             context: Build context containing file system and service information
         """
         self.context = context
         self.fs = context.fs
+
+    def _execute_hook(
+        self,
+        hook_name: str,
+        service_name: str,
+        zone_name: str,
+        hook_vars: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Execute a DNSSEC hook script for a specific service/zone.
+
+        Args:
+            hook_name: Name of the hook (e.g., 'pre-resign', 'post-resign')
+            service_name: Service name to get build_conf from
+            zone_name: Zone name being processed
+            hook_vars: Additional variables to pass to the hook script
+        """
+        # Get build_conf for the service
+        build_conf = self.context.resolved_builds.get(service_name, {})
+        hooks = get_dnssec_hooks(build_conf)
+
+        hook_script = hooks.get(hook_name)
+        if not hook_script:
+            logger.debug(f"[DNSSEC-Hook] No {hook_name} hook found for zone '{zone_name}' (service: {service_name})")
+            return
+
+        logger.debug(f"[DNSSEC-Hook] Executing {hook_name} hook for zone '{zone_name}' (service: {service_name})")
+
+        zone_name_clean = zone_name.rstrip('.')
+        zone_name_clean = zone_name_clean if zone_name_clean != '.' else 'root'
+
+        globals_dict = {
+            'zone_name': zone_name,
+            'zone_name_clean': zone_name_clean,
+            'service_name': service_name,
+            'fs': self.fs,
+            'workdir': self.fs.chroot,
+            'config': build_conf,
+            **(hook_vars or {})
+        }
+
+        try:
+            exec(hook_script, globals_dict)
+            logger.debug(f"[DNSSEC-Hook] {hook_name} hook completed for zone '{zone_name}'")
+        except Exception as e:
+            logger.error(f"[DNSSEC-Hook] {hook_name} hook failed for zone '{zone_name}': {e}")
+            logger.exception(e)
+            raise
         
     def run(self) -> None:
         """
         Main entry point for DNSSEC re-signing.
-        
+
         Builds zone dependency graph, determines signing order, and re-signs
         parent zones with child DS records.
         """
         logger.info("[DNSSEC-Resigner] Starting DNSSEC re-signing process...")
-        
+
         try:
             # Step 1: Build zone dependency graph
             zone_graph = self._bld_deps()
-            
+
             if not zone_graph:
                 logger.warning("[DNSSEC-Resigner] No zones found for re-signing.")
                 return
-            
-            logger.info(f"[DNSSEC-Resigner] Built dependency graph with {len(zone_graph)} zone(s)")
+
+            logger.debug(f"[DNSSEC-Resigner] Built dependency graph with {len(zone_graph)} zone(s)")
             logger.debug(f"[DNSSEC-Resigner] Zone graph: {zone_graph}")
-            
+
+            # Execute pre-resign hooks for all zones
+            # Users can modify key:/ filesystem to inject fake DS records
+            for zone_name, zone_info in zone_graph.items():
+                self._execute_hook('pre-resign', zone_info['service'], zone_name, {
+                    'zone_graph': zone_graph
+                })
+
             # Step 2: Topologically sort zones (children first, parents last)
             sorted_zones = self._topological_sort(zone_graph)
-            
+
             if not sorted_zones:
                 logger.warning("[DNSSEC-Resigner] No parent zones found for re-signing.")
                 return
-            
-            logger.info(f"[DNSSEC-Resigner] Will re-sign {len(sorted_zones)} parent zone(s): {sorted_zones}")
-            
+
+            logger.debug(f"[DNSSEC-Resigner] Will re-sign {len(sorted_zones)} parent zone(s): {sorted_zones}")
+
             # Step 3: Re-sign each parent zone with child DS records
             success_count = 0
             skip_count = 0
-            
+
             for parent_zone in sorted_zones:
                 zone_info = zone_graph[parent_zone]
-                
+
                 # Performance optimization: skip zones without children
                 if not zone_info['children']:
                     logger.debug(f"[DNSSEC-Resigner] Skipping leaf zone '{parent_zone}' (no children)")
                     skip_count += 1
                     continue
-                
-                logger.info(f"[DNSSEC-Resigner] Re-signing parent zone '{parent_zone}' with {len(zone_info['children'])} child DS record(s)")
-                
+
+                logger.debug(f"[DNSSEC-Resigner] Re-signing parent zone '{parent_zone}' with {len(zone_info['children'])} child DS record(s)")
+
                 if self._resign_parent_zone(parent_zone, zone_graph):
                     success_count += 1
-                    logger.info(f"[DNSSEC-Resigner] Successfully re-signed '{parent_zone}'")
+                    logger.debug(f"[DNSSEC-Resigner] Successfully re-signed '{parent_zone}'")
                 else:
                     logger.warning(f"[DNSSEC-Resigner] Failed to re-sign '{parent_zone}'")
-            
+
             logger.info(f"[DNSSEC-Resigner] Re-signing completed: {success_count} success, {skip_count} skipped (leaf zones)")
-            
+
+            # Execute post-resign hooks for all zones
+            for zone_name, zone_info in zone_graph.items():
+                self._execute_hook('post-resign', zone_info['service'], zone_name, {
+                    'zone_graph': zone_graph
+                })
+
         except Exception as e:
             logger.error(f"[DNSSEC-Resigner] Error during DNSSEC re-signing: {e}")
             logger.exception(e)
@@ -205,11 +268,11 @@ class DNSSECResigner:
     def _resign_parent_zone(self, parent_zone: str, zone_graph: Dict[str, Dict]) -> bool:
         """
         Re-sign a parent zone with DS records from its children.
-        
+
         Args:
             parent_zone: Parent zone name to re-sign
             zone_graph: Complete zone dependency graph
-            
+
         Returns:
             True if re-signing succeeded, False otherwise
         """
@@ -218,50 +281,50 @@ class DNSSECResigner:
             service_name = zone_info['service']
             zone_name_clean = zone_info['zone_name_clean']
             children = zone_info['children']
-            
+
             # Read unsigned zone content from temp:/
             base_filename = f"db.{zone_name_clean}" if parent_zone != "." else "db.root"
             unsigned_path = DNSBPath(f"{zone_info['temp_path_prefix']}{base_filename}.unsigned")
-            
+
             if not self.fs.exists(unsigned_path):
                 logger.error(f"[DNSSEC-Resigner] Unsigned zone file not found: {unsigned_path}")
                 return False
-            
+
             unsigned_content = self.fs.read_text(unsigned_path)
             logger.debug(f"[DNSSEC-Resigner] Read unsigned zone from {unsigned_path}")
-            
+
             # Collect DS records from all children
             ds_records_content = []
-            
+
             for child_zone in children:
                 if child_zone not in zone_graph:
                     logger.warning(f"[DNSSEC-Resigner] Child zone '{child_zone}' not in graph")
                     continue
-                
+
                 child_info = zone_graph[child_zone]
                 child_service = child_info['service']
                 child_zone_clean = child_info['zone_name_clean']
-                
+
                 # Read DS record from key:/
                 ds_path = DNSBPath(f"key:/{child_service}/{child_zone_clean}.ds")
-                
+
                 if not self.fs.exists(ds_path):
                     logger.warning(f"[DNSSEC-Resigner] DS record not found for child '{child_zone}': {ds_path}")
                     continue
-                
+
                 ds_content = self.fs.read_text(ds_path)
                 if ds_content.strip():
                     ds_records_content.append(f"; DS records for {child_zone}")
                     ds_records_content.append(ds_content.strip())
                     logger.debug(f"[DNSSEC-Resigner] Collected DS records for '{child_zone}'")
-            
+
             if not ds_records_content:
                 logger.warning(f"[DNSSEC-Resigner] No DS records found for children of '{parent_zone}'")
                 return False
-            
+
             # Append DS records to unsigned zone content
             modified_content = unsigned_content + "\n\n" + "\n".join(ds_records_content) + "\n"
-            
+
             # Re-sign the zone with modified content
             signed_result = self._resign_zone(
                 parent_zone,
@@ -269,26 +332,26 @@ class DNSSECResigner:
                 service_name,
                 modified_content
             )
-            
+
             if not signed_result:
                 logger.error(f"[DNSSEC-Resigner] Failed to sign '{parent_zone}'")
                 return False
-            
+
             signed_content, new_ds_content = signed_result
-            
+
             # Update temp:/ with new signed zone
             signed_path = DNSBPath(f"{zone_info['temp_path_prefix']}{base_filename}")
             self.fs.write_text(signed_path, signed_content)
             logger.debug(f"[DNSSEC-Resigner] Updated signed zone at {signed_path}")
-            
+
             # Update key:/ with new DS record (for use by parent zones)
             if new_ds_content:
                 ds_output_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.ds")
                 self.fs.write_text(ds_output_path, new_ds_content)
                 logger.debug(f"[DNSSEC-Resigner] Updated DS record at {ds_output_path}")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"[DNSSEC-Resigner] Exception while re-signing '{parent_zone}': {e}")
             logger.exception(e)
@@ -480,9 +543,9 @@ class DNSSECHandler:
         if not ksk_files:
             logger.warning("[DNSSEC] No KSK key files found in key:/. Skipping root.key generation.")
             return
-        
-        logger.info(f"[DNSSEC] Found {len(ksk_files)} KSK key file(s) for root.key")
-        
+
+        logger.debug(f"[DNSSEC] Found {len(ksk_files)} KSK key file(s) for root.key")
+
         # Read and combine all KSK key contents
         combined_content = []
         for ksk_file in ksk_files:
@@ -493,19 +556,19 @@ class DNSSECHandler:
                     logger.debug(f"[DNSSEC] Added KSK from {ksk_file}")
             except Exception as e:
                 logger.warning(f"[DNSSEC] Failed to read {ksk_file}: {e}")
-        
+
         if not combined_content:
             logger.warning("[DNSSEC] All KSK key files were empty or unreadable.")
             return
-        
+
         # Write combined content to key:/root.key
         output_path = DNSBPath("key:/root.key")
         combined_text = "\n\n".join(combined_content) + "\n"
-        
+
         try:
             self.fs.write_text(output_path, combined_text)
-            logger.info(f"[DNSSEC] Successfully generated {output_path} with {len(combined_content)} KSK key(s)")
-            logger.info(f"[DNSSEC] root.key can be used as trust-anchor-file for recursive resolvers")
+            logger.debug(f"[DNSSEC] Successfully generated {output_path} with {len(combined_content)} KSK key(s)")
+            logger.debug(f"[DNSSEC] root.key can be used as trust-anchor-file for recursive resolvers")
             logger.debug(f"[DNSSEC] root.key file size: {len(combined_text)} bytes")
         except Exception as e:
             logger.error(f"[DNSSEC] Failed to write root.key to {output_path}: {e}")
@@ -550,9 +613,9 @@ class DNSSECHandler:
         if not ds_files:
             logger.warning("[DNSSEC] No DS record files found in key:/. Skipping combination.")
             return
-        
-        logger.info(f"[DNSSEC] Found {len(ds_files)} DS record file(s): {ds_files}")
-        
+
+        logger.debug(f"[DNSSEC] Found {len(ds_files)} DS record file(s): {ds_files}")
+
         # Read and combine all DS record contents
         combined_content = []
         for ds_file in ds_files:
@@ -563,18 +626,18 @@ class DNSSECHandler:
                     logger.debug(f"[DNSSEC] Read DS record from {ds_file}")
             except Exception as e:
                 logger.warning(f"[DNSSEC] Failed to read {ds_file}: {e}")
-        
+
         if not combined_content:
             logger.warning("[DNSSEC] All DS record files were empty or unreadable.")
             return
-        
+
         # Write combined content to key:/all.ds
         output_path = DNSBPath("key:/all.ds")
         combined_text = "\n\n".join(combined_content) + "\n"
-        
+
         try:
             self.fs.write_text(output_path, combined_text)
-            logger.info(f"[DNSSEC] Successfully combined {len(combined_content)} DS record(s) into {output_path}")
+            logger.debug(f"[DNSSEC] Successfully combined {len(combined_content)} DS record(s) into {output_path}")
             logger.debug(f"[DNSSEC] Combined DS file size: {len(combined_text)} bytes")
         except Exception as e:
             logger.error(f"[DNSSEC] Failed to write combined DS file to {output_path}: {e}")

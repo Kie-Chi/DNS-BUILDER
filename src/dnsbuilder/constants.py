@@ -176,7 +176,7 @@ DEFAULT_DEVICE_NAME = "bridge"
 # --- Reserved Keys in Build Configs ---
 RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', 'mixins', 'mounts', 'files', 'auto', 'extra_conf', 'mirror', 'dnssec', 'vars'}
 
-RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include', 'auto', 'mirror', 'vars'}
+RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include', 'auto', 'mirror', 'vars', 'plugins'}
 
 # -- Config constants ---
 MIRRORS = { 

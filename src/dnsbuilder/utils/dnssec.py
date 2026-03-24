@@ -2,104 +2,110 @@
 Utilities for handling DNSSEC configuration
 
 Provides helper functions to extract DNSSEC configuration values from build configs,
-supporting both legacy boolean format and new structured format.
+supporting both legacy boolean format and new structured format with hooks support.
 """
 
-from typing import Union, List, Dict, Any, Tuple
+from typing import Union, List, Dict, Any, Tuple, Optional
 
 
-def get_dnssec_config(build_conf: Dict[str, Any]) -> Tuple[bool, List[str]]:
+def get_dnssec_config(build_conf: Dict[str, Any]) -> Tuple[bool, List[str], Dict[str, Any]]:
     """
     Extract DNSSEC configuration from build config.
-    
-    Supports both legacy format (dnssec: true/false) and new format 
-    (dnssec: {enable: true/false, include: [...]}).
-    
+
+    Supports both legacy format (dnssec: true/false) and new format
+    (dnssec: {enable: true/false, include: [...], hooks: {...}}).
+
     Args:
         build_conf: The build configuration dictionary
-        
-    Returns:
-        A tuple of (enable, include_files) where:
-        - enable: Boolean indicating if DNSSEC is enabled
-        - include_files: List of files to include for DNSSEC records
-        
-    Examples:
-        # Legacy format
-        >>> config = {'dnssec': True}
-        >>> get_dnssec_config(config)
-        (True, [])
-        
-        # New format
-        >>> config = {'dnssec': {'enable': True, 'include': 'keys.txt'}}
-        >>> get_dnssec_config(config)
-        (True, ['keys.txt'])
-        
-        >>> config = {'dnssec': {'enable': True, 'include': ['keys.txt', 'ds.txt']}}
-        >>> get_dnssec_config(config)
-        (True, ['keys.txt', 'ds.txt'])
     """
     dnssec_config = build_conf.get('dnssec', False)
-    
+
     # Legacy format: boolean value
     if isinstance(dnssec_config, bool):
-        return dnssec_config, []
-    
-    # New format: dictionary with enable and include
+        return dnssec_config, [], {}
+
+    # New format: dictionary with enable, include, and hooks
     if isinstance(dnssec_config, dict):
         enable = dnssec_config.get('enable', False)
         include = dnssec_config.get('include', [])
-        
+        hooks = dnssec_config.get('hooks', {})
+
         # Normalize include to list
         if isinstance(include, str):
             include = [include] if include else []
         elif not isinstance(include, list):
             include = []
-            
-        return enable, include
-    
+
+        # Normalize hooks to dict
+        if not isinstance(hooks, dict):
+            hooks = {}
+
+        return enable, include, hooks
+
     # Default: disabled
-    return False, []
+    return False, [], {}
 
 
 def is_dnssec_enabled(build_conf: Dict[str, Any]) -> bool:
     """
     Check if DNSSEC is enabled in build config.
-    
+
     Convenience function that only returns the enable status.
-    
+
     Args:
         build_conf: The build configuration dictionary
-        
-    Returns:
-        Boolean indicating if DNSSEC is enabled
-        
-    Examples:
-        >>> is_dnssec_enabled({'dnssec': True})
-        True
-        >>> is_dnssec_enabled({'dnssec': {'enable': True}})
-        True
-        >>> is_dnssec_enabled({'dnssec': False})
-        False
     """
-    enable, _ = get_dnssec_config(build_conf)
+    enable, _, _ = get_dnssec_config(build_conf)
     return enable
 
 
 def get_dnssec_includes(build_conf: Dict[str, Any]) -> List[str]:
     """
     Get list of files to include for DNSSEC records.
-    
+
     Args:
         build_conf: The build configuration dictionary
-        
+
     Returns:
         List of files to include for DNSSEC records
-        
-    Examples:
-        >>> get_dnssec_includes({'dnssec': {'enable': True, 'include': 'keys.txt'}})
-        ['keys.txt']
-        >>> get_dnssec_includes({'dnssec': True})
-        []
     """
-    _, include = get_dnssec_config(build_conf)
+    _, include, _ = get_dnssec_config(build_conf)
     return include
+
+
+def get_dnssec_hooks(build_conf: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get DNSSEC hooks configuration.
+
+    DNSSEC hooks allow injecting custom scripts at specific points during
+    Available hooks:
+        - pre_sign: Executed before initial zone signing
+        - pre_resign: Executed before re-signing parent zones (DS injection point)
+        - post_sign: Executed after zone signing completes
+
+    Args:
+        build_conf: The build configuration dictionary
+    """
+    _, _, hooks = get_dnssec_config(build_conf)
+    return hooks
+
+
+def get_dnssec_hook(build_conf: Dict[str, Any], hook_name: str) -> Optional[str]:
+    """
+    Get a specific DNSSEC hook script by name.
+
+    Args:
+        build_conf: The build configuration dictionary
+        hook_name: Name of the hook (e.g., 'pre_sign', 'pre_resign', 'post_sign')
+
+    Returns:
+        Hook script content as string, or None if not found
+
+    Examples:
+        >>> get_dnssec_hook({'dnssec': {'hooks': {'pre_sign': 'pass'}}}, 'pre_sign')
+        'pass'
+        >>> get_dnssec_hook({'dnssec': {'hooks': {'pre_sign': 'pass'}}}, 'nonexistent')
+        None
+    """
+    hooks = get_dnssec_hooks(build_conf)
+    return hooks.get(hook_name)
