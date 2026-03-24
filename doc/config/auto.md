@@ -8,7 +8,8 @@ Auto 功能通过三个执行阶段来管理配置：
 
 1. **setup**：初始化阶段，在配置解析前预执行，用于生成基础配置或新增服务
 2. **modify**：修改阶段，在配置解析后(`ref`展开、内置变量替换后)执行，用于动态调整已解析的配置
-3. **restrict**：验证阶段，在配置完全解析后执行，用于检查配置有效性
+3. **restrict**(out-of-date)：验证阶段，在配置完全解析后执行，用于检查配置有效性
+4. **post**: 在构建完后执行任意操作，可以执行清理工作，甚至对output_dir中的项目内容进行修改
 
 ## 配置结构
 
@@ -36,6 +37,10 @@ auto:
     result = "PASS"  # 必须赋值给 result，作为验证结果
     if not config.get('inet'):
       result = "ERROR: Missing inet"
+
+  post: |
+    output_dir = workdir / "output" / "recursor" / "content"
+    Path(output_dir).chmod(0o755)
 
 builds:
   recursor:

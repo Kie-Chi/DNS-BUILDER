@@ -1,93 +1,83 @@
-# Dynamic Constants Configuration (.dnsbattribute)
+# 动态常量配置
 
-## Overview
+## 概述
 
-The `.dnsbattribute` file allows you to dynamically override DNS Builder constants at runtime without modifying the source code. This is useful for:
+`.dnsbattribute` 文件允许你在运行时动态覆盖 DNSBuilder 的常量系统，无需修改源代码。适用于以下场景：
 
-- Adding custom logging module aliases
-- Supporting additional operating systems
-- Defining custom DNS software patterns
-- Adding custom package managers
-- Extending DNS software block definitions
+- 添加自定义日志模块别名
+- 支持额外的操作系统
+- 定义自定义 DNS 软件识别模式
+- 添加自定义包管理器
+- 扩展 DNS 软件配置块定义
 
-## File Location
+## 文件位置
 
-Place the `.dnsbattribute` file in your **workdir** (the directory specified via `--workdir` CLI option, or the config directory if not specified). The file will be automatically loaded when the dnsbuilder configuration is initialized.
+将 `.dnsbattribute` 文件放在 **workdir** 中（通过 `--workdir` 选项指定的目录，或配置文件所在目录）。文件会在 dnsbuilder 配置初始化时自动加载。
 
 ```
 workdir/
 ├── config.yml
-├── .dnsbattribute          ← Place here (will be auto-loaded)
+├── .dnsbattribute          ← 自动加载
 ├── top-1k.txt
 └── shared/
 ```
 
-### Command Examples
+## 配置格式
 
-```bash
-# Use current directory as workdir (will look for .dnsbattribute here)
-dnsbuilder build config.yml --workdir @cwd
-
-# Use config directory as workdir
-dnsbuilder build config.yml --workdir @config
-
-# Use custom directory as workdir
-dnsbuilder build config.yml --workdir /path/to/workdir
-```
-
-## Configuration Format
-
-The `.dnsbattribute` file uses YAML format and contains constants to override:
+`.dnsbattribute` 文件使用 YAML 格式，包含要覆盖的常量：
 
 ```yaml
-# Add custom log aliases
+# 添加自定义日志别名
 LOG_ALIAS_MAP:
   custom: "dnsbuilder.custom.module"
   mylog: "dnsbuilder.my.custom.logger"
 
-# Extend supported operating systems
+# 扩展支持的操作系统
 SUPPORTED_OS:
   - alpine
   - rocky
 
-# Add custom DNS software patterns
+# 添加自定义 DNS 软件识别模式
 RECOGNIZED_PATTERNS:
   my_custom_dns:
     - r"\bmydns\b"
     - r"\bcustom-bind\b"
 ```
 
-## Override Modes
+## 覆盖策略
 
-The loader supports three different strategies for applying overrides:
+加载器支持三种不同的覆盖策略：
 
-### 1. Replace (Default)
-For non-dict, non-list types, the entire constant is replaced:
+### 替换
+
+对于非字典、非列表类型，整个常量被替换：
 
 ```yaml
-DEFAULT_OS: "alpine"  # Replaces the entire value
+DEFAULT_OS: "alpine"  # 替换整个值
 ```
 
-### 2. Merge (for Dictionaries)
-Dictionaries are **deep-merged**, preserving existing keys:
+### 合并
+
+字典类型进行**深度合并**，保留原有的键值：
 
 ```yaml
 LOG_ALIAS_MAP:
   new_alias: "dnsbuilder.new.module"
-  # Existing aliases are preserved
+  # 原有别名会被保留
 ```
 
-Result:
+结果：
 ```python
 LOG_ALIAS_MAP = {
     "sub": "dnsbuilder.builder.substitute",
-    # ... existing entries ...
+    # ... 原有条目 ...
     "new_alias": "dnsbuilder.new.module",
 }
 ```
 
-### 3. Extend (for Lists)
-Lists are **extended** with new items:
+### 扩展
+
+列表类型会被**扩展**，新元素追加到末尾：
 
 ```yaml
 SUPPORTED_OS:
@@ -95,14 +85,14 @@ SUPPORTED_OS:
   - rocky
 ```
 
-Result:
+结果：
 ```python
 SUPPORTED_OS = ["ubuntu", "debian", "alpine", "rocky"]
 ```
 
-## Examples
+## 示例
 
-### Example 1: Add Custom Log Aliases
+### 添加自定义日志别名
 
 ```yaml
 # .dnsbattribute
@@ -111,13 +101,13 @@ LOG_ALIAS_MAP:
   dbg: "dnsbuilder.debug"
 ```
 
-Then use in environment:
+然后在环境中使用：
 ```bash
 export DNSB_DEBUG="mymod,dbg"
 dnsbuilder build config.yml
 ```
 
-### Example 2: Support Alpine Linux
+### 支持Alpine Linux
 
 ```yaml
 # .dnsbattribute
@@ -132,7 +122,7 @@ BASE_PACKAGE_MANAGERS:
     cleanup_cmd: ""
 ```
 
-### Example 3: Add Custom DNS Software
+### 添加自定义 DNS 软件
 
 ```yaml
 # .dnsbattribute
@@ -148,7 +138,7 @@ DNS_SOFTWARE_BLOCKS:
     - "custom-section"
 ```
 
-### Example 4: Extend Custom Package Manager
+### 扩展自定义包管理器
 
 ```yaml
 # .dnsbattribute
@@ -162,37 +152,28 @@ SOFT_PACKAGE_MANAGERS:
       apk: ["custom-pkg"]
 ```
 
-## Available Constants to Override
+## 可覆盖的常量
 
-Here are some commonly overridden constants:
+常用可覆盖的常量：
 
-| Constant | Type | Purpose |
-|----------|------|---------|
-| `LOG_ALIAS_MAP` | dict | Logging module name aliases |
-| `SUPPORTED_OS` | list | Supported operating systems |
-| `DEFAULT_OS` | str | Default OS when not specified |
-| `RECOGNIZED_PATTERNS` | dict | DNS software detection patterns |
-| `DNS_SOFTWARE_BLOCKS` | dict | DNS software configuration blocks |
-| `BEHAVIOR_TYPES` | set | Supported behavior types |
-| `RESOURCE_PREFIX` | str | Resource URL prefix |
-| `STD_BUILD_PREFIX` | str | Standard build reference prefix |
-| `BASE_PACKAGE_MANAGERS` | dict | Base package manager configs |
-| `SOFT_PACKAGE_MANAGERS` | dict | Software package manager configs |
+| 常量 | 类型 | 用途 |
+|------|------|------|
+| `LOG_ALIAS_MAP` | dict | 日志模块名称别名 |
+| `SUPPORTED_OS` | list | 支持的操作系统列表 |
+| `DEFAULT_OS` | str | 未指定时的默认操作系统 |
+| `RECOGNIZED_PATTERNS` | dict | DNS 软件识别模式 |
+| `DNS_SOFTWARE_BLOCKS` | dict | DNS 软件配置块定义 |
+| `BEHAVIOR_TYPES` | set | 支持的行为类型 |
+| `RESOURCE_PREFIX` | str | 资源 URL 前缀 |
+| `STD_BUILD_PREFIX` | str | 标准构建引用前缀 |
+| `BASE_PACKAGE_MANAGERS` | dict | 基础包管理器配置 |
+| `SOFT_PACKAGE_MANAGERS` | dict | 软件包管理器配置 |
 
-See `src/dnsbuilder/constants.py` for the complete list.
+完整列表见 `src/dnsbuilder/constants.py`。
 
-## Validation & Error Handling
+## 日志
 
-- **Non-existent constant**: A warning is logged, override is skipped
-- **Invalid YAML**: Error is logged, file is skipped
-- **Type mismatch**: Best-effort handling:
-  - Dict + Dict: Merged
-  - List + List: Extended
-  - Other: Replaced
-
-## Logging
-
-The attribute loader logs all operations at the INFO level:
+属性加载器在 INFO 级别记录所有操作：
 
 ```
 [AttributeLoader] Loaded attributes from /path/to/.dnsbattribute
@@ -201,21 +182,14 @@ The attribute loader logs all operations at the INFO level:
 [AttributeLoader] Updated constant 'SUPPORTED_OS'
 ```
 
-Enable debug logging to see detailed merge operations:
+启用调试日志查看详细的合并操作：
 
 ```bash
 export DNSB_DEBUG="auto"
 dnsbuilder build config.yml
 ```
 
-## Tips
+## 相关文档
 
-1. **Namespacing**: Use descriptive names for custom entries to avoid conflicts
-2. **Validation**: Test your `.dnsbattribute` file with a simple config first
-3. **Portability**: Keep `.dnsbattribute` out of version control if it's environment-specific
-4. **Documentation**: Comment your custom additions for team reference
-
-## See Also
-
-- `constants.py` - Source of all constant definitions
-- `.dnsbattribute.example` - Example configuration file
+- `constants.py` — 所有常量的源码定义
+- [插件开发](plugin.md) — 插件的 `attributes` 属性使用相同机制

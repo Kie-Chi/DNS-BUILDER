@@ -42,9 +42,38 @@
 - 类型与格式：`string`
 - 可选值
 
-  - 合法 IPv4 地址
+  - 符合[inet](top-level.md#inet)合法 IPv4 地址(若非法则DNSB自动分配一个作为保留地址\$\{rip\}，但是使用${ip}得到的仍然为原始非法地址)
   - **无该属性表示由DNSB分配**
   - **空字符串** 表示不参与DNSB分配，留给Docker自动分配
+
+```yaml
+inet: 10.10.0.0/24
+
+builds:
+  service:
+    # 留空
+    # ${ip} -> such as 10.10.0.2
+    # ${rip} -> none
+    # docker-compose.app_net.ipv4_address = 10.10.0.2
+  service:
+    # 空字符串
+    address: ""
+    # ${ip} -> none
+    # ${rip} -> none
+    # docker-compose.app_net.ipv4_address = may be 10.10.0.10
+  service:
+    # 合法IPv4地址
+    address: 10.10.0.3
+    # ${ip} -> 10.10.0.3
+    # ${rip} -> none
+    # docker-compose.app_net.ipv4_address = 10.10.0.3
+  service:
+    # 非法IPv4地址
+    address: 192.168.1.123
+    # ${ip} -> 192.168.1.123
+    # ${rip} -> such as 10.10.0.4
+    # docker-compose.app_net.ipv4_address = 10.10.0.4
+```
 
 ## behavior*
 
@@ -102,7 +131,7 @@
 ## auto*
 ### setup*
 ### modify*
-### restrict*
+### post*
 
 利用脚本自动化初始化或者修改配置，详见 [Auto 自动化脚本](auto.md)
 

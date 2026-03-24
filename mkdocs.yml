@@ -60,6 +60,8 @@ nav:
     - 文件路径与FS: rule/paths-and-fs.md
   - 实验功能:
     - DNSSEC 支持: dnssec.md
+    - 插件系统: plugin.md
+    - Attribute 覆写: dnsbattribute.md
   - 已弃用:
     - 概览: old/index.md
     - 推导式语法: old/comprehension.md
