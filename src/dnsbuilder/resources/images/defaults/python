@@ -1,0 +1,17 @@
+{
+    "default_deps": [],
+    "default_utils": [
+        "iproute2",
+        "vim",
+        "dnsutils",
+        "tcpdump",
+        "tmux",
+        "cmake",
+        "libuv1-dev",
+        "libpcap-dev",
+        "pkg-config",
+        "python3-dnslib",
+        "python3-scapy",
+        "build-essential"
+    ]
+}

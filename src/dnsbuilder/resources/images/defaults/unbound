@@ -1,0 +1,14 @@
+{
+    "default_deps": [
+        "build-essential",
+        "wget",
+        "libssl-dev",
+        "libexpat1-dev"
+    ],
+    "default_utils": [
+        "vim",
+        "dnsutils",
+        "tcpdump",
+        "tmux"
+    ]
+}

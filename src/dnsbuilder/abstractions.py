@@ -38,7 +38,6 @@ except ImportError:
     # Graceful degradation if dnslib not available
     pass
 logger = logging.getLogger(__name__)
-IMAGE_DEFAULTS = None
 
 
 # ============================================================================
@@ -225,21 +224,24 @@ class InternalImage(Image, ABC):
         pass
 
     def _load_defaults(self):
-        """Loads default settings from the 'defaults' resource."""
-        global IMAGE_DEFAULTS
-        if IMAGE_DEFAULTS is None:
-            IMAGE_DEFAULTS_TEXT = self.fs.read_text(
-                DNSBPath("resource:/images/defaults")
-            )
-            IMAGE_DEFAULTS = json.loads(IMAGE_DEFAULTS_TEXT)
+        """Loads default settings from the 'images/defaults/{software}' resource."""
         if not self.software:
             logger.critical(f"[{self.name}] No SoftWare defined in Image")
             return  # Likely an abstract/alias image without software type
 
-        defaults = IMAGE_DEFAULTS.get(self.software)
-        if not defaults:
+        try:
+            defaults_text = self.fs.read_text(
+                DNSBPath(f"resource:/images/defaults/{self.software}")
+            )
+            defaults = json.loads(defaults_text)
+        except FileNotFoundError:
             logger.warning(
-                f"No defaults found for software '{self.software}' in defaults"
+                f"No defaults found for software '{self.software}'"
+            )
+            return
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"Invalid JSON in defaults for software '{self.software}': {e}"
             )
             return
 

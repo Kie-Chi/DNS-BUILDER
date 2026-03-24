@@ -1,0 +1,1 @@
+"""Defaults resource files for DNSBuilder images."""

@@ -1,0 +1,13 @@
+{
+    "default_deps": [
+        "curl",
+        "wget",
+        "systemd"
+    ],
+    "default_utils": [
+        "vim",
+        "dnsutils",
+        "tcpdump",
+        "tmux"
+    ]
+}

@@ -18,7 +18,7 @@
 - 含义：引用已有镜像或镜像模板（如 `bind:9.18.0`）
 - 类型与格式：`string`；支持 `software:version` 形式或本地镜像名（无冒号时）
 - 可选值：
-  - 内置软件类型：`bind`、`unbound`、`python`、`judas`（详见资源默认依赖 `resources/images/defaults`）
+  - 内置软件类型：`bind`、`unbound`、`python`、`judas`（详见资源默认依赖 `resources/images/defaults/{software}`）
   - 同文件中的内部镜像名：引用同级定义的镜像（不含冒号）
 - 约束：与 `software`、`version`、`from` 互斥；使用 `ref` 时不得提供这三者
 - 解析说明：当使用本地镜像名时，将按继承链解析并合并父配置；当使用 `software:version` 时，按对应内部镜像类初始化。
@@ -45,13 +45,13 @@
 
 - 含义：构建期依赖包列表，影响镜像构建阶段安装的依赖
 - 类型与格式：`string[]`；如 `build-essential`、`libssl-dev` 等
-- 默认值与参考：不同软件类型有各自默认依赖，参见 `resources/images/defaults`
+- 默认值与参考：不同软件类型有各自默认依赖，参见 `resources/images/defaults/{software}`
 
 ## util
 
 - 含义：运行期工具包列表，如 `dnsutils`、`tcpdump` 等
 - 类型与格式：`string[]`；可包含 `python3-xxx` 以自动处理 Python 依赖
-- 默认值与参考：不同软件类型有各自默认工具包，参见 `resources/images/defaults`
+- 默认值与参考：不同软件类型有各自默认工具包，参见 `resources/images/defaults/{software}`
 
 ## mirror*
 

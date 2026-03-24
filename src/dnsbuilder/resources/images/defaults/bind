@@ -1,0 +1,17 @@
+{
+    "default_deps": [
+        "build-essential",
+        "pkg-config",
+        "wget",
+        "xz-utils",
+        "libssl-dev",
+        "perl",
+        "libcap-dev"
+    ],
+    "default_utils": [
+        "vim",
+        "dnsutils",
+        "tcpdump",
+        "tmux"
+    ]
+}

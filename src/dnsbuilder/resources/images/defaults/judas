@@ -1,0 +1,12 @@
+{
+    "default_deps": [
+        "git"
+    ],
+    "default_utils": [
+        "iproute2",
+        "vim",
+        "dnsutils",
+        "tcpdump",
+        "tmux"
+    ]
+}
