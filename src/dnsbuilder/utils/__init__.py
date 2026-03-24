@@ -24,6 +24,7 @@ from .reflection import (
 )
 from .fstree import print_tree, count_files, get_tree_string, list_all_files
 from .dnssec import get_dnssec_config, is_dnssec_enabled, get_dnssec_includes
+from .zone import ZoneName
 
 __all__ = [
     'setup_logger',
@@ -47,5 +48,7 @@ __all__ = [
     'get_dnssec_config',
     'is_dnssec_enabled',
     'get_dnssec_includes',
+    # Zone name utilities
+    'ZoneName',
 ]
 

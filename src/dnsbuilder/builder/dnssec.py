@@ -10,6 +10,7 @@ from pathlib import Path
 from ..datacls import BuildContext
 from ..io import DNSBPath
 from ..utils.dnssec import get_dnssec_hooks
+from ..utils.zone import ZoneName
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +61,10 @@ class DNSSECResigner:
 
         logger.debug(f"[DNSSEC-Hook] Executing {hook_name} hook for zone '{zone_name}' (service: {service_name})")
 
-        zone_name_clean = zone_name.rstrip('.')
-        zone_name_clean = zone_name_clean if zone_name_clean != '.' else 'root'
+        zone = ZoneName(zone_name)
 
         globals_dict = {
-            'zone_name': zone_name,
-            'zone_name_clean': zone_name_clean,
+            'zone': zone,
             'service_name': service_name,
             'fs': self.fs,
             'workdir': self.fs.chroot,
@@ -75,9 +74,9 @@ class DNSSECResigner:
 
         try:
             exec(hook_script, globals_dict)
-            logger.debug(f"[DNSSEC-Hook] {hook_name} hook completed for zone '{zone_name}'")
+            logger.debug(f"[DNSSEC-Hook] {hook_name} hook completed for zone '{zone.fqdn}'")
         except Exception as e:
-            logger.error(f"[DNSSEC-Hook] {hook_name} hook failed for zone '{zone_name}': {e}")
+            logger.error(f"[DNSSEC-Hook] {hook_name} hook failed for zone '{zone.fqdn}': {e}")
             logger.exception(e)
             raise
         
@@ -177,32 +176,29 @@ class DNSSECResigner:
         for ksk_path in ksk_files:
             try:
                 # Parse path: key:/service/zone.ksk.key
-                
+
                 service_name = ksk_path.parent.name
                 zone_filename = ksk_path.name
-                zone_name_clean = zone_filename.replace('.ksk.key', '')
-                
-                # Handle special root zone naming
-                if zone_name_clean == 'root' or zone_name_clean == '':
-                    zone_name = '.'
-                else:
-                    zone_name = zone_name_clean + '.'
-                
+                zone_label = zone_filename.replace('.ksk.key', '')
+
+                # Create ZoneName from label
+                zone = ZoneName(zone_label)
+
                 # Determine parent zone
-                parent_zone = self._find_parent(zone_name)
-                
+                parent_zone = self._find_parent(zone.fqdn)
+
                 # Add to graph
-                if zone_name not in graph:
-                    graph[zone_name] = {
+                if zone.fqdn not in graph:
+                    graph[zone.fqdn] = {
                         'service': service_name,
                         'parent': parent_zone,
                         'children': [],
                         'temp_path_prefix': f"temp:/services/{service_name}/zones/",
-                        'zone_name_clean': zone_name_clean
+                        'zone': zone  # Store ZoneName object
                     }
-                
-                logger.debug(f"[DNSSEC-Resigner] Added zone '{zone_name}' (service: {service_name}, parent: {parent_zone})")
-                
+
+                logger.debug(f"[DNSSEC-Resigner] Added zone '{zone.fqdn}' (service: {service_name}, parent: {parent_zone})")
+
             except Exception as e:
                 logger.warning(f"[DNSSEC-Resigner] Failed to parse {ksk_path}: {e}")
         
@@ -280,12 +276,11 @@ class DNSSECResigner:
         try:
             zone_info = zone_graph[parent_zone]
             service_name = zone_info['service']
-            zone_name_clean = zone_info['zone_name_clean']
+            zone = zone_info['zone']  # ZoneName object
             children = zone_info['children']
 
             # Read unsigned zone content from temp:/
-            base_filename = f"db.{zone_name_clean}" if parent_zone != "." else "db.root"
-            unsigned_path = DNSBPath(f"{zone_info['temp_path_prefix']}{base_filename}.unsigned")
+            unsigned_path = DNSBPath(f"{zone_info['temp_path_prefix']}{zone.filename}.unsigned")
 
             if not self.fs.exists(unsigned_path):
                 logger.error(f"[DNSSEC-Resigner] Unsigned zone file not found: {unsigned_path}")
@@ -304,10 +299,10 @@ class DNSSECResigner:
 
                 child_info = zone_graph[child_zone]
                 child_service = child_info['service']
-                child_zone_clean = child_info['zone_name_clean']
+                child_zone_obj = child_info['zone']  # ZoneName object
 
                 # Read DS record from key:/
-                ds_path = DNSBPath(f"key:/{child_service}/{child_zone_clean}.ds")
+                ds_path = DNSBPath(f"key:/{child_service}/{child_zone_obj.label}.ds")
 
                 if not self.fs.exists(ds_path):
                     logger.warning(f"[DNSSEC-Resigner] DS record not found for child '{child_zone}': {ds_path}")
@@ -327,12 +322,7 @@ class DNSSECResigner:
             modified_content = unsigned_content + "\n\n" + "\n".join(ds_records_content) + "\n"
 
             # Re-sign the zone with modified content
-            signed_result = self._resign_zone(
-                parent_zone,
-                zone_name_clean,
-                service_name,
-                modified_content
-            )
+            signed_result = self._resign_zone(zone, service_name, modified_content)
 
             if not signed_result:
                 logger.error(f"[DNSSEC-Resigner] Failed to sign '{parent_zone}'")
@@ -341,13 +331,13 @@ class DNSSECResigner:
             signed_content, new_ds_content = signed_result
 
             # Update temp:/ with new signed zone
-            signed_path = DNSBPath(f"{zone_info['temp_path_prefix']}{base_filename}")
+            signed_path = DNSBPath(f"{zone_info['temp_path_prefix']}{zone.filename}")
             self.fs.write_text(signed_path, signed_content)
             logger.debug(f"[DNSSEC-Resigner] Updated signed zone at {signed_path}")
 
             # Update key:/ with new DS record (for use by parent zones)
             if new_ds_content:
-                ds_output_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.ds")
+                ds_output_path = DNSBPath(f"key:/{service_name}/{zone.label}.ds")
                 self.fs.write_text(ds_output_path, new_ds_content)
                 logger.debug(f"[DNSSEC-Resigner] Updated DS record at {ds_output_path}")
 
@@ -357,48 +347,45 @@ class DNSSECResigner:
             logger.error(f"[DNSSEC-Resigner] Exception while re-signing '{parent_zone}': {e}")
             logger.exception(e)
             return False
-    
+
     def _resign_zone(
         self,
-        zone_name: str,
-        zone_name_clean: str,
+        zone: ZoneName,
         service_name: str,
         unsigned_content: str
     ) -> Optional[Tuple[str, str]]:
         """
         Sign a zone using existing keys from key:/.
-        
+
         Args:
-            zone_name: Zone name (e.g., 'com.', '.')
-            zone_name_clean: Clean zone name (e.g., 'com', 'root')
+            zone: ZoneName object
             service_name: Service name managing this zone
             unsigned_content: Unsigned zone file content (with DS records appended)
-            
+
         Returns:
             Tuple of (signed_content, ds_content) or None on failure
         """
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
-                
+
                 # Write unsigned zone content
-                zone_filename = f"db.{zone_name_clean}" if zone_name != "." else "db.root"
-                unsigned_file = temp_path / zone_filename
+                unsigned_file = temp_path / zone.filename
                 unsigned_file.write_text(unsigned_content)
-                
+
                 # Read existing keys from key:/
-                ksk_key_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.ksk.key")
-                ksk_private_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.ksk.private")
-                zsk_key_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.zsk.key")
-                zsk_private_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.zsk.private")
-                keynames_path = DNSBPath(f"key:/{service_name}/{zone_name_clean}.keynames")
-                
+                ksk_key_path = DNSBPath(f"key:/{service_name}/{zone.label}.ksk.key")
+                ksk_private_path = DNSBPath(f"key:/{service_name}/{zone.label}.ksk.private")
+                zsk_key_path = DNSBPath(f"key:/{service_name}/{zone.label}.zsk.key")
+                zsk_private_path = DNSBPath(f"key:/{service_name}/{zone.label}.zsk.private")
+                keynames_path = DNSBPath(f"key:/{service_name}/{zone.label}.keynames")
+
                 # Check all key files exist
                 for key_path in [ksk_key_path, ksk_private_path, zsk_key_path, zsk_private_path, keynames_path]:
                     if not self.fs.exists(key_path):
                         logger.error(f"[DNSSEC-Resigner] Key file not found: {key_path}")
                         return None
-                
+
                 # Read key basenames from metadata file
                 # Format: KSK_BASENAME=K.+013+61193\nZSK_BASENAME=K.+013+14828
                 keynames_content = self.fs.read_text(keynames_path)
@@ -437,13 +424,13 @@ class DNSSECResigner:
                 )
                 
                 # Sign the zone
-                logger.debug(f"[DNSSEC-Resigner] Signing zone '{zone_name}' with dnssec-signzone")
+                logger.debug(f"[DNSSEC-Resigner] Signing zone '{zone.fqdn}' with dnssec-signzone")
                 sign_result = subprocess.run(
                     [
                         "dnssec-signzone",
-                        "-3", hashlib.sha1(zone_name.encode()).hexdigest()[:16],
+                        "-3", hashlib.sha1(zone.fqdn.encode()).hexdigest()[:16],
                         "-N", "INCREMENT",
-                        "-o", zone_name,
+                        "-o", zone.fqdn,
                         str(unsigned_file)
                     ],
                     cwd=temp_path,
@@ -451,33 +438,36 @@ class DNSSECResigner:
                     text=True,
                     check=True
                 )
-                
+
                 logger.debug(f"[DNSSEC-Resigner] dnssec-signzone output: {sign_result.stdout}")
-                
+
                 # Read signed zone
-                signed_file = temp_path / f"{zone_filename}.signed"
+                signed_file = temp_path / f"{zone.filename}.signed"
                 if not signed_file.exists():
                     logger.error(f"[DNSSEC-Resigner] Signed zone file not found: {signed_file}")
                     return None
-                
+
                 signed_content = signed_file.read_text()
-                
-                # Read DS records
-                dsset_file = temp_path / f"dsset-{zone_name_clean}."
+
+                # DS records are only for child zones (root has no parent)
                 ds_content = ""
-                if dsset_file.exists():
-                    ds_content = dsset_file.read_text()
-                    logger.debug(f"[DNSSEC-Resigner] Found new DS records for '{zone_name}'")
+                if not zone.is_root:
+                    dsset_file = temp_path / f"dsset-{zone.label}."
+                    if dsset_file.exists():
+                        ds_content = dsset_file.read_text()
+                        logger.debug(f"[DNSSEC-Resigner] Found new DS records for '{zone.fqdn}'")
+                    else:
+                        logger.warning(f"[DNSSEC-Resigner] DS record file not found: {dsset_file}")
                 else:
-                    logger.warning(f"[DNSSEC-Resigner] DS record file not found: {dsset_file}")
-                
+                    logger.debug(f"[DNSSEC-Resigner] Skipping DS record for root zone")
+
                 return (signed_content, ds_content)
-                
+
         except subprocess.CalledProcessError as e:
-            logger.error(f"[DNSSEC-Resigner] dnssec-signzone failed for '{zone_name}': {e.stderr}")
+            logger.error(f"[DNSSEC-Resigner] dnssec-signzone failed for '{zone.fqdn}': {e.stderr}")
             return None
         except Exception as e:
-            logger.error(f"[DNSSEC-Resigner] Failed to sign zone '{zone_name}': {e}")
+            logger.error(f"[DNSSEC-Resigner] Failed to sign zone '{zone.fqdn}': {e}")
             logger.exception(e)
             return None
 
@@ -590,7 +580,7 @@ class DNSSECHandler:
                 return []
             
             # find the root
-            ksk_files = self.fs.rglob(key_root, ".ksk.key")
+            ksk_files = self.fs.rglob(key_root, "root.ksk.key")
             logger.debug(f"[DNSSEC] rglob found {len(ksk_files)} KSK key file(s): {[str(f) for f in ksk_files]}")
             return ksk_files
             

@@ -13,6 +13,7 @@ from ..exceptions import NetworkDefinitionError
 from ..io import DNSBPath
 from ..auto.executor import ScriptExecutor
 from ..utils.dnssec import get_dnssec_hooks, get_dnssec_includes
+from ..utils.zone import ZoneName
 
 logger = logging.getLogger(__name__)
 
@@ -25,38 +26,14 @@ class ZoneGenerator:
     Supports DNSSEC signing with KSK and ZSK key generation.
     Supports DNSSEC hooks for vulnerability reproduction scenarios.
     Supports including pre-generated keys from external directories.
-
     Plugins can create custom ZoneGenerator implementations to generate
     different zone file formats for their DNS software.
 
-    To create a custom ZoneGenerator:
-        1. Subclass this class (or create a new class with the same interface)
-        2. Override the `generate()` method
-        3. Return a list of ZoneArtifact objects
-
-    Example custom generator:
-
-        class MyDNSZoneGenerator(ZoneGenerator):
-            def generate(self) -> List[ZoneArtifact]:
-                # Generate custom format
-                lines = []
-                for record in self.records:
-                    lines.append(f"{record.rname} {QTYPE.get(record.rtype)} {record.rdata}")
-                content = "\\n".join(lines)
-
-                return [ZoneArtifact(
-                    filename=f"{self.zone_name.rstrip('.')}.txt",
-                    content=content,
-                    container_path=f"/etc/mydns/{self.zone_name.rstrip('.')}.txt",
-                    is_primary=True
-                )]
-
     Attributes:
         context: BuildContext containing all build information
-        zone_name: The zone name (e.g., "example.com.")
+        zone: ZoneName object with fqdn and label properties
         ip: The service IP address
-        service_name: The service name with trailing dot
-        service_name_raw: The service name without modification
+        service_name: The service name (used for paths and identifiers)
         records: List of RR (Resource Record) objects to include in the zone
         enable_dnssec: Whether DNSSEC signing is enabled
         build_conf: Build configuration dictionary
@@ -81,21 +58,21 @@ class ZoneGenerator:
 
         Args:
             context: BuildContext containing all build information
-            zone_name: The zone name (e.g., "example.com")
-            service_name: The service name
+            zone_name: The zone name (e.g., "example.com", "example.com.", "root")
+            service_name: The service name (used for paths and identifiers)
             records: List of RR (Resource Record) objects
             enable_dnssec: Whether to enable DNSSEC signing
             build_conf: Build configuration dictionary
         """
         self.context = context
-        self.zone_name = zone_name.rstrip(".") + "."
+        self.zone = ZoneName(zone_name)
+
         self.ip = self.context.service_ips.get(service_name)
         if self.ip is None:
             raise NetworkDefinitionError(
                 f"Service IP not found for {service_name}"
             )
-        self.service_name = service_name.rstrip(".") + "."
-        self.service_name_raw = service_name
+        self.service_name = service_name
         self.records = records
         self.enable_dnssec = enable_dnssec
         self.build_conf = build_conf or {}
@@ -250,16 +227,12 @@ class ZoneGenerator:
         if not hook_script:
             return hook_vars or {}
 
-        logger.info(f"[DNSSEC-Hook] Executing {hook_name} hook for zone '{self.zone_name}'")
+        logger.info(f"[DNSSEC-Hook] Executing {hook_name} hook for zone '{self.zone.fqdn}'")
 
-        # Prepare variables for the hook script
-        zone_name_clean = self.zone_name.rstrip('.')
-        zone_name_clean = zone_name_clean if zone_name_clean != '.' else 'root'
 
         globals_dict = {
-            'zone_name': self.zone_name,
-            'zone_name_clean': zone_name_clean,
-            'service_name': self.service_name_raw,
+            'zone': self.zone,
+            'service_name': self.service_name,
             'fs': self.context.fs,
             'workdir': self.context.fs.chroot,
             'config': self.build_conf,
@@ -268,27 +241,33 @@ class ZoneGenerator:
 
         try:
             exec(hook_script, globals_dict)
-            logger.info(f"[DNSSEC-Hook] {hook_name} hook completed for zone '{self.zone_name}'")
+            logger.info(f"[DNSSEC-Hook] {hook_name} hook completed for zone '{self.zone.fqdn}'")
             return globals_dict
         except Exception as e:
-            logger.error(f"[DNSSEC-Hook] {hook_name} hook failed for zone '{self.zone_name}': {e}")
+            logger.error(f"[DNSSEC-Hook] {hook_name} hook failed for zone '{self.zone.fqdn}': {e}")
             logger.exception(e)
             raise
 
-    def _sign_zone(self, unsigned_content: str) -> Optional[Tuple[str, str, str, str, str, str, str, str]]:
-        # Execute pre hook before signing
-        hook_result = self._execute_hook('pre', {
-            'unsigned_content': unsigned_content,
-            'temp_path': None  # Will be set inside temp context if needed
-        })
-        unsigned_content = hook_result.get('unsigned_content', unsigned_content)
+    def _sign_zone(self) -> Optional[Tuple[str, str, str, str, str, str, str, str]]:
+        """
+        Sign the zone file. Reads unsigned content from temp:/services/.../db.<zone>.unsigned
+        and writes signed content back to temp:/services/.../db.<zone>
+        """
+        unsigned_path = DNSBPath(f"temp:/services/{self.service_name}/zones/{self.zone.filename}.unsigned")
+        self._execute_hook('pre')
+
+        # Read unsigned content
+        if not self.context.fs.exists(unsigned_path):
+            logger.error(f"[DNSSEC] Unsigned zone file not found: {unsigned_path}")
+            return None
+        unsigned_content = self.context.fs.read_text(unsigned_path)
+        logger.debug(f"[DNSSEC] Read unsigned zone from {unsigned_path}")
 
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
 
-                zone_filename = f"db.{self.zone_name.rstrip('.')}" if self.zone_name != "." else "db.root"
-                unsigned_file = temp_path / zone_filename
+                unsigned_file = temp_path / self.zone.filename
                 unsigned_file.write_text(unsigned_content)
 
                 # Try to use keys from include directory first
@@ -297,15 +276,15 @@ class ZoneGenerator:
                 if included_keys:
                     # Use pre-generated keys from include directory
                     ksk_key_content, ksk_private_content, zsk_key_content, zsk_private_content, ksk_basename, zsk_basename = included_keys
-                    logger.info(f"[DNSSEC] Using included keys for '{self.zone_name}'")
+                    logger.info(f"[DNSSEC] Using included keys for '{self.zone.fqdn}'")
                 else:
                     # Fallback: generate new keys
                     if self.dnssec_includes:
-                        logger.warning(f"[DNSSEC] No valid keys found in include directories, falling back to auto-generation for '{self.zone_name}'")
+                        logger.warning(f"[DNSSEC] No valid keys found in include directories, falling back to auto-generation for '{self.zone.fqdn}'")
 
-                    logger.debug(f"Generating ZSK for '{self.zone_name}' using dnssec-keygen")
+                    logger.debug(f"Generating ZSK for '{self.zone.fqdn}' using dnssec-keygen")
                     zsk_result = subprocess.run(
-                        ["dnssec-keygen", "-a", "ECDSAP256SHA256", "-n", "ZONE", self.zone_name],
+                        ["dnssec-keygen", "-a", "ECDSAP256SHA256", "-n", "ZONE", self.zone.fqdn],
                         cwd=temp_path,
                         capture_output=True,
                         text=True,
@@ -314,9 +293,9 @@ class ZoneGenerator:
                     zsk_basename = zsk_result.stdout.strip()
                     logger.debug(f"Generated ZSK: {zsk_basename}")
 
-                    logger.debug(f"Generating KSK for '{self.zone_name}' using dnssec-keygen")
+                    logger.debug(f"Generating KSK for '{self.zone.fqdn}' using dnssec-keygen")
                     ksk_result = subprocess.run(
-                        ["dnssec-keygen", "-a", "ECDSAP256SHA256", "-f", "KSK", "-n", "ZONE", self.zone_name],
+                        ["dnssec-keygen", "-a", "ECDSAP256SHA256", "-f", "KSK", "-n", "ZONE", self.zone.fqdn],
                         cwd=temp_path,
                         capture_output=True,
                         text=True,
@@ -349,13 +328,13 @@ class ZoneGenerator:
                     f"$INCLUDE {ksk_basename}.key\n"
                 )
 
-                logger.debug(f"Signing zone '{self.zone_name}' using dnssec-signzone")
+                logger.debug(f"Signing zone '{self.zone.fqdn}' using dnssec-signzone")
                 sign_result = subprocess.run(
                     [
                         "dnssec-signzone",
-                        "-3", hashlib.sha1(self.zone_name.encode()).hexdigest()[:16],
+                        "-3", hashlib.sha1(self.zone.fqdn.encode()).hexdigest()[:16],
                         "-N", "INCREMENT",
-                        "-o", self.zone_name,
+                        "-o", self.zone.fqdn,
                         str(unsigned_file),
                     ],
                     cwd=temp_path,
@@ -365,46 +344,56 @@ class ZoneGenerator:
                 )
 
                 logger.debug(f"dnssec-signzone output: {sign_result.stdout}")
-                signed_file = temp_path / f"{zone_filename}.signed"
+                signed_file = temp_path / f"{self.zone.filename}.signed"
                 if not signed_file.exists():
                     logger.error(f"Signed zone file not found: {signed_file}")
                     return None
 
                 signed_content = signed_file.read_text()
-                zone_name_clean = self.zone_name.rstrip('.')
-                dsset_file = temp_path / f"dsset-{zone_name_clean}."
+
+                # DS records are only for child zones (root has no parent)
                 ds_content = ""
-                if dsset_file.exists():
-                    ds_content = dsset_file.read_text()
-                    logger.debug(f"Found DS records for '{self.zone_name}'")
+                if not self.zone.is_root:
+                    dsset_file = temp_path / f"dsset-{self.zone.label}."
+                    if dsset_file.exists():
+                        ds_content = dsset_file.read_text()
+                        logger.debug(f"Found DS records for '{self.zone.fqdn}'")
+                    else:
+                        logger.warning(f"DS record file not found: {dsset_file}")
                 else:
-                    logger.warning(f"DS record file not found: {dsset_file}")
+                    logger.debug(f"Skipping DS record for root zone")
 
-                logger.debug(f"DNSSEC signing succeeded for '{self.zone_name}'")
+                logger.debug(f"DNSSEC signing succeeded for '{self.zone.fqdn}'")
 
-                return (signed_content, ksk_key_content, zsk_key_content, ds_content,
+                # Write signed zone to temp:/services/ for post hook and final output
+                zones_dir = DNSBPath(f"temp:/services/{self.service_name}/zones")
+                signed_path = zones_dir / self.zone.filename
+                self.context.fs.write_text(signed_path, signed_content)
+                logger.debug(f"[DNSSEC] Wrote signed zone to {signed_path}")
+
+                return (ksk_key_content, zsk_key_content, ds_content,
                         ksk_private_content, zsk_private_content, ksk_basename, zsk_basename)
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"DNSSEC command failed for '{self.zone_name}': {e.stderr}")
+            logger.error(f"DNSSEC command failed for '{self.zone.fqdn}': {e.stderr}")
             return None
         except FileNotFoundError as e:
             logger.error(f"DNSSEC tools not found. Please install bind9-dnsutils: {e}")
             return None
         except Exception as e:
-            logger.error(f"DNSSEC signing failed for '{self.zone_name}': {e}")
+            logger.error(f"DNSSEC signing failed for '{self.zone.fqdn}': {e}")
             logger.exception(e)
             return None
 
     def generate(self) -> List[ZoneArtifact]:
         """
         Creates the full zone file content, including SOA and NS records.
-        
+
         Returns:
             List[ZoneArtifact]: List of generated zone file artifacts.
         """
         logger.debug(
-            f"Generating zone file for '{self.zone_name}' with {len(self.records)} records (DNSSEC: {self.enable_dnssec})."
+            f"Generating zone file for '{self.zone.fqdn}' with {len(self.records)} records (DNSSEC: {self.enable_dnssec})."
         )
 
         # Generate a simple serial number based on the current timestamp
@@ -412,13 +401,12 @@ class ZoneGenerator:
 
         # Create default SOA and NS records using service name
         # Format: {service}.servers.net. (e.g., root.servers.net., tld.servers.net.)
-        service_prefix = self.service_name.rstrip(".")
-        ns_name = f"{service_prefix}.servers.net."
+        ns_name = f"{self.service_name}.servers.net."
         soa_name = "admin.servers.net."
-        
+
         default_records = [
             RR(
-                rname=self.zone_name,
+                rname=self.zone.fqdn,
                 rtype=QTYPE.SOA,
                 rdata=SOA(
                     mname=ns_name,  # Primary master name
@@ -434,7 +422,7 @@ class ZoneGenerator:
                 ttl=86400,
             ),
             RR(
-                rname=self.zone_name,
+                rname=self.zone.fqdn,
                 rtype=QTYPE.NS,
                 rdata=NS(ns_name),
                 ttl=3600,
@@ -451,13 +439,13 @@ class ZoneGenerator:
         all_records = default_records + self.records
 
         # Format all records into a zone file string
-        zone_content_parts = [f"$ORIGIN {self.zone_name}"]
-        zone_label = DNSLabel(self.zone_name)
+        zone_content_parts = [f"$ORIGIN {self.zone.fqdn}"]
+        zone_label = DNSLabel(self.zone.fqdn)
 
         # First pass: calculate the maximum domain name length
         max_rname_len = 0
         formatted_records = []
-        
+
         for record in all_records:
             record_label = DNSLabel(record.rname)
             rname_str = ""
@@ -471,96 +459,88 @@ class ZoneGenerator:
                 rname_str = str(record_label)
 
             max_rname_len = max(max_rname_len, len(rname_str))
-            
+
             ttl_str = str(record.ttl) if record.ttl else ""
             rclass_str = CLASS.get(record.rclass, f"CLASS{record.rclass}")
             rtype_str = QTYPE.get(record.rtype, f"TYPE{record.rtype}")
-            
+
             formatted_records.append((rname_str, ttl_str, rclass_str, rtype_str, record.rdata.toZone()))
-        
+
         # Use dynamic width based on the longest domain name, minimum 24
         rname_width = max(24, max_rname_len + 4)
-        
+
         # Second pass: format all records with consistent width
         for rname_str, ttl_str, rclass_str, rtype_str, rdata in formatted_records:
             line = f"{rname_str:<{rname_width}}{ttl_str:<8}{rclass_str:<8}{rtype_str:<8}{rdata}"
             zone_content_parts.append(line)
 
         unsigned_content = "\n".join(zone_content_parts)
-        logger.debug(f"Finished generating unsigned zone file for '{self.zone_name}'.")
-        base_filename = f"db.{self.zone_name.rstrip('.')}" if self.zone_name != "." else "db.root"
+        logger.debug(f"Finished generating unsigned zone file for '{self.zone.fqdn}'.")
+
         if not self.enable_dnssec:
             return [
                 ZoneArtifact(
-                    filename=base_filename,
+                    filename=self.zone.filename,
                     content=unsigned_content,
-                    container_path=f"/usr/local/etc/zones/{base_filename}",
+                    container_path=f"/usr/local/etc/zones/{self.zone.filename}",
                     is_primary=True
                 )
             ]
-        sign_result = self._sign_zone(unsigned_content)
+
+        # Write unsigned zone file to temp:/services/ before signing, easy to modify
+        zones_dir = DNSBPath(f"temp:/services/{self.service_name}/zones")
+        self.context.fs.mkdir(zones_dir, parents=True, exist_ok=True)
+        unsigned_path = zones_dir / f"{self.zone.filename}.unsigned"
+        self.context.fs.write_text(unsigned_path, unsigned_content)
+        logger.debug(f"[DNSSEC] Wrote unsigned zone to {unsigned_path}")
+
+        # Sign the zone (reads from temp:/services, pre hook can modify the file)
+        sign_result = self._sign_zone()
         if not sign_result:
-            logger.warning(f"DNSSEC signing failed for '{self.zone_name}', falling back to unsigned.")
+            logger.warning(f"DNSSEC signing failed for '{self.zone.fqdn}', falling back to unsigned.")
             return [
                 ZoneArtifact(
-                    filename=base_filename,
+                    filename=self.zone.filename,
                     content=unsigned_content,
-                    container_path=f"/usr/local/etc/zones/{base_filename}",
+                    container_path=f"/usr/local/etc/zones/{self.zone.filename}",
                     is_primary=True
                 )
             ]
-        signed_content, ksk_content, zsk_content, ds_content, ksk_private_content, zsk_private_content, ksk_basename, zsk_basename = sign_result
-        logger.debug(f"DNSSEC signing successful for '{self.zone_name}', generating artifacts.")
-        
-        zone_name_clean = self.zone_name.rstrip('.')
-        zone_name_clean = zone_name_clean if zone_name_clean != '.' else 'root'
-        
+
+        # Read signed zone from temp:/services/
+        signed_path = zones_dir / self.zone.filename
+        signed_content = self.context.fs.read_text(signed_path)
+        unsigned_content = self.context.fs.read_text(unsigned_path)
+
+        ksk_content, zsk_content, ds_content, ksk_private_content, zsk_private_content, ksk_basename, zsk_basename = sign_result
+        logger.debug(f"DNSSEC signing successful for '{self.zone.fqdn}', generating artifacts.")
+
         artifacts = [
             # Signed zone file
             ZoneArtifact(
-                filename=base_filename,
+                filename=self.zone.filename,
                 content=signed_content,
-                container_path=f"/usr/local/etc/zones/{base_filename}",
+                container_path=f"/usr/local/etc/zones/{self.zone.filename}",
                 is_primary=True
             ),
-            # Unsigned zone file
             ZoneArtifact(
-                filename=f"{base_filename}.unsigned",
+                filename=f"{self.zone.filename}.unsigned",
                 content=unsigned_content,
-                container_path=f"/usr/local/etc/zones/{base_filename}.unsigned",
-                is_primary=False
-            ),
-            # KSK key file
-            ZoneArtifact(
-                filename=f"K{zone_name_clean}.ksk.key",
-                content=ksk_content,
-                container_path=f"/usr/local/etc/zones/keys/K{zone_name_clean}.ksk.key",
-                is_primary=False
-            ),
-            # ZSK key file
-            ZoneArtifact(
-                filename=f"K{zone_name_clean}.zsk.key",
-                content=zsk_content,
-                container_path=f"/usr/local/etc/zones/keys/K{zone_name_clean}.zsk.key",
-                is_primary=False
-            ),
-            # DS record set file
-            ZoneArtifact(
-                filename=f"dsset-{zone_name_clean}",
-                content=ds_content,
-                container_path=f"/usr/local/etc/zones/keys/dsset-{zone_name_clean}",
+                container_path=f"/usr/local/etc/zones/{self.zone.filename}.unsigned",
                 is_primary=False
             )
         ]
-        self.context.fs.mkdir(DNSBPath(f"key:/{self.service_name.rstrip('.')}"), exist_ok=True)
-        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ksk.key"), ksk_content)
-        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ksk.private"), ksk_private_content)
-        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.zsk.key"), zsk_content)
-        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.zsk.private"), zsk_private_content)
-        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.ds"), ds_content)
+        # Store keys in key:/ filesystem for DNSSEC re-signing
+        # These are NOT mounted to containers - signed zone already contains all DNSSEC records
+        self.context.fs.mkdir(DNSBPath(f"key:/{self.service_name}"), exist_ok=True)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name}/{self.zone.label}.ksk.key"), ksk_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name}/{self.zone.label}.ksk.private"), ksk_private_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name}/{self.zone.label}.zsk.key"), zsk_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name}/{self.zone.label}.zsk.private"), zsk_private_content)
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name}/{self.zone.label}.ds"), ds_content)
         # Save key basenames for re-signing (e.g., "K.+013+61193")
         # This metadata is needed to recreate proper key filenames during re-signing
         key_metadata = f"KSK_BASENAME={ksk_basename}\nZSK_BASENAME={zsk_basename}\n"
-        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name.rstrip('.')}/{zone_name_clean}.keynames"), key_metadata)
-        
+        self.context.fs.write_text(DNSBPath(f"key:/{self.service_name}/{self.zone.label}.keynames"), key_metadata)
+
         return artifacts
