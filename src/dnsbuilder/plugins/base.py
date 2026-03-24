@@ -446,6 +446,7 @@ class PluginRegistry:
         package: str,
         templates: bool = True,
         defaults: bool = True,
+        rules: bool = False,
         controls: bool = True,
         scripts: bool = False,
         configs: bool = True
@@ -476,6 +477,13 @@ class PluginRegistry:
             register_plugin_resource(path, package)
             logger.debug(
                 f"Registered templates resource: {path} -> {package} (from {plugin_name})"
+            )
+
+        if rules:
+            path = f"images/rules/{software}"
+            register_plugin_resource(path, package)
+            logger.debug(
+                f"Registered rules resource: {path} -> {package} (from {plugin_name})"
             )
 
         if defaults:
