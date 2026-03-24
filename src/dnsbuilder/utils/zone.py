@@ -76,6 +76,11 @@ class Zone:
         return len(self.parts) == 0
 
     @property
+    def FQDN(self) -> str:
+        """Get FQDN format (e.g., 'example.com.', '.' for root)."""
+        return self.fqdn
+
+    @property
     def fqdn(self) -> str:
         """Get FQDN format (e.g., 'example.com.', '.' for root)."""
         if self.is_root:
