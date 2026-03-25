@@ -119,7 +119,7 @@ class Includer(ABC):
     Abstract base class for configuration file assemblers.
         fs: FileSystem abstraction for file operations
         software_type: The DNS software type (e.g., "bind", "unbound")
-        main_configs: Dict mapping section name to its main config ConfigFragment
+        main: The global main config ConfigFragment
         _pending_fragments: Dict mapping section name to list of pending ConfigFragments
     """
 
@@ -128,43 +128,36 @@ class Includer(ABC):
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
         self.software_type = software_type
-        # Main configs: section -> ConfigFragment
-        self.main_configs: Dict[str, 'ConfigFragment'] = {}
+        # Global Main configs
+        self.main: Type['ConfigFragment'] = None
         # Fragments waiting to be included: section -> list of ConfigFragments
         self._pending_fragments: Dict[str, List['ConfigFragment']] = {}
 
     def add(self, fragment: 'ConfigFragment'):
         """
         Register a ConfigFragment for later assembly.
+
+        - If fragment is global and marked as main, it becomes the global main config.
+        - Otherwise, it's added to pending fragments for its section.
         """
         section = fragment.section
 
-        if fragment.is_main:
-            # Explicitly marked as main config
-            if section in self.main_configs:
+        if section == "global" and fragment.is_main:
+            # Set as global main config
+            if self.main is not None:
                 logger.warning(
-                    f"Duplicate main config for section '{section}'. "
-                    f"Overwriting previous."
+                    "Duplicate global main config. Overwriting previous."
                 )
-            self.main_configs[section] = fragment
+            self.main = fragment
+            logger.debug(f"Set '{fragment.dst}' as global main config")
         else:
-            # Check if we need to promote to main config
-            if section not in self.main_configs:
-                # No main config yet, this fragment becomes the main
-                self.main_configs[section] = fragment
-                logger.debug(
-                    f"Promoted '{fragment.dst}' to main config for section '{section}'"
-                )
-            else:
-                # Add to pending fragments
-                if section not in self._pending_fragments:
-                    self._pending_fragments[section] = []
-                self._pending_fragments[section].append(fragment)
-
-        logger.debug(
-            f"Added ConfigFragment: section='{section}', "
-            f"dst='{fragment.dst}', is_main={fragment.is_main}"
-        )
+            # Add to pending fragments
+            if section not in self._pending_fragments:
+                self._pending_fragments[section] = []
+            self._pending_fragments[section].append(fragment)
+            logger.debug(
+                f"Added fragment: section='{section}', dst='{fragment.dst}', is_main={fragment.is_main}"
+            )
 
     def adds(self, fragments: List['ConfigFragment']):
         """
@@ -190,14 +183,12 @@ class Includer(ABC):
 
     def get_all_sections(self) -> Set[str]:
         """
-        Get all sections that have either main configs or pending fragments.
+        Get all sections that have pending fragments.
 
         Returns:
             Set of section names
         """
-        sections = set(self.main_configs.keys())
-        sections.update(self._pending_fragments.keys())
-        return sections
+        return set(self._pending_fragments.keys())
 
     def is_repeatable(self, section: str) -> bool:
         """
@@ -240,16 +231,17 @@ class Includer(ABC):
     @abstractmethod
     def assemble(self) -> None:
         """
-        Assemble all pending fragments into main configs.
+        Assemble all pending fragments into the global main config.
 
         This is the core method that must be implemented by subclasses.
         It should:
 
         1. Iterate through all sections with pending fragments
-        2. For each section, check if it's repeatable
-        3. Apply the appropriate inclusion strategy:
-           - repeatable=True: Simple append at end of main config
-           - repeatable=False: Inject include inside the block
+        2. For each fragment:
+           - If section is "global": include directly into global main config
+           - Otherwise, based on repeatable:
+             - repeatable=True: render as a new block and append
+             - repeatable=False: try to inject into existing block, or create new one
 
         Called at the end of the configuration generation process.
         """
