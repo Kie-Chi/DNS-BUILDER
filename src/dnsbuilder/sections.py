@@ -10,6 +10,7 @@ Key Features:
 2. Unified content indentation
 3. Plugin extensibility through the registry
 4. Replaces the old DNS_SOFTWARE_BLOCKS constant
+5. Auto-generated wrap_re for block location in Includer
 
 Example:
     # BIND ACL block
@@ -25,11 +26,15 @@ Example:
     # acl "trusted" {
     #     192.168.1.0/24;
     # };
+
+    # Auto-generated wrap_re:
+    section_info.wrap_re  # Returns: r'acl\\s+"[^"]*\\s*\\{'
 """
 
 from abc import ABC, abstractmethod
 from typing import Dict, Set, Optional, ClassVar
 from dataclasses import dataclass, field
+import re
 import logging
 
 from . import constants
@@ -57,6 +62,9 @@ class SectionInfo:
                     - False (default): Block can only appear once. Multiple configs
                       must be included inside the block (e.g., BIND options).
                     - True: Block can appear multiple times
+        wrap_re: Regex pattern to locate this block in config file.
+                 Auto-generated from template if not provided.
+                 Used by Includer to find where to inject includes.
 
     Template Parameters:
         - {content}: Required. The configuration content to wrap
@@ -83,20 +91,159 @@ class SectionInfo:
         ...     template="forward-zone:\\n{content}",
         ...     repeatable=True
         ... )
+
+        # Auto-generated wrap_re
+        >>> info = SectionInfo(name="options", template="options {{\\n{content}\\n}};")
+        >>> info.wrap_re
+        'options\\\\s*\\\\{'
     """
     name: str
     template: str = "{content}"
     indent: int = 4
     params: Set[str] = field(default_factory=set)
     repeatable: bool = False
+    wrap_re: Optional[str] = None
+    _generated_wrap_re: str = field(default="", init=False, repr=False)
 
     def __post_init__(self):
-        """Validate template has {content} placeholder."""
+        """Validate template has {content} placeholder and generate wrap_re."""
         if "{content}" not in self.template:
             raise ValueError(
                 f"SectionInfo template must contain '{{content}}' placeholder. "
                 f"Got: {self.template}"
             )
+
+        # Auto-generate wrap_re if not provided
+        if self.wrap_re is None:
+            self._generated_wrap_re = self._derive_wrap_re()
+        else:
+            self._generated_wrap_re = self.wrap_re
+
+    @property
+    def block_pattern(self) -> Optional[str]:
+        """
+        Get the regex pattern to locate this block in config.
+
+        Returns None for global section (no block to locate).
+        Returns the wrap_re for other sections.
+        """
+        if self.name == "global":
+            return None
+        return self._generated_wrap_re
+
+    def _derive_wrap_re(self) -> str:
+        r"""
+        Auto-generate wrap_re from template.
+        Examples:
+
+            "options {{\n{content}\n}};" -> r'options\s*\{'
+            'acl "{name}" {{\n{content}\n}};' -> r'acl\s+"[^"]*"\s*\{'
+            "server:\n{content}" -> r'server\s*:'
+            "{content}" -> "" (global section)
+        """
+        if self.name == "global":
+            return ""
+
+        # Find {content} position
+        content_pos = self.template.find("{content}")
+        if content_pos == -1:
+            return ""
+
+        # Extract header (everything before {content})
+        header = self.template[:content_pos]
+
+        # Clean up and convert to regex
+        return self._header_to_regex(header)
+
+    def _header_to_regex(self, header: str) -> str:
+        r"""
+        Convert template header to regex pattern for block location.
+
+        Handles:
+        - Parameter placeholders: {name} -> [^"]* or \S+
+        - Escaped braces: {{ -> \{
+        - Whitespace normalization
+        - Special character escaping
+
+        Args:
+            header: The template portion before {content}
+        """
+        if not header:
+            return ""
+
+        result = header
+        result = result.replace("{{", "\x00BRACE\x00")
+        # {name} in quotes like "name" -> match any quoted string
+        # {param} not in quotes -> match any non-whitespace
+        result = self._replace_params(result)
+        result = result.replace("\x00BRACE\x00", r"\{")
+        result = re.sub(r'\s+', r'\\s*', result)
+        # We've already handled { and }, now escape other specials
+        # But be careful not to double-escape
+        special_chars = r'[\.\+\*\?\^\$\[\]\|]'
+        result = result.strip()
+
+        return result
+
+    def _replace_params(self, header: str) -> str:
+        """
+        Replace parameter placeholders with appropriate regex wildcards.
+
+        Rules:
+        - {param} inside quotes like "{param}" -> "[^"]*"
+        - {param} outside quotes -> \S+ (non-whitespace)
+
+        Args:
+            header: Template header with possible {param} placeholders
+        """
+        result = []
+        i = 0
+        in_quote = False
+        quote_char = None
+
+        while i < len(header):
+            char = header[i]
+
+            # Track quote state
+            if char in '"\'':
+                if not in_quote:
+                    in_quote = True
+                    quote_char = char
+                    result.append(char)
+                elif char == quote_char:
+                    in_quote = False
+                    quote_char = None
+                    result.append(char)
+                else:
+                    result.append(char)
+                i += 1
+                continue
+
+            # Check for parameter placeholder
+            if char == '{' and i + 1 < len(header) and header[i + 1] != '{':
+                # Find closing }
+                end = header.find('}', i)
+                if end != -1:
+                    # Extract param name
+                    param_name = header[i + 1:end]
+                    if param_name in self.params or param_name not in ('content',):
+                        # Replace with appropriate wildcard
+                        if in_quote:
+                            # Inside quotes: match any characters except the quote
+                            result.append('[^' + quote_char + ']*')
+                        else:
+                            # Outside quotes: match non-whitespace
+                            result.append(r'\S+')
+                    else:
+                        # Unknown param, keep as-is but escaped
+                        result.append(r'\{' + param_name + r'\}')
+                    i = end + 1
+                    continue
+
+            result.append(char)
+            i += 1
+
+        return ''.join(result)
 
     def format_content(self, content: str, **kwargs) -> str:
         """
@@ -257,7 +404,12 @@ class Section(ABC):
         # Fallback for unknown sections
         if section == "global":
             return base_name
-        return f"{base_name}.{section}"
+        
+        sinfo = cls.get_section(section)
+        if not sinfo.params:
+            return f"{base_name}.{section}"
+        else:
+            return f"{base_name}?{"&".join(f"{k}={v}" for k, v in sinfo.params.items())}#{section}"
 
     @classmethod
     def format(

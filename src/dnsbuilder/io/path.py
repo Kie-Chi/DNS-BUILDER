@@ -1,8 +1,10 @@
 # DNSBuilder\src\dnsbuilder\io\path.py
 
 import logging
+from dataclasses import dataclass, field
+from typing import Dict, Tuple
 from pathlib import PurePosixPath, PureWindowsPath, PurePath, PosixPath, WindowsPath, Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from .. import constants
 from ..exceptions import InvalidPathError
 from ..utils import override
@@ -13,6 +15,69 @@ os_type = 'posix' if type(Path()) is PosixPath else os_type
 # end
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class SectionReference:
+    """
+    Parsed section reference from a configuration file path.
+    Supports format: /path/to/file.conf[#section][?param=value&param2=value2]
+    """
+    file_path: str  # Original file path
+    section: str = "global"
+    params: Dict[str, str] = field(default_factory=dict)
+
+
+def parse_sr(path_str: str) -> Tuple[SectionReference, bool]:
+    """
+    Parse a path string to extract section and parameters.
+
+    Supports two formats:
+    1. Standard URL format: /path/to/file.conf[?param=value]#section
+       - e.g., /etc/conf?name=example.com#options
+    2. Suffix format (backward compatible): /path/to/file.conf.section
+       - e.g., /etc/conf.options
+
+    Priority: #fragment > .suffix > "global"
+    Examples:
+        >>> parse_section_reference("/usr/local/etc/conf.options")
+        SectionReference(file_path='/usr/local/etc/conf.options', section='options', params={})
+
+        >>> parse_section_reference("/usr/local/etc/conf?name=example.com#options")
+        SectionReference(file_path='/usr/local/etc/conf', section='options', params={'name': 'example.com'})
+
+        >>> parse_section_reference("/usr/local/etc/conf#options")
+        SectionReference(file_path='/usr/local/etc/conf', section='options', params={})
+    """
+    # urlparse to handle ?query#fragment (standard URL format)
+    parsed = urlparse(f"file://{path_str}" if not path_str.startswith(('file://', '/')) else path_str)
+    file_path = parsed.path if parsed.path else path_str
+
+    # Default values
+    section = "global"
+    params = {}
+
+    # Parse query string as parameters
+    if parsed.query:
+        raw_params = parse_qs(parsed.query)
+        params = {k: v[0] if len(v) == 1 else v for k, v in raw_params.items()}
+
+    # Determine section - priority: #fragment > .suffix > "global"
+    if parsed.fragment:
+        section = parsed.fragment
+    else:
+        suffixes = DNSBPath(file_path).suffixes
+        if (
+            len(suffixes) >= 1 and suffixes[-1] == '.conf'
+        ) or (
+            len(suffixes) >= 2 and suffixes[-2] == '.conf'
+        ):
+            section = suffixes[-1].strip(".") if (len(suffixes) >= 2 and suffixes[-2] == '.conf') else 'global'
+            return SectionReference(file_path=path_str, section=section, params=params), True
+        else:
+            return None, False
+            
+
+    return SectionReference(file_path=path_str, section=section, params=params), True
 
 
 def add_protocol_checkers(cls):

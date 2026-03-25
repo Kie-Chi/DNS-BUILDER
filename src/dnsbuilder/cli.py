@@ -842,3 +842,6 @@ def down(ctx, config_file, workdir, output_dir, volumes, clean):
 def ui(ctx):
     """Start web UI server"""
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+if __name__ == "__main__":
+    cli() 

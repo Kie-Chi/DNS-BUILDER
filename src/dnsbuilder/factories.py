@@ -9,15 +9,17 @@ Dependencies:
 - registry: For dynamic class discovery
 """
 
-from typing import Dict, Set, Tuple, List, Any
+from typing import Dict, Set, Tuple, List, Any, TYPE_CHECKING
 import logging
 
 from .protocols import ImageProtocol, BehaviorProtocol, IncluderProtocol
 from .abstractions import InternalImage
 from .io import FileSystem
-from .datacls import Pair
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError, DefinitionError
 from .registry import behavior_registry, image_registry, includer_registry, initialize_registries
+
+if TYPE_CHECKING:
+    from .datacls import ConfigFragment
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +208,11 @@ class BehaviorFactory:
 
 class IncluderFactory:
     """
-    Factory Creates the appropriate Includer object based on software type
+    Factory Creates the appropriate Includer object based on software type.
+    Instead of passing confs at construction time, fragments are registered
+    via add() and assembled via assemble().
+
+    The create() method now only requires the software type and filesystem.
     """
 
     def __init__(self, fs: FileSystem = None):
@@ -216,7 +222,14 @@ class IncluderFactory:
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
 
-    def create(self, confs: Dict[str, Pair], software_type: str) -> IncluderProtocol:
+    def create(self, software_type: str, fragments: List['ConfigFragment'] = None) -> IncluderProtocol:
+        """
+        Create an Includer for the specified software type.
+
+        Args:
+            software_type: The DNS software type (e.g., "bind", "unbound")
+            fragments: Optional list of ConfigFragments to register immediately
+        """
         includer_class = includer_registry.includer(software_type)
 
         if not includer_class:
@@ -226,4 +239,12 @@ class IncluderFactory:
                 f"Supported software types: {sorted(supported_software)}"
             )
 
-        return includer_class(confs=confs, fs=self.fs, software_type=software_type)
+        # Create Includer instance
+        includer = includer_class(fs=self.fs, software_type=software_type)
+
+        # Register fragments if provided
+        if fragments:
+            for fragment in fragments:
+                includer.add(fragment)
+
+        return includer

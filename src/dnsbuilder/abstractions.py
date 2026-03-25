@@ -10,13 +10,13 @@ Dependencies:
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Tuple, TypeVar, Generic, Type, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, Tuple, TypeVar, Generic, Type, Set, TYPE_CHECKING
 import logging
 import json
 import re
 import hashlib
 
-from .datacls import BehaviorArtifact, Pair, Package, PkgInstaller
+from .datacls import BehaviorArtifact, Package, PkgInstaller, ConfigFragment
 from .io import DNSBPath, FileSystem
 from .exceptions import (
     UnsupportedFeatureError,
@@ -31,6 +31,7 @@ from . import constants
 if TYPE_CHECKING:
     from .datacls.contexts import BuildContext
     from .registry import ImageRegistry
+    from .sections import SectionInfo
 try:
     from dnslib import RR, NS, CNAME, A, QTYPE
     import ipaddress
@@ -115,40 +116,98 @@ class Behavior(ABC):
 
 class Includer(ABC):
     """
-    Abstract Class describe the `include config` line used in software config-file.
+    Abstract base class for configuration file assemblers.
+        fs: FileSystem abstraction for file operations
+        software_type: The DNS software type (e.g., "bind", "unbound")
+        main_configs: Dict mapping section name to its main config ConfigFragment
+        _pending_fragments: Dict mapping section name to list of pending ConfigFragments
     """
 
-    def __init__(self, confs: Dict[str, Pair] = {}, fs: FileSystem = None, software_type: str = None):
+    def __init__(self, fs: FileSystem = None, software_type: str = None):
         if fs is None:
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
-        self.confs = confs
         self.software_type = software_type
-        self.contain()
+        # Main configs: section -> ConfigFragment
+        self.main_configs: Dict[str, 'ConfigFragment'] = {}
+        # Fragments waiting to be included: section -> list of ConfigFragments
+        self._pending_fragments: Dict[str, List['ConfigFragment']] = {}
 
-    @staticmethod
-    def parse_blk(pair: Pair) -> Optional[str]:
+    def add(self, fragment: 'ConfigFragment'):
         """
-        parse block name from volume name
+        Register a ConfigFragment for later assembly.
         """
-        suffixes = DNSBPath(pair.dst).suffixes
-        if len(suffixes) >= 1 and suffixes[-1] == ".conf":
-            return 'global'
+        section = fragment.section
 
-        if len(suffixes) >= 2 and suffixes[-2] == ".conf":
-            return suffixes[-1].strip(".")
+        if fragment.is_main:
+            # Explicitly marked as main config
+            if section in self.main_configs:
+                logger.warning(
+                    f"Duplicate main config for section '{section}'. "
+                    f"Overwriting previous."
+                )
+            self.main_configs[section] = fragment
+        else:
+            # Check if we need to promote to main config
+            if section not in self.main_configs:
+                # No main config yet, this fragment becomes the main
+                self.main_configs[section] = fragment
+                logger.debug(
+                    f"Promoted '{fragment.dst}' to main config for section '{section}'"
+                )
+            else:
+                # Add to pending fragments
+                if section not in self._pending_fragments:
+                    self._pending_fragments[section] = []
+                self._pending_fragments[section].append(fragment)
 
-        raise UnsupportedFeatureError(f"unsupported block format: {pair.dst}")
+        logger.debug(
+            f"Added ConfigFragment: section='{section}', "
+            f"dst='{fragment.dst}', is_main={fragment.is_main}"
+        )
 
-    def is_repeatable(self, block: str) -> bool:
+    def adds(self, fragments: List['ConfigFragment']):
         """
-        Check if a block can appear multiple times in the configuration.
+        Register multiple ConfigFragments.
 
         Args:
-            block: Block name to check
+            fragments: List of ConfigFragment instances
+        """
+        for fragment in fragments:
+            self.add(fragment)
+
+    def get_pendings(self, section: str) -> List['ConfigFragment']:
+        """
+        Get all pending fragments for a section.
+
+        Args:
+            section: Section name
 
         Returns:
-            True if the block can repeat, False otherwise
+            List of ConfigFragments for the section
+        """
+        return self._pending_fragments.get(section, [])
+
+    def get_all_sections(self) -> Set[str]:
+        """
+        Get all sections that have either main configs or pending fragments.
+
+        Returns:
+            Set of section names
+        """
+        sections = set(self.main_configs.keys())
+        sections.update(self._pending_fragments.keys())
+        return sections
+
+    def is_repeatable(self, section: str) -> bool:
+        """
+        Check if a section can appear multiple times in the configuration.
+
+        Args:
+            section: Section name to check
+
+        Returns:
+            True if the section can repeat, False otherwise
         """
         if not self.software_type:
             return False
@@ -156,28 +215,43 @@ class Includer(ABC):
         from .registry import section_registry
         section_cls = section_registry.section(self.software_type)
         if section_cls:
-            return section_cls.is_repeatable(block)
+            return section_cls.is_repeatable(section)
         return False
 
-    @abstractmethod
-    def include(self, pair: Pair) -> Optional[Any]:
+    def get_section_info(self, section: str) -> Optional['SectionInfo']:
         """
-        write `include config_line` line into conf
+        Get SectionInfo for a section from the registry.
 
         Args:
-            pair (Pair): volume pair to include
+            section: Section name
+
         Returns:
-            Optional[Pair]: the pair to include, if changed
+            SectionInfo instance or None
         """
-        pass
+        if not self.software_type:
+            return None
+
+        from .registry import section_registry
+        section_cls = section_registry.section(self.software_type)
+        if section_cls:
+            return section_cls.get_section(section)
+        return None
 
     @abstractmethod
-    def contain(self) -> None:
+    def assemble(self) -> None:
         """
-        contain block-main config in global-main config
+        Assemble all pending fragments into main configs.
 
-        Returns:
-            None
+        This is the core method that must be implemented by subclasses.
+        It should:
+
+        1. Iterate through all sections with pending fragments
+        2. For each section, check if it's repeatable
+        3. Apply the appropriate inclusion strategy:
+           - repeatable=True: Simple append at end of main config
+           - repeatable=False: Inject include inside the block
+
+        Called at the end of the configuration generation process.
         """
         pass
 

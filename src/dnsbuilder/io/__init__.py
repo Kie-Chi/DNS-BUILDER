@@ -19,7 +19,7 @@ Usage:
 """
 
 from .path import DNSBPath, is_path_absolute, is_path_valid
-from .path import Path, PurePath, PurePosixPath, PureWindowsPath, PosixPath, WindowsPath
+from .path import Path, PurePath, PurePosixPath, PureWindowsPath, PosixPath, WindowsPath, SectionReference, parse_sr
 from .fs import (
     FileSystem,
     AppFileSystem,
@@ -51,5 +51,8 @@ __all__ = [
     'MemoryFileSystem',
     'HyperMemoryFileSystem',
     'create_app_fs',
+    # SectionRefence
+    'SectionReference',
+    'parse_sr'
 ]
 

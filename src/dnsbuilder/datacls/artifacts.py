@@ -2,6 +2,8 @@ from typing import Optional, List, Dict, Any
 from dnslib import RR
 from pydantic import BaseModel, ConfigDict
 
+from ..io import DNSBPath
+
 
 class VolumeArtifact(BaseModel):
     """
@@ -10,6 +12,34 @@ class VolumeArtifact(BaseModel):
     filename: str
     content: str
     container_path: str
+
+
+class ConfigFragment(BaseModel):
+    """
+    Represents a configuration fragment for the Includer architecture.
+
+    Attributes:
+        src: Source file path (absolute path in content dir or temp dir)
+        dst: Container path (where the file will be mounted in container)
+        dcr: Docker-compose relative path (for volume mount string)
+        section: Target section name (e.g., "global", "options", "server")
+                 Default is "global".
+        is_main: Whether this fragment is the main config for its section.
+                        The first .conf file for a section becomes the main config.
+        content: Optional content string (for memory-generated configs).
+                 If provided, this content will be written to src.
+        params: Optional parameters for section template formatting.
+                Used when the section requires parameters like zone names.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    src: DNSBPath  # Source file path
+    dst: str  # Container path
+    dcr: Optional[str] = None  # Docker-compose relative path
+    section: str = "global"  # Target section
+    is_main: bool = False  # Is this the main config for its section
+    content: Optional[str] = None  # Optional content
+    params: Dict[str, Any] = {}  # Optional section parameters
 
 
 class ZoneArtifact(VolumeArtifact):

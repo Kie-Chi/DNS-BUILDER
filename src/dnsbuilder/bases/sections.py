@@ -143,7 +143,7 @@ class UnboundSection(Section):
                 name="server",
                 template="server:\n{content}",
                 indent=4,
-                repeatable=False,  # Only one server block
+                repeatable=True,
             ),
             "remote-control": SectionInfo(
                 name="remote-control",

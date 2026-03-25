@@ -9,10 +9,10 @@ from datetime import datetime
 
 from ..abstractions import InternalImage, MasterBehavior
 from ..bases import SelfDefinedImage
-from ..datacls import BuildContext, BehaviorArtifact, Pair, Volume
+from ..datacls import BuildContext, BehaviorArtifact, Volume, ConfigFragment
 from .zone import ZoneGenerator
 from .. import constants
-from ..io import DNSBPath, FileSystem
+from ..io import DNSBPath, FileSystem, parse_sr
 from ..exceptions import BuildError, BehaviorError, DNSBPathNotFoundError, VolumeError, BuildDefinitionError
 from ..utils import get_dnssec_config
 
@@ -232,19 +232,14 @@ class ServiceHandler:
         # Help DNSSEC key combine
         self.trace.add_stage("dnssec_key_combine", "Combine DNSSEC keys if applicable")
 
-        
-        # Process volume mounts
+        # Process volume mounts - Phase 1: Classification
         self.trace.add_stage("process_volumes", "Process volume mount configuration")
-        pairs = self._process_volumes()
-        if pairs:
-            self.trace.add_decision(
-                "main_config_path", 
-                "Main configuration file path", 
-                "_process_volumes", 
-                str(pairs.get("global", None)),
-                "Obtained main config file path from volume processing"
-            )
-        
+        fragments = self._process_volumes()
+
+        # Phase 2 & 3: Register fragments and assemble
+        self.trace.add_stage("config_assembly", "Assemble configuration fragments")
+        self._assemble_configurations(fragments)
+
         # Assemble compose service block
         self.trace.add_stage("assemble_compose", "Assemble docker-compose service configuration")
         compose_service_block = self._assemble_compose_service()
@@ -368,14 +363,26 @@ class ServiceHandler:
         self.build_conf.setdefault('volumes', []).append(volume_str)
         logger.debug(f"Generated extra_conf volume: {volume_str}")
 
-    def _process_volumes(self) -> Dict[str, Pair] | None:
-        pairs = {}
-        _nd_iclds = []
+    def _process_volumes(self) -> List['ConfigFragment']:
+        """
+        Process volume mounts and collect ConfigFragments.
+        - Does NOT modify any configuration files
+        - Returns a list of ConfigFragments for later assembly
+        """
+        from ..datacls import ConfigFragment
+        from ..registry import section_registry
+
+        fragments: List[ConfigFragment] = []
         filtered_volumes = self.__filter_volumes()
+
+        # Get the Section class for this software
+        section_cls = section_registry.section(self.image_obj.software) if self.image_obj.software else None
+
         for volume in filtered_volumes:
             logger.debug(f"Processing volume for '{self.service_name}': '{volume}'")
             host_path = volume.src
             container_path = volume.dst
+
             if host_path.need_check:
                 if not self.context.fs.exists(host_path):
                     if not host_path.is_absolute():
@@ -395,48 +402,128 @@ class ServiceHandler:
                     filename = host_path.__rname__.split(".")[0]
                 else:
                     filename = host_path.__rname__
-                
+
                 target_path = self.contents_dir / filename
                 with self.context.fs.fallback(enable=False):
                     if self.context.fs.exists(target_path):
                         filename = f"{hashlib.sha256(str(host_path).encode()).hexdigest()[:16]}-{filename}"
                         target_path = self.contents_dir / filename
-                
+
                 if self.context.fs.is_dir(host_path):
                     self.context.fs.copytree(host_path, target_path)
                 else:
                     self.context.fs.copy(host_path, target_path)
-                suffixes = DNSBPath(container_path).suffixes
+
                 dcr_path = f"./{self.service_name}/contents/{filename}"
-                if (len(suffixes) >= 1 and suffixes[-1] == '.conf') or (len(suffixes) >= 2 and suffixes[-2] == '.conf'):
-                    blk = suffixes[-1].strip(".") if (len(suffixes) >= 2 and suffixes[-2] == '.conf') else 'global'
-                    _blks = constants.DNS_SOFTWARE_BLOCKS.get(self.image_obj.software, set())
-                    if blk in _blks:
-                        if not pairs.get(blk, None):
-                            pairs[blk] = Pair(src=target_path, dst=container_path, dcr=dcr_path)
-                            logger.debug(f"Identified '{filename}' as the main `{blk}` configuration file.")
+
+                # Determine if this is a configuration file and its section using parse_sr
+                sr_result, is_conf = parse_sr(str(container_path))
+
+                if is_conf and sr_result:
+                    section = sr_result.section
+                    sr_params = sr_result.params
+
+                    # Check if section is valid for this software
+                    valid_sections = set()
+                    if section_cls:
+                        valid_sections = section_cls.get_section_names()
+
+                    if section in valid_sections or section == 'global':
+                        # Check if we already have a main config for this section
+                        existing_main = any(
+                            f.section == section and f.is_main
+                            for f in fragments
+                        )
+
+                        if not existing_main:
+                            # This becomes the main config for this section
+                            fragment = ConfigFragment(
+                                src=target_path,
+                                dst=str(container_path),
+                                dcr=dcr_path,
+                                section=section,
+                                is_main=True,
+                                params=sr_params if sr_params else {},
+                            )
+                            fragments.append(fragment)
+                            logger.debug(f"Identified '{filename}' as the main `{section}` configuration file.")
                         else:
-                            if self.context.fs.read_text(pairs[blk].src).find(str(container_path)) != -1:
-                                logger.debug(f"Include line for '{container_path}' already exists, skipping auto-include.")
-                            else:
-                                _nd_iclds.append(Pair(src=target_path, dst=container_path, dcr=dcr_path))
+                            # This is a fragment to be included
+                            fragment = ConfigFragment(
+                                src=target_path,
+                                dst=str(container_path),
+                                dcr=dcr_path,
+                                section=section,
+                                is_main=False,
+                                params=sr_params if sr_params else {},
+                            )
+                            fragments.append(fragment)
+                            logger.debug(f"Collected '{filename}' as a fragment for section `{section}`.")
                     else:
-                        logger.warning(f"Configuration file '{filename}' is not in a recognized block for '{self.image_obj.software}', skipping.")
-            
+                        logger.warning(
+                            f"Configuration file '{filename}' is not in a recognized section "
+                            f"for '{self.image_obj.software}', treating as regular volume."
+                        )
+
                 final_volume_str = f"{dcr_path}:{container_path}"
                 if volume.mode:
                     final_volume_str += f":{volume.mode}"
                 self.processed_volumes.append(final_volume_str)
                 logger.debug(f"Path copied and added as processed volume: {final_volume_str}")
-        if self.image_obj.software in constants.DNS_SOFTWARE_BLOCKS:
-            includer = self.context.includer_factory.create(pairs, self.image_obj.software)
-            for _icld in _nd_iclds:
-                logger.debug(f"Found additional config file '{_icld.src}', will attempt to include it in the main `{blk}` config.")
-                p = includer.include(_icld)
-                if p:
-                    logger.debug(f"Help Copy to Another directory: {p.dcr}:{p.dst}")
-                    self.processed_volumes.append(f"{p.dcr}:{p.dst}")
-        return pairs
+
+        return fragments
+
+    def _assemble_configurations(self, fragments: List['ConfigFragment']):
+        """
+        Creates an Includer for the current software
+        Registers all ConfigFragments
+        Calls assemble() to perform the final configuration merge
+
+        Args:
+            fragments: List of ConfigFragment objects from volume processing
+        """
+        from ..datacls import ConfigFragment
+        from ..registry import includer_registry
+
+        # Check if this software has an Includer
+        if not self.image_obj.software:
+            logger.debug(f"[{self.service_name}] No software type, skipping config assembly")
+            return
+
+        includer_class = includer_registry.includer(self.image_obj.software)
+        if not includer_class:
+            logger.debug(
+                f"[{self.service_name}] No Includer for software '{self.image_obj.software}', "
+                f"skipping config assembly"
+            )
+            return
+
+        # Create Includer instance
+        includer = includer_class(fs=self.context.fs, software_type=self.image_obj.software)
+
+        # Register all fragments
+        for fragment in fragments:
+            includer.add(fragment)
+            logger.debug(
+                f"[{self.service_name}] Registered fragment: section='{fragment.section}', "
+                f"dst='{fragment.dst}', is_main={fragment.is_main}"
+            )
+
+        # Perform assembly
+        logger.info(f"[{self.service_name}] Assembling configuration fragments...")
+        includer.assemble()
+
+        self.trace.add_decision(
+            "config_assembly",
+            "Configuration fragment assembly",
+            "includer",
+            {
+                "software": self.image_obj.software,
+                "fragments_count": len(fragments),
+                "sections": list(includer.get_all_sections()),
+            },
+            f"Assembled {len(fragments)} fragments using {includer_class.__name__}"
+        )
 
     def _generate_artifacts_from_behaviors(
         self,
@@ -620,48 +707,72 @@ class ServiceHandler:
         """
         Write config items to section-specific generated_zones.conf files.
 
-        Each section gets its own file:
-        - generated_zones.conf (global section)
-        - generated_zones.conf.server (server section)
-        - etc.
+        Behavior based on section type:
+        - repeatable=True (e.g., BIND zone, acl): Each item is independently formatted
+          with template and params, then written directly to generated_zones.conf (global).
+          Each zone "example.com" { ... } gets its own block.
+        - repeatable=False (e.g., BIND options, logging): Items are merged together
+          and written to a section-specific file (e.g., generated_zones.conf.options).
         """
         from ..registry import section_registry
 
         # Get the Section class for this software
         section_cls = section_registry.section(self.image_obj.software)
+        global_items = []  # For repeatable sections, rendered content goes to global
 
         for section, items in config_items_by_section.items():
             if not items:
                 continue
 
-            # Format content for this section
-            formatted_lines = []
-            for item in items:
-                content = item["content"]
-                params = item.get("params", {})
-
-                # Use Section class to format if available
-                if section_cls:
-                    formatted = section_cls.format(section, content, **params)
-                else:
-                    formatted = content
-
-                formatted_lines.append(formatted)
-
-            section_content = "\n\n".join(formatted_lines)
-
-            # Determine filename based on section
+            # Check if this section is repeatable
+            is_repeatable = False
             if section_cls:
-                filename = section_cls.get_filename(section)
-            else:
-                filename = f"generated_zones.conf.{section}" if section != "global" else "generated_zones.conf"
+                is_repeatable = section_cls.is_repeatable(section)
+            if is_repeatable:
+                # Repeatable section: each item gets its own formatted block
+                for item in items:
+                    content = item["content"]
+                    params = item.get("params", {})
+                    if section_cls:
+                        formatted = section_cls.format(section, content, **params)
+                    else:
+                        formatted = content
 
+                    global_items.append(formatted)
+                    logger.debug(
+                        f"Formatted repeatable section '{section}' item with params {params}"
+                    )
+            else:
+                # Non-repeatable section: merge items and write to section-specific file
+                section_content = "\n\n".join([item["content"] for item in items])
+                # Determine filename based on section
+                if section_cls:
+                    filename = section_cls.get_filename(section)
+                else:
+                    filename = f"generated_zones.conf.{section}" if section != "global" else "generated_zones.conf"
+
+                filepath = self.tmp_dir / filename
+                self.context.fs.write_text(
+                    filepath,
+                    f"# Auto-generated by DNS Builder\n\n{section_content}\n"
+                )
+                logger.debug(f"Wrote non-repeatable section '{section}' config to '{filepath}'.")
+
+                # Add volume mount
+                container_path = f"/usr/local/etc/zones/{filename}"
+                volumes.append(f"{filepath}:{container_path}")
+                logger.debug(f"Added volume mount: {filepath} -> {container_path}")
+
+        # Write global file with all repeatable section items
+        if global_items:
+            global_content = "\n\n".join(global_items)
+            filename = constants.GENERATED_ZONES_FILENAME
             filepath = self.tmp_dir / filename
             self.context.fs.write_text(
                 filepath,
-                f"# Auto-generated by DNS Builder\n\n{section_content}\n"
+                f"# Auto-generated by DNS Builder\n\n{global_content}\n"
             )
-            logger.debug(f"Wrote {section} config to '{filepath}'.")
+            logger.debug(f"Wrote global config with {len(global_items)} repeatable items to '{filepath}'.")
 
             # Add volume mount
             container_path = f"/usr/local/etc/zones/{filename}"

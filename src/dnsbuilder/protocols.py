@@ -83,26 +83,29 @@ class BehaviorProtocol(Protocol):
 @runtime_checkable
 class IncluderProtocol(Protocol):
     """
-    Protocol for configuration file includers.
-    
-    Includers handle including configuration snippets into main config files
-    for different DNS software.
+    Protocol for configuration file assemblers.
+
+    Includers handle the assembly of ConfigFragments into main configuration files
+    for different DNS software. They work as delayed-binding configuration assemblers:
+    1. Collect ConfigFragments via add()
+    2. Assemble them at the end via assemble()
     """
-    
-    def include(self, pair: Any) -> Optional[Any]:
+
+    def add(self, fragment: Any) -> None:
         """
-        Write include directive for a configuration file.
-        
+        Register a ConfigFragment for later assembly.
+
         Args:
-            pair: Volume pair to include (source and destination)
+            fragment: ConfigFragment instance with section, src, dst info
         """
         ...
-    
-    def contain(self) -> None:
+
+    def assemble(self) -> None:
         """
-        Contain block-specific config in global main config.
-        
-        Sets up the structure for including configuration blocks.
+        Assemble all pending fragments into main configs.
+
+        This is the core method that performs the final configuration merge.
+        Called at the end of the configuration generation process.
         """
         ...
 
@@ -155,20 +158,25 @@ class BehaviorFactoryProtocol(Protocol):
 class IncluderFactoryProtocol(Protocol):
     """
     Protocol for includer factory implementations.
-    
+
     Factories create appropriate includer instances for different DNS software.
+
+    New Architecture:
+    -----------------
+    The factory creates Includer instances that are ready for fragment registration.
+    Fragments are registered via add() and assembled via assemble().
     """
-    
-    def create(self, confs: Dict[str, Any], software_type: str) -> IncluderProtocol:
+
+    def create(self, software_type: str, fragments: Any = None) -> IncluderProtocol:
         """
         Create an includer instance for the specified software type.
-        
+
         Args:
-            confs: Configuration file paths dictionary
             software_type: DNS software type (e.g., "bind", "unbound")
-            
+            fragments: Optional list of ConfigFragments to register immediately
+
         Returns:
-            Includer instance
+            Includer instance ready for fragment registration
         """
         ...
 
@@ -299,6 +307,11 @@ class SectionProtocol(Protocol):
     @classmethod
     def has_section(cls, name: str) -> bool:
         """Check if a section is supported."""
+        ...
+    
+    @classmethod
+    def is_repeatable(cls, name: str) -> bool:
+        """Check if a section is repeatable."""
         ...
 
     @classmethod

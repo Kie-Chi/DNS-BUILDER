@@ -1,29 +1,20 @@
-from typing import List, Dict, NamedTuple
+from typing import List, Dict
 
 from .. import constants
 from ..io.path import DNSBPath, is_path_valid
 from ..exceptions import VolumeError
 
-class Pair(NamedTuple):
-    """
-        Class Pair to describe a volume pair
-        src: absolute path in content dir
-        dst: relative path in container
-        dcr: relative path in docker container
-    """
-    src: DNSBPath # absolute path in content dir
-    dst: str # relative path in container
-    dcr: str | None = None # relative path in docker container
 
-"""
+class Volume:
+    """
     Class Volume to resolve volumes like src:dst:mode
+
     We will support list-like volumes config later like:
         volumes:
             - source:
             - target:
             ....
-"""
-class Volume:
+    """
     def __init__(self, volume: List[Dict] | str):
         self.origin_volume = volume
         self.is_origin = False
@@ -32,7 +23,7 @@ class Volume:
             self._init_short()
         elif isinstance(volume, list):
             self._init_list()
-    
+
     def __post_init__(self):
         if not self.src.exists():
             raise VolumeError(f"Source volume {self.src} does not exist")
@@ -72,7 +63,6 @@ class Volume:
             self.mode = None
         else:
             raise VolumeError(f"Invalid volume format: {self.origin_volume}, we expect src:dst[:mode]")
-
 
     def _init_list(self):
         """
