@@ -115,10 +115,24 @@ class BindStubBehavior(Behavior):
 
 
 class BindMasterBehavior(MasterBehavior):
-    """Generates `type master` configuration for BIND"""
-    
+    """
+    Generates `type master` configuration for BIND.
+
+    BIND zone configuration goes to the "zone" section with zone name as parameter.
+    The Section system will format it as: zone "example.com" { ... };
+    """
+
     def generate_config_line(self, zone_name: str, file_path: str) -> str:
-        return f'zone "{zone_name}" {{ type master; file "{file_path}"; }};'
+        """Generate the content inside the zone block."""
+        return f'type master; file "{file_path}";'
+
+    def get_section(self) -> str:
+        """BIND master zones go to 'zone' section."""
+        return "zone"
+
+    def get_section_params(self, zone_name: str) -> dict:
+        """Provide zone name for the zone section template."""
+        return {"name": zone_name}
 
 
 # ============================================================================
@@ -141,7 +155,9 @@ class UnboundForwardBehavior(Behavior):
 
 class UnboundHintBehavior(HintBehavior):
     """
-    Generates 'root-hints' configuration for Unbound
+    Generates 'root-hints' configuration for Unbound.
+
+    The root-hints directive belongs to the 'server' section.
     """
 
     def generate(
@@ -152,16 +168,18 @@ class UnboundHintBehavior(HintBehavior):
 
         file_content = self.gen_hint(service_name, build_context)
 
+        # root-hints directive goes in server section
         config_line = f'root-hints: "{container_path}"'
 
         volume = VolumeArtifact(
             filename=filename,
             content=file_content,
             container_path=container_path,
-            section="server",
         )
         return BehaviorArtifact(
-            config_line=config_line, new_volume=volume, section="server"
+            config_line=config_line,
+            section="server",
+            new_volume=volume
         )
 
 
@@ -175,15 +193,32 @@ class UnboundStubBehavior(Behavior):
     ) -> BehaviorArtifact:
         target_ips = MasterBehavior.resolve_ips(self.targets, build_context, service_name)
         stub_addrs = "\n\t".join([f"stub-addr: {ip}" for ip in target_ips])
-        config_line = f'stub-zone:\n\tname: "{self.zone}"\n\t{stub_addrs}'
-        return BehaviorArtifact(config_line=config_line)
+        config_line = f'name: "{self.zone}"\n\t{stub_addrs}'
+        
+        return BehaviorArtifact(
+            config_line=config_line,
+            section="stub-zone"
+        )
 
 
 class UnboundMasterBehavior(MasterBehavior):
-    """Generates `auth-zone` configuration for Unbound"""
+    """
+    Generates `auth-zone` configuration for Unbound.
+
+    Unbound authoritative zones use the "auth-zone" section.
+    The Section system will format it as:
+    auth-zone:
+        name: "example.com"
+        zonefile: "..."
+    """
 
     def generate_config_line(self, zone_name: str, file_path: str) -> str:
-        return f'auth-zone:\n\tname: "{zone_name}"\n\tzonefile: "{file_path}"'
+        """Generate auth-zone content."""
+        return f'name: "{zone_name}"\n\tzonefile: "{file_path}"'
+
+    def get_section(self) -> str:
+        """Unbound master zones go to 'auth-zone' section."""
+        return "auth-zone"
 
 
 # ============================================================================
@@ -246,11 +281,21 @@ class PdnsRecursorStubBehavior(Behavior):
 
 
 class PdnsRecursorMasterBehavior(MasterBehavior):
-    """Generates `auth-zones` configuration for PowerDNS Recursor"""
+    """
+    Generates `auth-zones` configuration for PowerDNS Recursor.
+
+    PowerDNS Recursor uses simple key=value format without block structure.
+    All configuration goes to the "global" section.
+    """
 
     def generate_config_line(self, zone_name: str, file_path: str) -> str:
+        """Generate auth-zones configuration line."""
         # PowerDNS Recursor format: auth-zones=example.org=/var/zones/example.org
         return f'auth-zones+={zone_name}={file_path}'
+
+    def get_section(self) -> str:
+        """PowerDNS Recursor only has global section."""
+        return "global"
 
 
 # ============================================================================

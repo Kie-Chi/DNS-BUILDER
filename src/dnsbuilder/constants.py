@@ -1,4 +1,3 @@
-from enum import Enum
 from dnslib import A, CNAME, AAAA, TXT, NS
 
 # --- Log and Debug ---
@@ -123,14 +122,9 @@ RECOGNIZED_PATTERNS = {
 }
 
 
-# --- Behavior Sections ---
+# --- Behavior Types ---
 
 BEHAVIOR_TYPES = {"Forward", "Stub", "Master", "Hint"}
-
-class BehaviorSection(str, Enum):
-    SERVER = "server"
-    TOPLEVEL = "toplevel"
-
 RECORD_TYPE_MAP = {
     "A": A,
     "NS": NS,

@@ -12,7 +12,7 @@ from typing import Dict, Type, Set, Any, Optional, List
 from dataclasses import dataclass, field
 import logging
 
-from ..protocols import ImageProtocol, BehaviorProtocol, IncluderProtocol, ZoneGeneratorProtocol
+from ..protocols import ImageProtocol, BehaviorProtocol, IncluderProtocol, ZoneGeneratorProtocol, SectionProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,8 @@ class PluginRegistry:
         image_registry: "ImageRegistry",
         behavior_registry: "BehaviorRegistry",
         includer_registry: "IncluderRegistry",
-        zone_generator_registry: "ZoneGeneratorRegistry" = None
+        zone_generator_registry: "ZoneGeneratorRegistry" = None,
+        section_registry: "SectionRegistry" = None
     ):
         """
         Initialize the plugin registry.
@@ -188,11 +189,13 @@ class PluginRegistry:
             behavior_registry: The core behavior registry
             includer_registry: The core includer registry
             zone_generator_registry: The core zone generator registry
+            section_registry: The core section registry
         """
         self._images = image_registry
         self._behaviors = behavior_registry
         self._includers = includer_registry
         self._zone_generators = zone_generator_registry
+        self._sections = section_registry
         # Maps: software -> plugin_name
         self._plugin_images: Dict[str, str] = {}
         # Maps: (software, behavior_type) -> plugin_name
@@ -201,6 +204,8 @@ class PluginRegistry:
         self._plugin_includers: Dict[str, str] = {}
         # Maps: software -> plugin_name
         self._plugin_zone_generators: Dict[str, str] = {}
+        # Maps: software -> plugin_name
+        self._plugin_sections: Dict[str, str] = {}
         # Maps: plugin_name -> Plugin instance
         self._loaded_plugins: Dict[str, Plugin] = {}
 
@@ -436,6 +441,83 @@ class PluginRegistry:
 
     # =========================================================================
     #
+    # Section Registration
+    #
+    # =========================================================================
+
+    def register_section(
+        self,
+        software: str,
+        section_class: Type[SectionProtocol],
+        override: bool = False
+    ) -> None:
+        """
+        Register a Section implementation.
+
+        This allows plugins to provide custom configuration block definitions
+        for different DNS software. Each Section class defines the supported
+        configuration blocks, their formatting templates, and file naming
+        conventions.
+
+        Args:
+            software: Software identifier (e.g., "mydns", "coredns")
+            section_class: The Section class to register
+            override: If True, replace existing registration
+        """
+        if self._sections is None:
+            logger.warning(
+                f"SectionRegistry not available, cannot register section for '{software}'"
+            )
+            return
+
+        if software in self._sections.registry and not override:
+            existing_plugin = self._plugin_sections.get(software, "built-in")
+            raise ValueError(
+                f"Section '{software}' already registered by '{existing_plugin}'. "
+                f"Use override=True to replace."
+            )
+
+        self._sections.register(software, section_class)
+        self._plugin_sections[software] = self._current_plugin or "unknown"
+
+        logger.debug(
+            f"Registered section '{software}' from plugin '{self._current_plugin or 'unknown'}'"
+        )
+
+    def unregister_section(self, software: str) -> bool:
+        """
+        Unregister a Section implementation.
+
+        Args:
+            software: Software identifier to unregister
+        """
+        if self._sections is None:
+            return False
+
+        if software in self._plugin_sections:
+            if software in self._sections._registry:
+                del self._sections._registry[software]
+            del self._plugin_sections[software]
+            logger.debug(f"Unregistered section '{software}'")
+            return True
+        return False
+
+    def get_section(self, software: str) -> Optional[Type[SectionProtocol]]:
+        """
+        Get a Section class by software type.
+
+        Args:
+            software: Software identifier
+
+        Returns:
+            Section class or None if not found
+        """
+        if self._sections is None:
+            return None
+        return self._sections.section(software)
+
+    # =========================================================================
+    #
     # Resource Registration
     #
     # =========================================================================
@@ -586,3 +668,7 @@ class PluginRegistry:
     def get_zone_generators_by_plugin(self, plugin_name: str) -> Set[str]:
         """Get all zone generators registered by a specific plugin."""
         return {sw for sw, pn in self._plugin_zone_generators.items() if pn == plugin_name}
+
+    def get_sections_by_plugin(self, plugin_name: str) -> Set[str]:
+        """Get all sections registered by a specific plugin."""
+        return {sw for sw, pn in self._plugin_sections.items() if pn == plugin_name}

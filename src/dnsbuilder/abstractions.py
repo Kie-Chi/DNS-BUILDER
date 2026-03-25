@@ -118,11 +118,12 @@ class Includer(ABC):
     Abstract Class describe the `include config` line used in software config-file.
     """
 
-    def __init__(self, confs: Dict[str, Pair] = {}, fs: FileSystem = None):
+    def __init__(self, confs: Dict[str, Pair] = {}, fs: FileSystem = None, software_type: str = None):
         if fs is None:
             raise DefinitionError("FileSystem is not provided.")
         self.fs = fs
         self.confs = confs
+        self.software_type = software_type
         self.contain()
 
     @staticmethod
@@ -138,6 +139,25 @@ class Includer(ABC):
             return suffixes[-1].strip(".")
 
         raise UnsupportedFeatureError(f"unsupported block format: {pair.dst}")
+
+    def is_repeatable(self, block: str) -> bool:
+        """
+        Check if a block can appear multiple times in the configuration.
+
+        Args:
+            block: Block name to check
+
+        Returns:
+            True if the block can repeat, False otherwise
+        """
+        if not self.software_type:
+            return False
+
+        from .registry import section_registry
+        section_cls = section_registry.section(self.software_type)
+        if section_cls:
+            return section_cls.is_repeatable(block)
+        return False
 
     @abstractmethod
     def include(self, pair: Pair) -> Optional[Any]:
@@ -155,7 +175,7 @@ class Includer(ABC):
     def contain(self) -> None:
         """
         contain block-main config in global-main config
-        
+
         Returns:
             None
         """
@@ -736,10 +756,11 @@ class ExternalImage(Image, ABC):
 class MasterBehavior(Behavior, ABC):
     """
     Abstract base class for master/authoritative zone behaviors.
-    
+
     This class provides common functionality for behaviors that generate
-    authoritative DNS zone records. Subclasses must implement generate_config_line
-    to produce software-specific configuration.
+    authoritative DNS zone records. Subclasses must implement:
+    - generate_config_line(): produce software-specific configuration
+    - Optionally override get_section() and get_section_params() for Section integration
     """
 
     def __init__(self, zone: str, args_str: str):
@@ -778,18 +799,48 @@ class MasterBehavior(Behavior, ABC):
     def generate_config_line(self, zone_name: str, file_path: str) -> str:
         """
         Generate configuration line for this behavior.
-        
-        This method must be implemented by subclasses to generate software-specific
-        configuration (e.g., BIND's 'zone "example.com" { type master; file "..."; };').
-        
         Args:
             zone_name: The zone name
             file_path: Path to the zone file
-            
-        Returns:
-            Configuration line string
         """
         pass
+
+    def get_section(self) -> str:
+        """
+        Return the target section for this behavior's configuration.
+        """
+        return "global"
+
+    def get_section_params(self, zone_name: str) -> Dict[str, Any]:
+        """
+        Return parameters for section template formatting.
+        
+        Args:
+            zone_name: The zone name
+        """
+        return {}
+
+    def generate_artifact(self, zone_name: str, file_path: str) -> BehaviorArtifact:
+        """
+        Generate a complete BehaviorArtifact with config line and section info.
+
+        This method combines generate_config_line() with section information
+        to produce a fully-formed BehaviorArtifact for the Section system.
+
+        Args:
+            zone_name: The zone name
+            file_path: Path to the zone file in container
+
+        Returns:
+            BehaviorArtifact with config_line, section, and section_params
+        """
+        config_line = self.generate_config_line(zone_name, file_path)
+        return BehaviorArtifact(
+            config_line=config_line,
+            section=self.get_section(),
+            section_params=self.get_section_params(zone_name),
+            new_records=None  # Records are handled separately in generate()
+        )
 
     def generate(
         self, service_name: str, build_context: "BuildContext"

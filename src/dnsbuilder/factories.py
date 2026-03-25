@@ -226,4 +226,4 @@ class IncluderFactory:
                 f"Supported software types: {sorted(supported_software)}"
             )
 
-        return includer_class(confs=confs, fs=self.fs)
+        return includer_class(confs=confs, fs=self.fs, software_type=software_type)

@@ -6,7 +6,8 @@ This module contains all Protocol definitions for the DNSBuilder framework.
 Protocols are the foundation layer with zero dependencies on other dnsbuilder modules.
 """
 
-from typing import Protocol, Dict, Any, List, Optional, Type, runtime_checkable
+from typing import Protocol, Dict, Any, List, Optional, Type, Set, runtime_checkable
+from . import constants
 
 
 # ============================================================================
@@ -264,5 +265,75 @@ class ZoneGeneratorRegistryProtocol(Protocol):
 
     def get(self, software: str) -> Optional[Type[ZoneGeneratorProtocol]]:
         """Get a zone generator class by software type."""
+        ...
+
+
+# ============================================================================
+# Section Protocols
+# ============================================================================
+
+@runtime_checkable
+class SectionProtocol(Protocol):
+    """
+    Protocol for DNS software configuration section definitions.
+
+    Sections define the configuration blocks supported by each DNS software,
+    including formatting templates and file naming conventions.
+    """
+
+    @classmethod
+    def get_sections(cls) -> Dict[str, Any]:
+        """Return all supported configuration sections."""
+        ...
+
+    @classmethod
+    def get_section(cls, name: str) -> Optional[Any]:
+        """Get a specific section by name."""
+        ...
+
+    @classmethod
+    def get_section_names(cls) -> Set[str]:
+        """Get all supported section names."""
+        ...
+
+    @classmethod
+    def has_section(cls, name: str) -> bool:
+        """Check if a section is supported."""
+        ...
+
+    @classmethod
+    def get_filename(cls, section: str, base_name: str = constants.GENERATED_ZONES_FILENAME) -> str:
+        """Generate filename for a specific section."""
+        ...
+
+    @classmethod
+    def format(cls, section: str, content: str, **kwargs) -> str:
+        """Format content for a specific section."""
+        ...
+
+    @classmethod
+    def get_software(cls) -> str:
+        """Get the software name for this Section class."""
+        ...
+
+
+@runtime_checkable
+class SectionRegistryProtocol(Protocol):
+    """
+    Protocol for section registries.
+
+    Registries manage registration of section definitions for different DNS software.
+    """
+
+    def register(self, software: str, section_class: Type[SectionProtocol]) -> None:
+        """Register a section class for a software type."""
+        ...
+
+    def get(self, software: str) -> Optional[Type[SectionProtocol]]:
+        """Get a section class by software type."""
+        ...
+
+    def get_supports(self) -> Set[str]:
+        """Get all software types with registered sections."""
         ...
 

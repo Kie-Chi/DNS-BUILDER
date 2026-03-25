@@ -466,11 +466,17 @@ class ServiceHandler:
 
     def _process_master_zones(
         self, volumes: List[Any], master_artifacts_with_obj: List[Tuple[BehaviorArtifact, MasterBehavior]]
-    ) -> Dict[constants.BehaviorSection, List[str]]:
-        """Aggregates master records, generates zone files, and creates config lines."""
-        all_config_lines = collections.defaultdict(list)
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Aggregates master records, generates zone files, and creates config lines.
+
+        Returns:
+            Dict mapping section name to list of config items.
+            Each config item is a dict with "content" and optional "params".
+        """
+        all_config_items: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
         if not master_artifacts_with_obj:
-            return all_config_lines
+            return all_config_items
 
         records_by_zone = collections.defaultdict(list)
         behavior_by_zone = {}
@@ -517,37 +523,46 @@ class ServiceHandler:
                     build_conf=self.build_conf
                 )
             artifacts = generator.generate()  # Returns List[ZoneArtifact]
-            
+
             # Find the primary zone file for config generation
             primary_artifact = None
-            
+
             # Process all artifacts: write files and create volume mounts
             for artifact in artifacts:
                 # Write file to disk
                 filepath = gen_vol_dir / artifact.filename
                 self.context.fs.write_text(filepath, artifact.content)
-                
+
                 # Create volume mount
                 volume_str = f"{filepath}:{artifact.container_path}"
                 volumes.append(volume_str)
                 logger.debug(f"Generated zone artifact: {filepath} -> {artifact.container_path}")
-                
+
                 # Track the primary artifact for config generation
                 if artifact.is_primary:
                     primary_artifact = artifact
-            
-            # Generate config line using the primary zone file
+
+            # Generate config artifact using the primary zone file
             if primary_artifact:
                 behavior_obj = behavior_by_zone[zone]
-                config_line = behavior_obj.generate_config_line(zone, primary_artifact.container_path)
-                all_config_lines[constants.BehaviorSection.TOPLEVEL].append(config_line)
+                # Use generate_artifact to get complete BehaviorArtifact with section info
+                config_artifact = behavior_obj.generate_artifact(zone, primary_artifact.container_path)
+                all_config_items[config_artifact.section].append({
+                    "content": config_artifact.config_line,
+                    "params": config_artifact.section_params
+                })
             else:
                 logger.warning(f"No primary artifact found for zone '{zone}'")
 
-        return all_config_lines
+        return all_config_items
 
     def _process_behavior(self):
-        """Orchestrates the entire behavior processing workflow."""
+        """
+        Orchestrates the entire behavior processing workflow.
+
+        Collects config lines from behaviors, groups them by section,
+        and writes each section to its own generated_zones.conf[.section] file.
+        """
         volumes = self.build_conf.setdefault('volumes', [])
 
         if not self.build_conf.get("behavior"):
@@ -566,14 +581,17 @@ class ServiceHandler:
         )
 
         # Step 2: Process master zone artifacts to generate zone files and their config lines
-        all_config_lines = self._process_master_zones(volumes, master_artifacts_with_obj)
+        config_items_by_section = self._process_master_zones(volumes, master_artifacts_with_obj)
 
         # Step 3: Process standard (non-master) artifacts
         for artifact in standard_artifacts:
             logger.debug(
                 f"Generated behavior artifact: section='{artifact.section}', line='{artifact.config_line.replace(chr(10), ' ')}'"
             )
-            all_config_lines[artifact.section].append(artifact.config_line)
+            config_items_by_section[artifact.section].append({
+                "content": artifact.config_line,
+                "params": artifact.section_params
+            })
 
             if artifact.new_volume:
                 gen_vol_dir = self.tmp_dir / constants.GENERATED_ZONES_SUBDIR
@@ -588,51 +606,67 @@ class ServiceHandler:
                     f"Generated and added new volume from behavior: {filepath} -> {vol.container_path}"
                 )
 
-        # Step 4: Write all collected config lines to the generated zones file
-        generated_zones_content = self._format_behavior_config(all_config_lines)
-        if not generated_zones_content.strip():
+        # Step 4: Write config items to section-specific files
+        if not config_items_by_section:
             return
 
-        gen_zones_path = self.tmp_dir / constants.GENERATED_ZONES_FILENAME
-        self.context.fs.write_text(
-            gen_zones_path, f"# Auto-generated by DNS Builder\n\n{generated_zones_content}\n"
-        )
-        logger.debug(f"Wrote generated behavior config to '{gen_zones_path}'.")
+        self._write_section_files(config_items_by_section, volumes)
 
-        container_conf_path = (
-            f"/usr/local/etc/zones/{constants.GENERATED_ZONES_FILENAME}"
-        )
-        volumes.append(
-            f"{gen_zones_path}:{container_conf_path}"
-        )
-        logger.debug(f"Added volume mount for generated zones config: {gen_zones_path} -> {container_conf_path}")
+    def _write_section_files(
+        self,
+        config_items_by_section: Dict[str, List[Dict[str, Any]]],
+        volumes: List[str]
+    ):
+        """
+        Write config items to section-specific generated_zones.conf files.
 
-    def _format_behavior_config(
-        self, config_lines_by_section: Dict[constants.BehaviorSection, List[str]]
-    ) -> str:
-        """Formats the collected behavior config lines"""
-        output_parts = []
-        software_type = self.image_obj.software
+        Each section gets its own file:
+        - generated_zones.conf (global section)
+        - generated_zones.conf.server (server section)
+        - etc.
+        """
+        from ..registry import section_registry
 
-        if software_type == "unbound":
-            server_lines = config_lines_by_section.get(
-                constants.BehaviorSection.SERVER, []
+        # Get the Section class for this software
+        section_cls = section_registry.section(self.image_obj.software)
+
+        for section, items in config_items_by_section.items():
+            if not items:
+                continue
+
+            # Format content for this section
+            formatted_lines = []
+            for item in items:
+                content = item["content"]
+                params = item.get("params", {})
+
+                # Use Section class to format if available
+                if section_cls:
+                    formatted = section_cls.format(section, content, **params)
+                else:
+                    formatted = content
+
+                formatted_lines.append(formatted)
+
+            section_content = "\n\n".join(formatted_lines)
+
+            # Determine filename based on section
+            if section_cls:
+                filename = section_cls.get_filename(section)
+            else:
+                filename = f"generated_zones.conf.{section}" if section != "global" else "generated_zones.conf"
+
+            filepath = self.tmp_dir / filename
+            self.context.fs.write_text(
+                filepath,
+                f"# Auto-generated by DNS Builder\n\n{section_content}\n"
             )
-            if server_lines:
-                output_parts.append("server:")
-                for line in server_lines:
-                    indented_line = "\n".join(
-                        [f"    {sub_line}" for sub_line in line.split("\n")]
-                    )
-                    output_parts.append(indented_line)
+            logger.debug(f"Wrote {section} config to '{filepath}'.")
 
-        # For both 'bind' and 'unbound', toplevel lines are added at the root.
-        toplevel_lines = config_lines_by_section.get(
-            constants.BehaviorSection.TOPLEVEL, []
-        )
-        output_parts.extend(toplevel_lines)
-
-        return "\n\n".join(output_parts)
+            # Add volume mount
+            container_path = f"/usr/local/etc/zones/{filename}"
+            volumes.append(f"{filepath}:{container_path}")
+            logger.debug(f"Added volume mount: {filepath} -> {container_path}")
 
     def _generate_passthrough_config(self, service_config: Dict[str, Any]) -> Dict[str, Any]:
         """Generate passthrough configuration items"""

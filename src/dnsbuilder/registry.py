@@ -13,8 +13,9 @@ from abc import ABC, abstractmethod
 import logging
 
 from . import constants
-from .protocols import BehaviorProtocol, ImageProtocol, IncluderProtocol, ZoneGeneratorProtocol
+from .protocols import BehaviorProtocol, ImageProtocol, IncluderProtocol, ZoneGeneratorProtocol, SectionProtocol
 from .abstractions import Behavior, Includer, InternalImage
+from .sections import Section
 from .utils import discover_classes, extract_bhv_info, extract_img_info, extract_inc_info, override
 
 logger = logging.getLogger(__name__)
@@ -178,11 +179,72 @@ class ZoneGeneratorRegistry(Registry[str, Type[ZoneGeneratorProtocol]]):
         return set(self.registry.keys())
 
 
+class SectionRegistry(Registry[str, Type[SectionProtocol]]):
+    """
+    Registry for managing section definitions for different DNS software.
+
+    Uses reflection to automatically find and register section implementations
+    from the bases.sections module.
+    """
+
+    package = "dnsbuilder.bases.sections"
+    base_class = Section
+
+    @override
+    def _register_item(self, class_name: str, discovered_class: Type[SectionProtocol]):
+        """
+        Auto-discover and register section classes.
+
+        Extracts software name from class name (e.g., BindSection -> bind).
+        """
+        software = self._extract_software_name(class_name)
+        if software:
+            self.register(software, discovered_class)
+            logger.debug(f"Auto-registered section '{software}' from class '{class_name}'")
+
+    def _extract_software_name(self, class_name: str) -> Optional[str]:
+        """
+        Extract software name from Section class name.
+
+        Examples:
+            BindSection -> bind
+            UnboundSection -> unbound
+            PdnsRecursorSection -> pdns_recursor
+            KnotResolverSection -> knot_resolver
+            KnotResolver6Section -> knot_resolver6
+        """
+        if not class_name.endswith("Section"):
+            return None
+
+        # Remove 'Section' suffix
+        name_part = class_name[:-7]  # Remove 'Section'
+
+        # Convert CamelCase to snake_case
+        import re
+        # Convert CamelCase to snake_case (but preserve trailing digits)
+        # First handle CamelCase: insert underscore before uppercase letters
+        snake_case = re.sub(r'([A-Z])', r'_\1', name_part).lower()
+        # Remove leading underscore if present
+        if snake_case.startswith('_'):
+            snake_case = snake_case[1:]
+
+        return snake_case
+
+    def section(self, software: str) -> Optional[Type[SectionProtocol]]:
+        """Get a section class by software type."""
+        return self.get(software)
+
+    def get_supports(self) -> Set[str]:
+        """Get all software types with registered sections."""
+        return set(self.registry.keys())
+
+
 # Global registries
 behavior_registry = BehaviorRegistry()
 image_registry = ImageRegistry()
 includer_registry = IncluderRegistry()
 zone_generator_registry = ZoneGeneratorRegistry()
+section_registry = SectionRegistry()
 
 
 def initialize_registries(
@@ -198,7 +260,7 @@ def initialize_registries(
         load_plugins: Whether to load plugins (default: True)
         plugin_config: Optional list of plugin specs from configuration
     """
-    logger.debug("Initializing behavior, image, and includer registries...")
+    logger.debug("Initializing behavior, image, includer, and section registries...")
 
     # Auto-discover built-in behaviors
     behavior_registry.discover()
@@ -209,6 +271,9 @@ def initialize_registries(
     # Auto-discover built-in includers
     includer_registry.discover()
 
+    # Auto-discover built-in sections
+    section_registry.discover()
+
     # Zone generator registry does not auto-discover
     # It is populated by plugins registering their custom generators
     # If no plugin registers a generator for a software, the default is used
@@ -216,6 +281,7 @@ def initialize_registries(
     logger.debug(f"Discovered {len(behavior_registry.registry)} behavior implementations")
     logger.debug(f"Discovered {len(image_registry.registry)} image implementations")
     logger.debug(f"Discovered {len(includer_registry.registry)} includer implementations")
+    logger.debug(f"Discovered {len(section_registry.registry)} section definitions")
     logger.debug(f"Supported software types: {behavior_registry.get_supports()}")
 
     # Load plugins after built-in discovery
@@ -226,3 +292,6 @@ def initialize_registries(
             logger.info(f"Loaded plugins: {loaded}")
             logger.debug(f"After plugins - Supported software types: {behavior_registry.get_supports()}")
             logger.debug(f"After plugins - Zone generators: {zone_generator_registry.get_supports()}")
+            logger.debug(f"After plugins - Sections: {section_registry.get_supports()}")
+
+

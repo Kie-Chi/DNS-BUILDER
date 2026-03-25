@@ -66,14 +66,16 @@ class PluginManager:
             behavior_registry,
             image_registry,
             includer_registry,
-            zone_generator_registry
+            zone_generator_registry,
+            section_registry
         )
 
         self._registry = PluginRegistry(
             image_registry=image_registry,
             behavior_registry=behavior_registry,
             includer_registry=includer_registry,
-            zone_generator_registry=zone_generator_registry
+            zone_generator_registry=zone_generator_registry,
+            section_registry=section_registry
         )
         self._plugins: Dict[str, Plugin] = {}
         self._loaded = False
