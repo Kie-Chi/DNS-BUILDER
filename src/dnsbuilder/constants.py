@@ -46,7 +46,8 @@ KNOWN_TOP_MODULES = {
 
 
 # --- Filenames and Paths ---
-GENERATED_ZONES_FILENAME = "generated_zones.conf"
+DEFAULT_CONF_SUFFIX = ".conf"
+GENERATED_ZONES_FILENAME = f"generated_zones{DEFAULT_CONF_SUFFIX}"
 GENERATED_ZONES_SUBDIR = "zones"
 INCLUDE_SUBDIR = "includes"
 DOCKERFILE_NAME = "Dockerfile"

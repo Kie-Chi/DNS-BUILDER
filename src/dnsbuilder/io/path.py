@@ -67,11 +67,11 @@ def parse_sr(path_str: str) -> Tuple[SectionReference, bool]:
     else:
         suffixes = DNSBPath(file_path).suffixes
         if (
-            len(suffixes) >= 1 and suffixes[-1] == '.conf'
+            len(suffixes) >= 1 and suffixes[-1] == constants.DEFAULT_CONF_SUFFIX
         ) or (
-            len(suffixes) >= 2 and suffixes[-2] == '.conf'
+            len(suffixes) >= 2 and suffixes[-2] == constants.DEFAULT_CONF_SUFFIX
         ):
-            section = suffixes[-1].strip(".") if (len(suffixes) >= 2 and suffixes[-2] == '.conf') else 'global'
+            section = suffixes[-1].strip(".") if (len(suffixes) >= 2 and suffixes[-2] == constants.DEFAULT_CONF_SUFFIX) else 'global'
             return SectionReference(file_path=path_str, section=section, params=params), True
         else:
             return None, False

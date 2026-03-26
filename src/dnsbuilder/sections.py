@@ -371,8 +371,13 @@ class Section(ABC):
         Args:
             name: Section name to check
 
-        Returns:
-            True if the section can repeat, False otherwise
+        Examples:
+            for DNS software Unbound, `server` block can appear multiple times, thus Section.server is repeatable.
+
+            for DNS software BIND, `options` block can NOT appear multiple times, thus Section.options is NOT repeatable.
+            
+            for DNS software BIND, `zone` block can appear multiple times, thus Section.zone is repeatable.
+
         """
         section_info = cls.get_section(name)
         return section_info.repeatable if section_info else False

@@ -349,16 +349,16 @@ class ServiceHandler:
         logger.debug(f"Processing extra_conf for '{self.service_name}'...")
         
         content_hash = hashlib.sha256(f"{self.service_name}:extra_conf:{extra_conf}".encode()).hexdigest()[:24]
-        temp_uri = DNSBPath(f"temp:/{content_hash}.conf")
+        temp_uri = DNSBPath(f"temp:/{content_hash}{constants.DEFAULT_CONF_SUFFIX}")
         # Check temp:// files without fallback - they only exist in memory
         counter = 0
         with self.context.fs.fallback(enable=False):
             while self.context.fs.exists(temp_uri):
                 counter += 1
                 collision_hash = hashlib.sha256(f"{self.service_name}:extra_conf:{extra_conf}:{counter}".encode()).hexdigest()[:24]
-                temp_uri = DNSBPath(f"temp:/{collision_hash}.conf")
+                temp_uri = DNSBPath(f"temp:/{collision_hash}{constants.DEFAULT_CONF_SUFFIX}")
         self.context.fs.write_text(temp_uri, extra_conf)
-        container_path = f"/usr/local/etc/extra_{self.service_name}.conf"
+        container_path = f"/usr/local/etc/extra_{self.service_name}{constants.DEFAULT_CONF_SUFFIX}"
         volume_str = f"{str(temp_uri)}:{container_path}"
         self.build_conf.setdefault('volumes', []).append(volume_str)
         logger.debug(f"Generated extra_conf volume: {volume_str}")
@@ -749,7 +749,8 @@ class ServiceHandler:
                 if section_cls:
                     filename = section_cls.get_filename(section)
                 else:
-                    filename = f"generated_zones.conf.{section}" if section != "global" else "generated_zones.conf"
+                    base = constants.GENERATED_ZONES_FILENAME
+                    filename = f"{base}.{section}" if section != "global" else base
 
                 filepath = self.tmp_dir / filename
                 if section_content.strip():
