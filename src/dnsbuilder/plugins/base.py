@@ -111,13 +111,12 @@ class Plugin(ABC):
     # Uses same merge logic as .dnsbattribute
     # Example:
     #   attributes = {
-    #       "DNS_SOFTWARE_BLOCKS": {
-    #           "coredns": {"global"}
-    #       },
     #       "RECOGNIZED_PATTERNS": {
     #           "coredns": [r"\bcoredns\b"]
     #       }
     #   }
+    # Note: Configuration blocks are defined via Section class, not attributes.
+    # Register your Section class in on_load() instead.
     attributes: Dict[str, Any] = {}
 
     @abstractmethod
