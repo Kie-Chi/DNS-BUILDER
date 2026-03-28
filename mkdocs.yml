@@ -39,11 +39,11 @@ markdown_extensions:
   - mdx_truly_sane_lists
 nav:
   - 首页: index.md
-  - 开始: 
+  - 开始:
     - 安装与运行: root/install.md
     - 快速开始: root/getting-started.md
   - CLI 命令参考: cli.md
-  - 配置参考: 
+  - 配置参考:
     - 概览: config/index.md
     - 配置处理流程: config/processing-pipeline.md
     - 顶层配置: config/top-level.md
@@ -53,6 +53,7 @@ nav:
     - 自动化脚本: config/auto.md
   - 语法与规则:
     - 概览: rule/index.md
+    - 配置生成机制: config-generation.md
     - 合并与覆盖规则: rule/merge-and-override.md
     - 标准服务模板: rule/build-templates.md
     - 行为 DSL: rule/behavior-dsl.md

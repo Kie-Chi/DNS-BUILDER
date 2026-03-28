@@ -130,13 +130,9 @@ RECOGNIZED_PATTERNS:
   my_dns:
     - r"\bmydns\b"
     - r"\bcustom-bind\b"
-
-DNS_SOFTWARE_BLOCKS:
-  my_dns:
-    - "global"
-    - "zone"
-    - "custom-section"
 ```
+
+> **注意**：配置块定义现在通过 Section 系统管理。如需定义自定义配置块，请通过插件注册 Section 类。
 
 ### 扩展自定义包管理器
 
@@ -162,7 +158,6 @@ SOFT_PACKAGE_MANAGERS:
 | `SUPPORTED_OS` | list | 支持的操作系统列表 |
 | `DEFAULT_OS` | str | 未指定时的默认操作系统 |
 | `RECOGNIZED_PATTERNS` | dict | DNS 软件识别模式 |
-| `DNS_SOFTWARE_BLOCKS` | dict | DNS 软件配置块定义 |
 | `BEHAVIOR_TYPES` | set | 支持的行为类型 |
 | `RESOURCE_PREFIX` | str | 资源 URL 前缀 |
 | `STD_BUILD_PREFIX` | str | 标准构建引用前缀 |

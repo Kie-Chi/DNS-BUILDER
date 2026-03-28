@@ -1,6 +1,7 @@
 **/
 .*
 *.txt
+*.zip
 *.md
 *.yml
 *.dot

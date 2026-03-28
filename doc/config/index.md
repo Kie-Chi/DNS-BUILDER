@@ -1,6 +1,6 @@
 # 概览
 
-本页提供编写 DNSBuilder 配置的最简路径：按“顶层 → 镜像 → 服务”的顺序搭建项目，其余细节在对应页面展开
+本页提供编写 DNSBuilder 配置的最简路径：按"顶层 → 镜像 → 服务"的顺序搭建项目，其余细节在对应页面展开
 
 ## 结构与职责
 
@@ -25,9 +25,28 @@ builds: {}
 - include：支持相对、绝对与 `resource:/` 路径；按深度合并策略整合配置
 - auto：支持在三个阶段（setup、modify、restrict）执行 Python 脚本来动态管理配置
 
+## 配置文件路径语法
+
+在 `volumes` 中挂载配置文件时，可使用特殊语法指定目标 section 和参数：
+
+```yaml
+volumes:
+  # 后缀格式：.options 表示 options section
+  - ./options.conf:/etc/named.conf.options
+
+  # Fragment 格式：# 指定 section
+  - ./custom.conf:/etc/named.conf#server
+
+  # 带参数格式：?name=value 指定模板参数
+  - ./zone.conf:/etc/zones.conf?name=example.com#zone
+```
+
+详见 [配置生成机制](../config-generation.md)。
+
 ## 延伸阅读
 
 - [配置处理流程](processing-pipeline.md)
+- [配置生成机制](../config-generation.md) — Section、Includer、配置片段详解
 - [Auto 自动化脚本](auto.md)
 - [顶层配置](top-level.md)
 - [镜像配置](images.md)
