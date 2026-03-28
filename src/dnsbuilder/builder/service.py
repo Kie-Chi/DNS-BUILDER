@@ -648,7 +648,7 @@ class ServiceHandler:
         Orchestrates the entire behavior processing workflow.
 
         Collects config lines from behaviors, groups them by section,
-        and writes each section to its own generated_zones.conf[.section] file.
+        and writes each section to its own {GENERATED_ZONES_FILENAME}[.section] file.
         """
         volumes = self.build_conf.setdefault('volumes', [])
 
@@ -705,14 +705,17 @@ class ServiceHandler:
         volumes: List[str]
     ):
         """
-        Write config items to section-specific generated_zones.conf files.
+        Write config items to section-specific config files.
+
+        Output filename is determined by Section.get_filename() which uses
+        GENERATED_ZONES_FILENAME as the base (default: generated_zones.conf).
 
         Behavior based on section type:
         - repeatable=True (e.g., BIND zone, acl): Each item is independently formatted
-          with template and params, then written directly to generated_zones.conf (global).
+          with template and params, then written directly to {GENERATED_ZONES_FILENAME} (global).
           Each zone "example.com" { ... } gets its own block.
         - repeatable=False (e.g., BIND options, logging): Items are merged together
-          and written to a section-specific file (e.g., generated_zones.conf.options).
+          and written to a section-specific file (e.g., {GENERATED_ZONES_FILENAME}.options).
         """
         from ..registry import section_registry
 
@@ -749,8 +752,7 @@ class ServiceHandler:
                 if section_cls:
                     filename = section_cls.get_filename(section)
                 else:
-                    base = constants.GENERATED_ZONES_FILENAME
-                    filename = f"{base}.{section}" if section != "global" else base
+                    filename = f"{constants.GENERATED_ZONES_BASENAME}{constants.DEFAULT_CONF_SUFFIX}.{section}" if section != "global" else f"{constants.GENERATED_ZONES_BASENAME}{constants.DEFAULT_CONF_SUFFIX}"
 
                 filepath = self.tmp_dir / filename
                 if section_content.strip():
@@ -768,7 +770,11 @@ class ServiceHandler:
         # Write global file with all repeatable section items
         if global_items:
             global_content = "\n\n".join(global_items)
-            filename = constants.GENERATED_ZONES_FILENAME
+            # Use Section's get_filename for consistent naming with software-specific suffix
+            if section_cls:
+                filename = section_cls.get_filename("global")
+            else:
+                filename = constants.GENERATED_ZONES_FILENAME
             filepath = self.tmp_dir / filename
             if global_content.strip():
                 self.context.fs.write_text(

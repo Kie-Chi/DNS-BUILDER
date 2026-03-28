@@ -302,9 +302,15 @@ class Section(ABC):
     Each DNS software inherits from this class to define its supported
     configuration blocks. The Section system provides:
 
+    Class Attributes:
+        conf_suffix: Configuration file suffix for this DNS software (default: ".conf")
+        include_tpl: Include statement template (e.g., 'include "{path}";')
+
     Example:
 
         class UnboundSection(Section):
+            conf_suffix = ".conf"  # Unbound uses .conf files
+
             @classmethod
             def get_sections(cls) -> Dict[str, SectionInfo]:
                 return {
@@ -320,10 +326,25 @@ class Section(ABC):
                         indent=4
                     ),
                 }
+
+        class KnotResolverSection(Section):
+            conf_suffix = ".conf"
+
+            @classmethod
+            def get_sections(cls) -> Dict[str, SectionInfo]:
+                return {
+                    "global": SectionInfo(name="global"),
+                }
     """
 
     # Cache for section info
     _sections_cache: ClassVar[Optional[Dict[str, SectionInfo]]] = None
+
+    # Configuration file suffix - subclasses can override
+    conf_suffix: ClassVar[str] = constants.DEFAULT_CONF_SUFFIX
+
+    # Include statement template - subclasses can override
+    include_tpl: ClassVar[str] = ""
 
     @classmethod
     @abstractmethod
@@ -394,27 +415,43 @@ class Section(ABC):
 
     @classmethod
     def get_filename(
-        cls, section: str, base_name: str = constants.GENERATED_ZONES_FILENAME
+        cls, section: str, base_name: Optional[str] = None
     ) -> str:
         """
         Generate filename for a specific section.
 
+        Uses the class's conf_suffix to construct the filename.
+
         Args:
             section: Section name
-            base_name: Base filename
+            base_name: Base filename without suffix (default: GENERATED_ZONES_BASENAME)
+
+        Returns:
+            Filename with appropriate suffix
         """
+        if base_name is None:
+            base_name = constants.GENERATED_ZONES_BASENAME
+
         section_info = cls.get_section(section)
+        suffix = cls.conf_suffix
+
         if section_info:
-            return section_info.get_filename(base_name)
+            # Append suffix to the base filename from section_info
+            filename = section_info.get_filename(base_name)
+            # Only add suffix if not already present
+            if not filename.endswith(suffix):
+                filename = f"{filename}{suffix}" if "." not in filename else filename
+            return filename
+
         # Fallback for unknown sections
         if section == "global":
-            return base_name
-        
+            return f"{base_name}{suffix}"
+
         sinfo = cls.get_section(section)
-        if not sinfo.params:
-            return f"{base_name}.{section}"
+        if not sinfo or not sinfo.params:
+            return f"{base_name}{suffix}.{section}"
         else:
-            return f"{base_name}?{"&".join(f"{k}={v}" for k, v in sinfo.params.items())}#{section}"
+            return f"{base_name}{suffix}?{"&".join(f"{k}={v}" for k, v in sinfo.params.items())}#{section}"
 
     @classmethod
     def format(

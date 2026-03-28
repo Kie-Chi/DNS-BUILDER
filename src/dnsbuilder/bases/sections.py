@@ -31,6 +31,11 @@ class BindSection(Section):
     - acl "name" { ... };
     """
 
+    # BIND configuration file suffix
+    conf_suffix = ".conf"
+    # BIND include statement template
+    include_tpl = 'include "{path}";'
+
     @classmethod
     def get_sections(cls) -> Dict[str, SectionInfo]:
         return {
@@ -131,6 +136,11 @@ class UnboundSection(Section):
     The template uses colon suffix (e.g., "server:") followed by indented content.
     """
 
+    # Unbound configuration file suffix
+    conf_suffix = ".conf"
+    # Unbound include statement template
+    include_tpl = 'include: "{path}"'
+
     @classmethod
     def get_sections(cls) -> Dict[str, SectionInfo]:
         return {
@@ -202,6 +212,11 @@ class PdnsRecursorSection(Section):
     All configuration is in a single "global" section.
     """
 
+    # PowerDNS Recursor configuration file suffix
+    conf_suffix = ".conf"
+    # PowerDNS Recursor uses include-dir directive, not individual includes
+    include_tpl = ""
+
     @classmethod
     def get_sections(cls) -> Dict[str, SectionInfo]:
         return {
@@ -224,6 +239,11 @@ class KnotResolverSection(Section):
     Knot Resolver uses Lua-based configuration format.
     All configuration is in a single "global" section using Lua syntax.
     """
+
+    # Knot Resolver uses .conf for the main config (which contains Lua)
+    conf_suffix = ".conf"
+    # Knot Resolver uses dofile() for includes
+    include_tpl = "dofile('{path}')"
 
     @classmethod
     def get_sections(cls) -> Dict[str, SectionInfo]:

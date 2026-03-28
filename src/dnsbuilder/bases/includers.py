@@ -29,8 +29,8 @@ class BindIncluder(BaseIncluder):
     BIND-style configuration assembler.
 
     Uses brace counting to inject includes into existing blocks.
+    include_tpl is fetched from BindSection ('include "{path}";').
     """
-    _include_tpl = 'include "{path}";'
 
     def inject(self, content: str, section: str, lines: List[str]) -> Tuple[str, bool]:
         """
@@ -82,8 +82,8 @@ class UnboundIncluder(BaseIncluder):
 
     Unbound uses YAML-like format without explicit block end markers,
     so injection is not possible. All fragments are appended as new blocks.
+    include_tpl is fetched from UnboundSection ('include: "{path}"').
     """
-    _include_tpl = 'include: "{path}"'
 
     def inject(self, content: str, section: str, lines: List[str]) -> Tuple[str, bool]:
         """
