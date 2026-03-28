@@ -22,10 +22,35 @@ from typing import Dict, Any, Optional, List
 # Import from dnsbuilder
 from dnsbuilder.plugins import Plugin, PluginRegistry
 from dnsbuilder.abstractions import InternalImage, Behavior, MasterBehavior, Includer
-from dnsbuilder.datacls import BehaviorArtifact, VolumeArtifact, Pair
+from dnsbuilder.datacls import BehaviorArtifact, VolumeArtifact, ConfigFragment
 from dnsbuilder.datacls.contexts import BuildContext
+from dnsbuilder.sections import Section, SectionInfo
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CoreDNS Section Implementation
+# =============================================================================
+
+class CoreDNSSection(Section):
+    """
+    CoreDNS configuration block definitions.
+
+    CoreDNS uses a single Corefile for all configuration.
+    It only has a "global" section (the main Corefile).
+    """
+
+    @classmethod
+    def get_sections(cls) -> Dict[str, SectionInfo]:
+        return {
+            # global - CoreDNS 主配置文件
+            "global": SectionInfo(
+                name="global",
+                template="{content}",
+                indent=0,
+            ),
+        }
 
 
 # =============================================================================
@@ -41,59 +66,51 @@ class CoreDNSIncluder(Includer):
     to the main Corefile.
     """
 
-    def include(self, pair: Pair):
+    def assemble(self) -> None:
+        """
+        Assemble all pending fragments into the main Corefile.
+
+        CoreDNS doesn't use traditional include directives.
+        Instead, it directly embeds configuration content into the Corefile.
+        """
+        if not self.main:
+            logger.warning("[CoreDNSIncluder] No main config found")
+            return
+
+        # Get all sections with pending fragments
+        for section in self.get_all_sections():
+            fragments = self.get_pendings(section)
+
+            for fragment in fragments:
+                self._include_fragment(fragment)
+
+        logger.debug(
+            f"[CoreDNSIncluder] Assembled {sum(len(f) for f in self._pending_fragments.values())} fragments"
+        )
+
+    def _include_fragment(self, fragment: ConfigFragment):
         """
         Append generated config content to the main Corefile.
 
-        Unlike BIND which uses `include "file";`, CoreDNS directly embeds
-        the configuration content into the main Corefile.
-
         Args:
-            pair: Pair containing src (host path) and dst (container path)
-
-        Returns:
-            None (the content is directly appended)
+            fragment: ConfigFragment containing the config info
         """
-        block = self.parse_blk(pair)
-        if block is None:
-            block = "global"
-
-        # Get the main config file (Corefile)
-        conf = self.confs.get(block, None)
-        if conf is None:
-            logger.warning(
-                f"[CoreDNSIncluder] No main config found for block '{block}', "
-                f"cannot include '{pair.dst}'"
-            )
-            return None
-
         # Read the generated config content
         try:
-            generated_content = self.fs.read_text(pair.src)
+            generated_content = self.fs.read_text(fragment.src)
         except Exception as e:
             logger.error(
-                f"[CoreDNSIncluder] Failed to read generated config '{pair.src}': {e}"
+                f"[CoreDNSIncluder] Failed to read generated config '{fragment.src}': {e}"
             )
-            return None
+            return
 
         # Append to main Corefile with a comment header
-        append_content = f"\n# Auto-included from {pair.dst}\n{generated_content}\n"
-        self.fs.append_text(conf.src, append_content)
+        append_content = f"\n# Auto-included from {fragment.dst}\n{generated_content}\n"
+        self.fs.append_text(self.main.src, append_content)
 
         logger.debug(
-            f"[CoreDNSIncluder] Appended config from '{pair.src}' to main Corefile"
+            f"[CoreDNSIncluder] Appended config from '{fragment.src}' to main Corefile"
         )
-
-        # Return None means the original volume mount is not modified
-        return None
-
-    def contain(self):
-        """
-        No additional containment needed for CoreDNS.
-
-        All configuration is already in the main Corefile.
-        """
-        pass
 
 
 # =============================================================================
@@ -295,10 +312,8 @@ class CoreDNSPlugin(Plugin):
     priority = 50  # Higher priority (lower number = earlier load)
 
     # Constants to override/extend when plugin loads
+    # Note: DNS_SOFTWARE_BLOCKS is now managed by Section system
     attributes = {
-        "DNS_SOFTWARE_BLOCKS": {
-            "coredns": {"global"}
-        },
         "RECOGNIZED_PATTERNS": {
             "coredns": [r"\bcoredns\b"]
         }
@@ -312,6 +327,9 @@ class CoreDNSPlugin(Plugin):
             registry: The plugin registry to register with
         """
         logger.info("[CoreDNSPlugin] Loading CoreDNS plugin...")
+
+        # Register Section (defines configuration blocks)
+        registry.register_section("coredns", CoreDNSSection)
 
         # Register Image
         registry.register_image("coredns", CoreDNSImage)
@@ -350,7 +368,8 @@ class CoreDNSPlugin(Plugin):
         )
 
         logger.info(
-            "[CoreDNSPlugin] Registered: image=coredns, "
+            "[CoreDNSPlugin] Registered: section=coredns, "
+            "image=coredns, "
             "behaviors=[forward, stub, hint, master], "
             "includer=enabled, resources=enabled (templates, configs, builder_templates)"
         )
