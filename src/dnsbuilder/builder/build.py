@@ -173,11 +173,12 @@ class Builder:
         config_data['builds'] = context.resolved_builds
         
         substitutor = VariableSubstitutor(
-            config=context.config, 
-            images=context.images, 
+            config=context.config,
+            images=context.images,
             service_ips=context.service_ips,
             reserved_ips=context.reserved_ips,
-            resolved_builds=context.resolved_builds
+            resolved_builds=context.resolved_builds,
+            fs=context.fs
         )
         substituted_config = substitutor.run(config_data)
         logger.debug("[VariableSubstitutor] Variable substitution complete.")

@@ -2,13 +2,16 @@
 import logging
 import re
 import os
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
 from functools import wraps
 
 from ..abstractions import Image, InternalImage
 from ..config import Config
 from .. import constants
 from ..exceptions import BuildError, ReferenceNotFoundError
+
+if TYPE_CHECKING:
+    from ..io import FileSystem, DNSBPath
 
 logger = logging.getLogger(__name__)
 
@@ -47,20 +50,22 @@ class VariableSubstitutor:
     """
     Handles the substitution of variables within resolved build configurations.
     """
-    
+
     def __init__(
-            self, 
-            config: Config, 
-            images: Dict[str, Image], 
-            service_ips: Dict[str, str], 
+            self,
+            config: Config,
+            images: Dict[str, Image],
+            service_ips: Dict[str, str],
             reserved_ips: Dict[str, str],
-            resolved_builds: Dict[str, Dict]
+            resolved_builds: Dict[str, Dict],
+            fs: "FileSystem" = None
     ):
         self.config = config
         self.images = images
         self.service_ips = service_ips
         self.reserved_ips = reserved_ips
         self.resolved_builds = resolved_builds
+        self.fs = fs
 
     def _norm(self, key: str) -> str:
         """Normalize key by applying alias mapping on dot-separated parts."""
@@ -160,6 +165,54 @@ class VariableSubstitutor:
             return parts[1]
         
         raise BuildError(f"Environment variable '{env_var_name}' is not set and no default value was provided.")
+
+    @lenient_resolver
+    @no_required
+    def _resolve_read(self, key: str, fallback: str = None) -> str:
+        """
+        Read file content and return as multi-line string.
+
+        Usage:
+            ${read <path>}              - read file, error if not found
+            ${read <path>::<fallback>}  - read file, use fallback if not found
+
+        Always use '::' as the separator between path and fallback.
+        The fallback can be another ${read} expression for cascading file reads.
+
+        Examples:
+            ${read resource:/templates/header.txt}
+            ${read ./local/config.conf}
+            ${read file:/etc/hosts::none}
+            ${read ./file1.txt::${read ./file2.txt}}  # cascading fallback
+        """
+        path_str = key[5:]  # Remove 'read.' prefix
+
+        # Extract fallback using '::' separator
+        if fallback is None and "::" in path_str:
+            path_str, fallback = path_str.split("::", 1)
+
+        if not self.fs:
+            if fallback is not None:
+                logger.warning(f"[Resolve/read] FileSystem not available, using fallback '{fallback}' for path '{path_str}'.")
+                return str(fallback)
+            raise BuildError(f"FileSystem not available for ${read} resolution. Path: '{path_str}'")
+
+        try:
+            from ..io import DNSBPath
+            path = DNSBPath(path_str)
+            content = self.fs.read_text(path)
+            logger.debug(f"[Resolve/read] Read file '{path_str}' -> {len(content)} chars, {content.count(chr(10))+1} lines.")
+            return content
+        except FileNotFoundError:
+            if fallback is not None:
+                logger.warning(f"[Resolve/read] File '{path_str}' not found, using fallback '{fallback}'.")
+                return str(fallback)
+            raise BuildError(f"File '{path_str}' not found for ${read} resolution.")
+        except Exception as e:
+            if fallback is not None:
+                logger.warning(f"[Resolve/read] Failed to read '{path_str}': {e}. Using fallback '{fallback}'.")
+                return str(fallback)
+            raise BuildError(f"Failed to read file '{path_str}': {e}")
 
     @lenient_resolver
     @no_required
@@ -300,6 +353,10 @@ class VariableSubstitutor:
         # Environment variables
         if key.startswith("env."):
             return self._resolve_env(key)
+
+        # File read: ${read <path>}
+        if key.startswith("read."):
+            return self._resolve_read(key)
 
         # Extract generic fallback from non-env keys: `${some.path:default}`
         core_key = key

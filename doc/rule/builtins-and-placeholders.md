@@ -38,6 +38,11 @@
   - 其他 **服务可用属性** 也可类似引用
 - 环境变量：
   - `${env.<NAME>[:<default>]}`：读取进程环境变量；支持提供默认值（当未设置时生效）。无默认值且未设置时会报错。
+- 文件读取：
+  - `${read.<path>[::<fallback>]}`：读取指定路径的文件内容，返回为多行字符串
+  - 支持所有 DNSBPath 协议：`resource:/`、`file:/`、`temp:/` 等
+  - 使用 `::` 分隔 fallback，文件不存在时使用 fallback，无 fallback 则报错
+  - 支持**嵌套 fallback**：`${read ./file1.txt::${read ./file2.txt}}`
 
 ## 解析规则与递归替换
 
@@ -76,6 +81,7 @@ builds:
 - 引用不存在的服务或属性：
   - `${services.<service>.ip}` 或 `${services.<service>.image.<prop>}` 在替换阶段解析失败时会返回 `none` 并记录警告；若后续行为/校验依赖该值，则会在对应阶段抛出错误
 - 环境变量缺失且无默认值：在替换阶段返回 `none` 并记录警告；提供默认值时使用默认值
+- 文件读取失败：`${read.<path>}` 文件不存在或读取错误时，有 fallback 则使用，无 fallback 则抛出 `BuildError`
 - 变量解析为复杂类型（dict/list）：抛出 `BuildError`，因为字符串替换仅接受标量
 
 ### 实践建议
@@ -105,6 +111,17 @@ builds:
     behavior: |
       . hint root
       . forward ${services.recursor.ip}  # 跨服务引用 IP
+
+  # 文件读取示例
+  custom-config:
+    image: unbound
+    files:
+      header.txt: ${read.resource:/templates/header.txt}  # 读取资源文件
+      local.conf: ${read ./my-custom.conf::default content}  # 带 fallback
+      # 嵌套 fallback：优先读取 file1，不存在则读 file2
+      cascade.conf: ${read ./primary.conf::${read ./backup.conf}}
+      # 多层 fallback：file1 → file2 → 默认值
+      multi.conf: ${read ./first.txt::${read ./second.txt::final default}}
 ```
 
 ## 延伸阅读
