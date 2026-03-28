@@ -290,30 +290,54 @@ class ServiceHandler:
         logger.debug(f"Created service directory for '{self.service_name}' at '{self.service_dir}'")
 
     def __filter_volumes(self) -> List[Volume]:
+        """
+        Filter and deduplicate volumes.
+
+        - Deduplicate by container path (dst): keep the last one for same dst
+        - Handle ${required} volumes: check if satisfied by actual volume
+        - Log warnings for duplicates
+        """
         origin_volumes = self.build_conf.get('volumes', [])
-        filtered_volumes = []
-        required_volumes = []
+        if not origin_volumes:
+            return []
+
+        parsed_volumes = []
         for volume_str in origin_volumes:
             try:
                 volume = Volume(volume_str)
+                parsed_volumes.append(volume)
             except (BuildError, VolumeError) as e:
                 raise VolumeError(f"Invalid volume format in service '{self.service_name}': {e}")
+
+        unique_by_dst = {}
+        for volume in parsed_volumes:
+            dst_key = str(volume.dst)
+            if dst_key in unique_by_dst:
+                old_vol = unique_by_dst[dst_key]
+                logger.warning(
+                    f"[{self.service_name}] Duplicate volume mount to '{dst_key}': "
+                    f"'{old_vol}' will be replaced by '{volume}'"
+                )
+            unique_by_dst[dst_key] = volume
+
+        final_volumes = []
+        required_volumes = []
+        for volume in unique_by_dst.values():
             if volume.is_required:
                 required_volumes.append(volume)
             else:
-                filtered_volumes.append(volume)
+                final_volumes.append(volume)
 
-        def is_implemented(volume: Volume) -> bool:
-            for filterd in filtered_volumes:
-                if volume.dst == filterd.dst:
-                    return True
-            return False
-        
-        not_satisfied = [required for required in required_volumes if not is_implemented(required)]
-        if not_satisfied:
-            raise VolumeError(f"Required volumes mount to {[str(v.dst) for v in not_satisfied]}, but not implemented.")
-                    
-        return filtered_volumes
+        satisfied_dsts = {str(v.dst) for v in final_volumes}
+        unsatisfied = [v for v in required_volumes if str(v.dst) not in satisfied_dsts]
+
+        if unsatisfied:
+            raise VolumeError(
+                f"Required volumes mount to {[str(v.dst) for v in unsatisfied]}, "
+                f"but not implemented in service '{self.service_name}'."
+            )
+
+        return final_volumes
 
     def _process_files(self):
         files = self.build_conf.get('files', {})
@@ -834,11 +858,11 @@ class ServiceHandler:
         """Generate volume mount configuration"""
         passthrough_mounts = self.build_conf.get('mounts', [])
         final_volumes = self.processed_volumes + passthrough_mounts
-        
+
         self.trace.add_decision(
-            "volume_processing", 
-            "Volume mount processing", 
-            "processed_volumes + passthrough_mounts", 
+            "volume_processing",
+            "Volume mount processing",
+            "processed_volumes + passthrough_mounts",
             {
                 "processed_volumes_count": len(self.processed_volumes),
                 "passthrough_mounts_count": len(passthrough_mounts),
@@ -846,30 +870,37 @@ class ServiceHandler:
             },
             f"Merged processed volumes ({len(self.processed_volumes)}) and passthrough volumes ({len(passthrough_mounts)})"
         )
-        
-        if final_volumes: 
-            # Use set for deduplication and sort
-            unique_volumes = sorted(list(set(final_volumes)))
+
+        if final_volumes:
+            # Deduplicate by container path (dst): keep the last one
+            # Note: Main deduplication happens in __filter_volumes, this handles
+            # passthrough_mounts which are added later
+            unique_by_dst = {}
+            for vol_str in final_volumes:
+                try:
+                    vol = Volume(vol_str)
+                    unique_by_dst[str(vol.dst)] = vol_str
+                except Exception:
+                    unique_by_dst[vol_str] = vol_str
+
+            unique_volumes = sorted(list(unique_by_dst.values()))
             service_config['volumes'] = unique_volumes
-            
-            if len(unique_volumes) != len(final_volumes):
-                self.trace.add_warning(f"Detected duplicate volume mounts, deduplicated: original {len(final_volumes)}, after deduplication {len(unique_volumes)}")
-            
+
             self.trace.add_decision(
-                "final_volumes", 
-                "Final volume configuration", 
-                "volume_deduplication", 
+                "final_volumes",
+                "Final volume configuration",
+                "volume_deduplication_by_dst",
                 unique_volumes,
-                "Deduplicated and sorted volume mount list"
+                "Deduplicated by container path (dst)"
             )
-        
+
         # Clean up mounts configuration
-        if 'mounts' in self.build_conf: 
+        if 'mounts' in self.build_conf:
             del self.build_conf['mounts']
             self.trace.add_decision(
-                "cleanup_mounts", 
-                "Clean up mounts configuration", 
-                "build_conf", 
+                "cleanup_mounts",
+                "Clean up mounts configuration",
+                "build_conf",
                 "removed",
                 "Removed mounts key from build configuration to avoid duplication"
             )
