@@ -671,3 +671,57 @@ class PluginRegistry:
     def get_sections_by_plugin(self, plugin_name: str) -> Set[str]:
         """Get all sections registered by a specific plugin."""
         return {sw for sw, pn in self._plugin_sections.items() if pn == plugin_name}
+
+    # =========================================================================
+    #
+    # Auto Helper Registration
+    #
+    # =========================================================================
+
+    def register_auto_helper(self, name: str, func: "Callable") -> None:
+        """
+        Register an auto script helper function.
+
+        Helper functions are automatically injected into the execution
+        environment of auto scripts, allowing users to call them directly.
+
+        Args:
+            name: Helper function name (e.g., "zone_from_file")
+            func: Callable function
+
+        Example:
+            def on_load(self, registry):
+                from .helpers import zone_from_file
+                registry.register_auto_helper("zone_from_file", zone_from_file)
+        """
+        if not hasattr(self, '_auto_helpers'):
+            self._auto_helpers: Dict[str, "Callable"] = {}
+        self._auto_helpers[name] = func
+        logger.debug(f"Registered auto helper: {name}")
+
+    def unregister_auto_helper(self, name: str) -> bool:
+        """
+        Unregister an auto helper function.
+
+        Args:
+            name: Helper function name to unregister
+
+        Returns:
+            True if unregistered, False if not found
+        """
+        if hasattr(self, '_auto_helpers') and name in self._auto_helpers:
+            del self._auto_helpers[name]
+            logger.debug(f"Unregistered auto helper: {name}")
+            return True
+        return False
+
+    def get_auto_helpers(self) -> Dict[str, "Callable"]:
+        """
+        Get all registered auto helper functions.
+
+        Returns:
+            Dictionary mapping helper names to callable functions
+        """
+        if not hasattr(self, '_auto_helpers'):
+            self._auto_helpers: Dict[str, "Callable"] = {}
+        return self._auto_helpers.copy()

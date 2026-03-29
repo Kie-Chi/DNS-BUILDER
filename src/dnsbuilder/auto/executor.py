@@ -10,22 +10,24 @@ logger = logging.getLogger(__name__)
 
 class ScriptExecutor:
     """Executor for Python automation scripts."""
-    
-    def __init__(self, max_workers: Optional[int] = None, fs: Optional[FileSystem] = None):
+
+    def __init__(self, max_workers: Optional[int] = None, fs: Optional[FileSystem] = None, plugin_registry=None):
         """
         Initialize the script executor.
-        
+
         Args:
             max_workers: Maximum number of worker processes
             fs: File system instance to use. If None, creates default app filesystem
+            plugin_registry: PluginRegistry instance for auto helper injection
         """
         if max_workers is None:
             max_workers = os.cpu_count() or 1
         self.max_workers = max_workers
-        
+
         if fs is None:
             raise DefinitionError("FileSystem must be provided to ScriptExecutor")
         self.fs = fs
+        self.plugin_registry = plugin_registry
     
     def exec_python(self, script_content: str, config: Dict[str, Any], 
                             service_name: Optional[str] = None, output_dir: Optional[str] = None) -> Any:
@@ -64,12 +66,16 @@ class ScriptExecutor:
                 globals_dict = {
                     'config': config,
                     'service_name': service_name,
-                    'result': None, 
+                    'result': None,
                     'fs': self.fs,  # Pass FileSystem object for flexible file operations
                     'workdir': self.fs.chroot,  # Pass workdir path
                     'output_dir': output_dir,  # Pass output directory for post scripts
                     '__name__': '__main__'
                 }
+                # Inject auto helpers from plugins
+                if self.plugin_registry:
+                    helpers = self.plugin_registry.get_auto_helpers()
+                    globals_dict.update(helpers)
                 with self.fs.open(temp_script_path, 'r') as f:
                     exec(f.read(), globals_dict)
                 if globals_dict.get('result') is None:
@@ -89,6 +95,10 @@ class ScriptExecutor:
                     'output_dir': output_dir,  # Pass output directory for post scripts
                     '__name__': '__main__'
                 }
+                # Inject auto helpers from plugins
+                if self.plugin_registry:
+                    helpers = self.plugin_registry.get_auto_helpers()
+                    globals_dict.update(helpers)
                 with open(script_path, 'r') as f:
                     exec(f.read(), globals_dict)
                 os.unlink(script_path)

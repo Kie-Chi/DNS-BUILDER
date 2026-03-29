@@ -14,19 +14,21 @@ logger = logging.getLogger(__name__)
 
 class AutomationManager:
     """Manager for orchestrating automation phases."""
-    
-    def __init__(self, max_workers: Optional[int] = None, fs: Optional[FileSystem] = None):
+
+    def __init__(self, max_workers: Optional[int] = None, fs: Optional[FileSystem] = None, plugin_registry=None):
         """
         Initialize the automation manager.
-        
+
         Args:
             max_workers: Maximum number of worker processes
             fs: File system instance to pass to ScriptExecutor
+            plugin_registry: PluginRegistry instance for auto helper injection
         """
-        self.executor = ScriptExecutor(max_workers, fs)
+        self.executor = ScriptExecutor(max_workers, fs, plugin_registry)
         if max_workers is None:
             max_workers = os.cpu_count() or 1
         self.max_workers = max_workers
+        self.plugin_registry = plugin_registry
     
     def setup(self, config: Dict[str, Any]) -> None:
         """

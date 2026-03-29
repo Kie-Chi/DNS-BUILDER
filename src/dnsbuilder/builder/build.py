@@ -22,6 +22,7 @@ from ..io import DNSBPath, FileSystem
 from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError, DefinitionError
 from ..auto import AutomationManager
 from ..utils.fstree import print_tree, count_files
+from ..plugins import get_plugin_manager
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,10 @@ class Builder:
         
         self.pr_blds = self._load_pr_blds()
         self.ic: Dict[str, Image] = {}
-        # Initialize AutomationManager without resolver dependencies (will be set later)
-        self.am = AutomationManager(fs=fs)
+        # Get plugin registry for auto helper injection
+        plugin_registry = get_plugin_manager().registry
+        # Initialize AutomationManager with plugin registry for helper injection
+        self.am = AutomationManager(fs=fs, plugin_registry=plugin_registry)
         # Initialize ImageBuilder for shared image management
         self.ib = ImageBuilder()
         logger.debug(f"Builder initialized for project '{self.config.name}'. Output dir: '{self.output_dir}'")

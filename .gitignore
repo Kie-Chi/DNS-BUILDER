@@ -14,6 +14,8 @@
 !test/**
 !doc
 !doc/**
+!dnsb_utils
+!dnsb_utils/**
 !.github
 !.github/**
 !scripts
@@ -26,3 +28,5 @@
 **/__pycache__
 *.log
 *.Dockerfile
+*.db
+db.*
