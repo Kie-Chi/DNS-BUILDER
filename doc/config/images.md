@@ -18,7 +18,7 @@
 - 含义：引用已有镜像或镜像模板（如 `bind:9.18.0`）
 - 类型与格式：`string`；支持 `software:version` 形式或本地镜像名（无冒号时）
 - 可选值：
-  - 内置软件类型：`bind`、`unbound`、`python`、`judas`（详见资源默认依赖 `resources/images/defaults/{software}`）
+  - 内置软件类型：`bind`、`unbound`、`pdns_auth`、`pdns_recursor`、`python`、`judas`（详见资源默认依赖 `resources/images/defaults/{software}`）
   - 同文件中的内部镜像名：引用同级定义的镜像（不含冒号）
 - 约束：与 `software`、`version`、`from` 互斥；使用 `ref` 时不得提供这三者
 - 解析说明：当使用本地镜像名时，将按继承链解析并合并父配置；当使用 `software:version` 时，按对应内部镜像类初始化。
@@ -26,7 +26,7 @@
 ## software
 
 - 含义：软件类型（仅在不使用 `ref` 时）
-- 类型与可选值：`string`，常见取值包括 `bind`、`unbound`、`python`、`judas`
+- 类型与可选值：`string`，常见取值包括 `bind`、`unbound`、`pdns_auth`、`pdns_recursor`、`python`、`judas`
 - 约束：必须与 `version`、`from` 同时出现；否则校验失败
 
 ## version
@@ -118,3 +118,18 @@ images:
 - [顶层配置](top-level.md)
 - [服务配置](builds.md)
 - [合并与覆盖规则](../rule/merge-and-override.md)
+
+## DNS 软件类型与别名
+
+标准角色按 canonical 软件类型解析：
+
+| 类型 | 角色 | 说明 |
+|---|---|---|
+| `bind` | `auth`、`recursor`、`forwarder` | BIND 权威/递归/转发 |
+| `unbound` | `recursor`、`forwarder` | Unbound 递归/转发 |
+| `pdns_auth` | `auth` | PowerDNS Authoritative 的 BIND backend |
+| `pdns_recursor` | `recursor`、`forwarder` | PowerDNS Recursor |
+
+`pdns_recur`、`pdns-recur`、`powerdns_recur` 等只归一化为 `pdns_recursor`，不会产生第二套实现。Authoritative 必须使用 `pdns_auth`，不能用 Recursor 的角色。
+
+`pdns_auth` 使用 PowerDNS 专用 `pdns.conf` 和独立资源模板；它虽然读取 BIND-style zonefile，但不代表所有 BIND 配置 directive 都被 PowerDNS 支持。

@@ -22,9 +22,17 @@
     ↓
 [Auto Modify] 修改已解析的配置
     ↓
-[构建生成] 生成 Dockerfile、docker-compose.yml 等
+[DNSSEC Preflight] 解析 host/docker 工具（启用 DNSSEC 时）
+    ↓
+[并行服务生成] 初次生成 zone、配置和挂载，等待 barrier
+    ↓
+[DNSSEC Re-sign] 建立 DS 链并更新最终 signed zone/metadata
+    ↓
+[配置组装] 生成 Dockerfile、docker-compose.yml 等
     ↓
 [Auto Restrict] 验证最终配置有效性
+    ↓
+[Auto Post] 在 Compose 写出后执行收尾脚本
     ↓
 [增量缓存] 检测变化，仅重建必要服务(Optional)
     ↓
@@ -38,7 +46,7 @@
 **操作：** 解析 YAML 配置文件
 
 ```bash
-dnsb config.yml
+dnsb build config.yml
 ```
 
 - 从指定文件读取 YAML 格式的配置
@@ -148,7 +156,15 @@ auto:
 - **禁止在服务中使用 `ref` 字段**
   - ref 解析必须在 modify 前完成
 
-### 9. 构建生成
+### 9. DNSSEC 预检与 barrier
+
+启用 DNSSEC 的服务会共享一个工具 runner。`util_mode: host` 解析宿主机工具，`util_mode: docker` 在 `util_image` 中运行临时容器。所有服务先完成初次行为和 zone 生成，再由 barrier 保证父子 zone 都已就绪。
+
+### 10. DNSSEC Re-sign 与配置生成
+
+re-sign 阶段把子区 DS 写回父区并更新最终 `db.<zone>`。`pdns_auth` 服务随后生成 PowerDNS 专用 `pdns.conf`、BIND backend zone 配置以及 SQLite metadata DB；BIND/Unbound 服务则继续使用各自的配置 Section。
+
+### 11. 构建生成
 
 **操作：** 为每个服务生成 Dockerfile、配置文件等
 
@@ -157,7 +173,7 @@ auto:
 - 处理卷挂载和文件复制
 - 生成 `docker-compose.yml`
 
-### 10. Auto Restrict 阶段
+### 12. Auto Restrict 阶段
 
 **操作：** 执行验证脚本，检查最终配置有效性
 
@@ -180,6 +196,10 @@ auto:
 - 检查网络连通性要求
 - 提供部署前的检查列表
 
+
+### 13. Auto Post 阶段
+
+Compose 文件写出后执行 `auto.post`，适合生成报告或校验最终产物。
 
 ## 延伸阅读
 

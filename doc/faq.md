@@ -14,10 +14,10 @@
 - 模块级微调：`-l/--log-levels` 支持对特定模块单独设定级别，覆盖全局。示例：
 
   ```shell
-  dnsb config.yml --debug -l "res=INFO"    # 使用别名
-  dnsb config.yml -l "builder.*=DEBUG"                 # 顶层通配，等价于 dnsbuilder.builder
+  dnsb build config.yml --debug -l "res=INFO"    # 使用别名
+  dnsb build config.yml -l "builder.*=DEBUG"                 # 顶层通配，等价于 dnsbuilder.builder
   setx DNSB_LOG_LEVELS "fs=WARNING,api=DEBUG"        # 环境变量（CLI 参数优先生效）
-  dnsb config.yml
+  dnsb build config.yml
   ```
 - 别名与自动前缀：
 
@@ -112,3 +112,25 @@
 - “循环引用”：简化并打断 `ref` 链；避免 A↔B 互引
 - “挂载失败”：检查源路径存在；理解绝对/相对路径复制与挂载规则；确认 `resource:/` 资源可用
 - “DSL 生成失败”：缩减行为；核对语法与模板支持；查看调试日志中的解析步骤
+
+## PowerDNS 与 DNSSEC
+
+### PowerDNS Authoritative 为什么不能只挂载 zonefile？
+
+BIND backend 可以读取 DNSBuilder 生成的 BIND-style zonefile，但预签名 DNSSEC 还需要 BIND DNSSEC metadata DB。DNSBuilder 会生成 `pdns_dnssec.conf` 和 SQLite `bind-dnssec-db.sqlite3`；不需要 `pdnsutil`。
+
+### `pdns_recur` 和 `pdns_recursor` 有什么区别？
+
+`pdns_recursor` 是 canonical 软件类型。`pdns_recur`、`pdns-recur` 等只是输入 alias，避免产生重复实现。Authoritative 使用独立的 `pdns_auth`。
+
+### PowerDNS 容器启动但 zone 被拒绝
+
+确认服务使用固定版本的 Authoritative 镜像、entrypoint 为 `/usr/local/sbin/pdns_server`，并挂载 `pdns_auth_base.conf`、`generated_zones.conf`、签名 `db.<zone>` 和 SQLite DB。当前生成的 glue 可能位于父 zone 外；基础配置需要 `bind-ignore-broken-records=yes`。
+
+### 递归查询没有 `ad`
+
+先确认根信任锚与当前构建产生的 root zone 属于同一批产物。重建后使用 `docker compose up -d --force-recreate` 清除旧容器缓存，或在 Unbound 中执行 `unbound-control flush_zone .`。
+
+### nginx 配置被当成 Unbound 配置
+
+`.conf` 和 `.conf.<section>` 目标会进入 DNSBuilder Section 组装。应用配置应使用例如 `/etc/nginx/nginx.config`，并用 `nginx -c` 显式指定。

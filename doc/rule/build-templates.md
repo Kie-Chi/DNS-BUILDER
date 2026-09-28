@@ -22,6 +22,14 @@
   - `recursor`：递归解析器，挂载 `unbound_recursor_base.conf`
   - `forwarder`：转发器，挂载 `unbound_forwarder_base.conf`
 
+### PowerDNS
+
+- `pdns_auth:auth`：PowerDNS Authoritative BIND backend，使用 `pdns_auth_base.conf`、`generated_zones.conf` 和 `pdns.conf`。
+- `pdns_recursor:recursor` / `pdns_recursor:forwarder`：PowerDNS Recursor，使用 key=value 配置。
+- `pdns_recur` 只是 `pdns_recursor` 的输入别名。
+
+PowerDNS Authoritative 与 Recursor 是两个独立软件类型，不能笼统写成 `pdns`。
+
 ## 使用示例
 
 ```yaml

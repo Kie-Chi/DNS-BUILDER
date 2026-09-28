@@ -104,11 +104,21 @@
         apt: "mirrors.tencent.com"  # 覆盖全局配置
   ```
 
+## DNSSEC 工具模式（util_mode / util_image / util_auto_install）
+
+启用 DNSSEC 的构建会预检 `dnssec-signzone`，必要时按需调用 `dnssec-keygen` 等工具。
+
+- `util_mode`：`host`（默认）或 `docker`。`host` 依次查找 `BIND_DNSSEC_KEYGEN`、`BIND_DNSSEC_SIGNZONE`、`BIND_DNSSEC_DSFROMKEY`、`BIND_DNSSEC_CHECKZONE`、PATH 和常见路径；`docker` 使用 `util_image` 启动临时容器。
+- `util_image`：`docker` 模式使用的本地镜像，例如 `bind:9.18.4`；DNSBuilder 不自动拉取。
+- `util_auto_install`：默认 `false`；设置为 `true` 才允许按操作系统尝试安装 BIND 工具包。环境变量 `DNSSEC_AUTO_INSTALL=1` 也可显式开启。
+
+工具只用于构建期签名，不会成为 PowerDNS、BIND 或 Unbound 运行时的必要依赖。
+
 ## 额外字段*
 
 - 可选项
 - 顶层允许存在未列出的附加字段；这些字段不会参与校验，但会 **透传到最终 Compose 输出**
-- 注意：为避免与保留键冲突，顶层保留键包括：`name`、`inet`、`images`、`builds`、`include`、`auto`、`mirror`
+- 注意：为避免与保留键冲突，顶层保留键包括：`name`、`inet`、`images`、`builds`、`include`、`plugins`、`auto`、`mirror`、`vars`、`util_mode`、`util_image`、`util_auto_install`
 
 ## 示例
 

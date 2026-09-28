@@ -46,7 +46,7 @@ builds:
 dnsb build demo.yml [--debug]
 ```
 
-**输出：** 在运行目录下的 `output/demo` 可以看到完整的 `docker-compose` 项目。
+**输出：** 默认在配置文件所在目录的 `output/demo` 看到完整的 `docker-compose` 项目；使用 `--workdir @cwd` 时才以当前目录为工作目录。
 
 ## 启动环境
 
@@ -58,7 +58,7 @@ dnsb run demo.yml -d
 
 # 方式2：手动启动
 cd output/demo
-docker compose up --build -d
+docker compose up --pull never --build -d
 ```
 
 ## 管理容器
@@ -108,3 +108,7 @@ dnsb down demo.yml
 | `-w, --workdir` | 指定工作目录(`@config`为配置文件目录) |
 | `-g, --graph <file>` | 生成网络拓扑图（Graphviz 格式） |
 | `--vfs` | 使用虚拟文件系统而非本地磁盘 |
+
+## PowerDNS Authoritative 示例
+
+仓库中的 `examples/bugs/dnssec-fault/pdns.yml` 展示 BIND、PowerDNS Authoritative 和 Unbound 的混合 DNSSEC 链路。原始纯 BIND 配置保留为 `examples/bugs/dnssec-fault/bind.yml`。运行步骤和验证命令见该目录的 README。

@@ -6,7 +6,7 @@
 
 ## 概要
 
-DNSBuilder以挂载文件的后缀`.conf`来识别DNS软件配置并协助挂载，例如`should_be_included.conf`，将被自动引用至DNS软件的主配置中
+DNSBuilder 通过容器目标路径的 `.conf` 或 `.conf.<section>` 后缀识别 DNS 软件配置并协助挂载，例如 `should_be_included.conf`。目标路径不是 DNS 配置（如 nginx 的 `/etc/nginx/nginx.config`）时，不会被自动引用。
 
 具体内容详见后续`Section/SectionReference`介绍
 ```shell
@@ -136,6 +136,8 @@ class ConfigFragment(BaseModel):
 | forward-zone | True | `forward-zone:\n{content}` |
 | stub-zone | True | `stub-zone:\n{content}` |
 | auth-zone | True | `auth-zone:\n{content}` |
+
+**PowerDNS Authoritative (`pdns_auth`)**：继承 BIND-style zone section 以生成 `generated_zones.conf`，但主服务配置来自独立的 `pdns_auth_base.conf`，额外参数通过 `/usr/local/etc/includes` 挂载；不能把 BIND 的 `named.conf` 当作 `pdns.conf`。
 
 **PowerDNS Recursor / Knot Resolver**：
 
@@ -611,3 +613,12 @@ class MyDNSIncluder(BaseIncluder):
         # 不支持注入的情况
         return content, False
 ```
+## PowerDNS Authoritative 的独立配置路径
+
+`pdns_auth` 使用三类文件：
+
+1. `/usr/local/etc/pdns.conf`：PowerDNS daemon 配置；
+2. `/usr/local/etc/zones/generated_zones.conf`：BIND backend 的 `zone "..." { type master; file "..."; };`；
+3. `/usr/local/etc/includes/*.conf`：额外 PowerDNS 参数，例如 `bind-dnssec-db`。
+
+因此 `PdnsAuthIncluder` 不会把参数写进 BIND `named.conf`。PowerDNS 服务的 entrypoint/command 由专用模板固定为 `/usr/local/sbin/pdns_server --config-dir=/usr/local/etc`。

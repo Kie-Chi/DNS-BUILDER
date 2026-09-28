@@ -845,7 +845,7 @@ registry.register_section(
 )
 ```
 
-Section 类定义软件支持的配置块，详见 [配置生成机制](config-generation.md)。
+Section 类定义软件支持的配置块，详见 [配置生成机制](rule/config-generation.md)。
 
 ### Zone Generator 注册
 

@@ -43,12 +43,14 @@ DNSBuilder 提供一组内置资源与模板，位于只读的 `resource:/` 文�
   - `bind_recursor_base.conf`：BIND 递归解析基础配置
   - `unbound_forwarder_base.conf`：Unbound 转发器基础配置
   - `unbound_recursor_base.conf`：Unbound 递归解析基础配置
+  - `pdns_auth_base.conf`：PowerDNS Authoritative 的 BIND backend 基础配置
+  - `pdns_recursor_base.conf`：PowerDNS Recursor 基础配置
 - `images/`
   - `controls/`：控制文件与密钥（随`traffic`挂载）
     - `bind/`：`rndc.key`
     - `unbound/`：`control.conf`、`unbound_control.key/.pem`、`unbound_server.key/.pem`
   - `templates/`：标准服务模板（按软件分类）
-    - `bind`、`unbound`、`python`、`judas` 等目录下存放模板片段
+    - `bind`、`unbound`、`pdns_auth`、`pdns_recursor`、`python`、`judas` 等目录下存放模板片段
   - `rules/`：镜像规则定义（按软件分类）
 - `builder/templates`：标准服务模板的聚合定义（JSON），供 `std:<role>`/`<software>:<role>` 解析时使用
 - `scripts/`
@@ -165,3 +167,12 @@ builds:
 - [文件路径与 FS](rule/paths-and-fs.md)（路径协议、复制与落盘规则）
 - [标准服务模板](rule/build-templates.md)（角色列表与解析规则）
 - [顶层配置](config/top-level.md)《镜像配置》《服务配置》（引用与 include 的综合用法）
+
+## PowerDNS 资源
+
+- `builder/templates/pdns_auth`：显式覆盖官方 Authoritative 镜像的 entrypoint、command 和 `pdns.conf` 挂载。
+- `builder/templates/pdns_recursor`：PowerDNS Recursor 的角色模板。
+- `configs/pdns_auth_base.conf`：`launch=bind`、`bind-config` 和兼容 glue 的默认配置。
+- `configs/pdns_recursor_base.conf`：Recursor 的 key=value 基础配置。
+
+启用 Authoritative DNSSEC 时，SQLite metadata 是构建产物而非静态 resource；它由 Python `sqlite3` 在每次构建中生成。

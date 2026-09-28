@@ -126,7 +126,29 @@ builds:
 - 说明：此配置会与其余 mirror 配置深度合并，用于为特定服务定制镜像源
 - 延伸阅读
   - [顶层配置 - mirror](top-level.md#mirror)
-  - [内部镜像配置 - mirror](images.md#mirror可选)
+  - [内部镜像配置 - mirror](images.md#mirror)
+
+## DNSSEC 配置
+
+权威服务可以使用布尔值或对象启用 DNSSEC：
+
+```yaml
+builds:
+  auth-cn:
+    image: powerdns/pdns-auth-50:5.0.7
+    ref: std:auth
+    dnssec:
+      enable: true
+      include: resource:/keys/cn
+    behavior: |
+      cn master dlv NS auth-dlv
+```
+
+`std-auth` include 可以根据 `vars.std.dnssec` 为权威服务统一设置开关。构建器先预检 DNSSEC 工具，再在所有服务完成初次 zone 生成后执行 DNSSEC barrier/re-sign，最后写出 `db.<zone>`。启用 `pdns_auth` 时还会生成 `pdns_dnssec.conf` 和 SQLite metadata DB。
+
+## `mounts` 与配置文件后缀
+
+`volumes` 中目标路径以 `.conf` 或 `.conf.<section>` 结尾时会参与 DNS 软件 Section/Includer 组装；普通应用配置应使用 `mounts` 透传，或使用不会被识别为 DNS 配置的目标后缀。例如 nginx 可挂载到 `/etc/nginx/nginx.config`，再用 `nginx -c /etc/nginx/nginx.config` 启动。
 
 ## auto*
 ### setup*

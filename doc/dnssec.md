@@ -1,15 +1,17 @@
 # DNSSEC 支持(试验中)
 
-仅在装有`bind9-utils`的linux环境下可用
+DNSBuilder 的 DNSSEC 链路使用 BIND DNSSEC 工具生成预签名 zonefile，并在构建阶段建立 DS 信任链。工具依赖与运行时 DNS 服务分开处理。
 
-DNSBuilder 自动支持 DNSSEC 签名和密钥管理
+默认 `util_mode: host`，按 `BIND_DNSSEC_*` 环境变量、PATH 和常见系统路径查找 `dnssec-signzone`、`dnssec-keygen` 等工具；`util_auto_install: true` 才会根据宿主机尝试安装 `bind9-utils`/`bind-utils`/`bind-tools` 或 macOS Homebrew `bind`。设置 `util_mode: docker` 时，DNSBuilder 在指定 `util_image` 中运行临时工具容器，不把工具安装到最终服务镜像，也不会自动拉取镜像。
+
+PowerDNS Authoritative 使用预签名 zonefile 时还需要 BIND DNSSEC metadata DB。DNSBuilder 使用 Python 标准库 `sqlite3` 生成该数据库，因此 `pdnsutil` 不是必要依赖。
 
 ## 功能特性
 
 - **自动签名链构建**：自动建立从根到叶的信任链
 - **密钥自动生成**：KSK 和 ZSK 自动生成和管理
 - **DS 记录自动传播**：子区 DS 记录自动添加到父区
-- **透明集成**：无需手动配置，自动处理所有 DNSSEC 相关事务
+- **显式配置工具依赖**：支持 host/docker 两种工具模式和环境变量覆盖
 - **DNSSEC Hooks**：支持在签名过程中注入自定义脚本，用于漏洞复现场景
 - **预生成密钥支持**：支持使用预先生成的密钥，便于控制 key tag 和密钥复用
 
@@ -91,6 +93,36 @@ builds:
 2. 自动 fallback 到密钥生成
 3. 继续正常签名流程
 
+## PowerDNS Authoritative 预签名链路
+
+将服务的镜像类型写成 `pdns_auth`，角色仍使用独立的 `pdns_auth:auth`（`std:auth` 会按软件类型解析）：
+
+```yaml
+images:
+  powerdns:
+    ref: pdns_auth:5.0.7
+builds:
+  auth-cn:
+    image: powerdns
+    ref: std:auth
+    dnssec: true
+    behavior: |
+      cn master dlv NS auth-dlv
+```
+
+也可以在服务级直接使用可识别的外部镜像，例如 `powerdns/pdns-auth-50:5.0.7`。DNSBuilder 会生成并挂载：
+
+- `/usr/local/etc/pdns.conf`：`launch=bind`、`bind-config` 和兼容现有 glue 的 `bind-ignore-broken-records=yes`；
+- `/usr/local/etc/zones/generated_zones.conf` 与 `db.<zone>`：BIND backend 读取的 zone 配置和最终签名文件；
+- `/usr/local/etc/includes/pdns_dnssec.conf`：`bind-dnssec-db` 路径；
+- `/usr/local/var/lib/pdns/bind-dnssec-db.sqlite3`：包含 `cryptokeys`、`domainmetadata`、`tsigkeys` 的 metadata DB。
+
+`pdns_recursor` 是递归软件的 canonical 类型；`pdns_recur`、`pdns-recur` 等仅为输入 alias。Authoritative 与 Recursor 不能用同一个软件角色或配置文件。
+
+PowerDNS 的 bind backend 会忽略 zone 外的 `*.servers.net.` glue；DNSBuilder 的 PowerDNS 基础配置开启 `bind-ignore-broken-records=yes`，否则同一份现有 zonefile 会被拒绝。
+
+验证时直接查询 Authoritative 地址检查 SOA/DNSKEY/DS，再经 Unbound 查询正记录和 NXDOMAIN。递归响应应带 `ad`，负响应应带 `NSEC3` 和对应 `RRSIG`。
+
 ## 工作原理
 
 ### 签名流程
@@ -103,7 +135,7 @@ builds:
 2. **区域签名阶段**
    - 使用 ZSK 签名区域数据
    - 使用 KSK 签名 DNSKEY 记录集
-   - 生成签名区域文件（`.signed`）
+   - 生成最终签名区域文件 `db.<zone>`（`.signed` 仅是旧实现中的中间命名，不是运行时契约）
 
 3. **信任链建立**
    - 从子区 KSK 生成 DS 记录

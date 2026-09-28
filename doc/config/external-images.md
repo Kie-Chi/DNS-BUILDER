@@ -8,7 +8,7 @@
 ## 与内部镜像的区别
 
 - 内部镜像：在顶层 `images` 中声明，支持 `ref`、`software`/`version`/`from` 三元组、依赖与工具的默认值处理，并参与标准模板（`std:`）解析的“软件类型”推断
-- 外部镜像：不在 `images` 中声明，直接在服务的 `image` 写字符串使用；不具备“软件类型”，因此无法用于 `std:` 的角色推断
+- 外部镜像：不在 `images` 中声明，直接在服务的 `image` 写字符串使用。DNSBuilder 会按镜像名识别 `bind`、`unbound`、`pdns_auth`、`pdns_recursor` 等已知软件；无法识别的软件仍可作为普通 Compose 服务使用，但不能用于 `std:` 角色推断
 
 ## 用法示例
 
@@ -33,7 +33,7 @@ builds:
 ```yaml
 builds:
   grafana:
-    image: "grafana/grafana:latest"
+    image: "grafana/grafana:11.0.0"
     ports:
       - "3000:3000"
     volumes:
@@ -47,7 +47,7 @@ builds:
 
 ## 约束与注意事项
 
-- `std:` 模板、`behavior`等内置行为与“软件类型”相关，需从内部镜像的  `software`类型推断；因此外部镜像 **均不适用**
+- `std:` 模板和 `behavior` 依赖软件类型。可识别的外部镜像（如 `powerdns/pdns-auth-50:5.0.7`、`powerdns/pdns-recursor-50:5.0.12`）可以使用对应角色；镜像的实际 entrypoint、配置目录和可用 directive 仍需与生成模板匹配
 - 外部镜像无法被内部镜像所引用
 
 ## 何时选择外部镜像
@@ -62,3 +62,20 @@ builds:
 - [内部镜像配置](images.md)
 - [服务配置](builds.md)
 - [文件路径与FS](../rule/paths-and-fs.md)
+
+## PowerDNS 外部镜像示例
+
+```yaml
+builds:
+  auth-cn:
+    image: powerdns/pdns-auth-50:5.0.7
+    ref: std:auth
+    behavior: |
+      cn master dlv NS auth-dlv
+
+  recursor:
+    image: powerdns/pdns-recursor-50:5.0.12
+    ref: std:recursor
+```
+
+PowerDNS Authoritative 需要由 DNSBuilder 挂载 `pdns.conf`、`generated_zones.conf`、签名 zonefile 和（启用预签名 DNSSEC 时）SQLite metadata DB。官方镜像的启动参数由模板显式设置；请固定版本 tag，不要依赖 `latest`。

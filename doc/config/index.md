@@ -23,7 +23,7 @@ builds: {}
 - 服务：需要 `image` 或 `ref`；使用 `std:` 模板时必须提供 `image`
 - 引用：同级 `ref` 支持链式继承；出现循环或未知引用会报错
 - include：支持相对、绝对与 `resource:/` 路径；按深度合并策略整合配置
-- auto：支持在三个阶段（setup、modify、restrict）执行 Python 脚本来动态管理配置
+- auto：支持在四个阶段（setup、modify、restrict、post）执行 Python 脚本来动态管理配置
 
 ## 配置文件路径语法
 
@@ -41,12 +41,12 @@ volumes:
   - ./zone.conf:/etc/zones.conf?name=example.com#zone
 ```
 
-详见 [配置生成机制](../config-generation.md)。
+详见 [配置生成机制](../rule/config-generation.md)。
 
 ## 延伸阅读
 
 - [配置处理流程](processing-pipeline.md)
-- [配置生成机制](../config-generation.md) — Section、Includer、配置片段详解
+- [配置生成机制](../rule/config-generation.md) — Section、Includer、配置片段详解
 - [Auto 自动化脚本](auto.md)
 - [顶层配置](top-level.md)
 - [镜像配置](images.md)

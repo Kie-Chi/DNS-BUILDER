@@ -2,14 +2,16 @@
 
 ## 环境准备
 
+- Python 3.12 或更高版本（推荐使用项目虚拟环境）
 - Docker 与 Compose：需已安装并可用的 Docker 环境（Windows 建议 Docker Desktop + WSL2）。验证：`docker --version` 与 `docker compose version` 均正常输出
+- 启用 DNSSEC 时：默认需要宿主机 `dnssec-signzone`；也可设置 `util_mode: docker` 与本地 `util_image`。`pdnsutil` 不属于必要依赖，PowerDNS metadata 使用 Python 标准库 `sqlite3`。
 
 ## 安装
 
 ```shell
 git clone https://github.com/Kie-Chi/DNS-BUILDER.git && \
 cd DNS-BUILDER && \
-pip install .
+python -m pip install .
 ```
 
 ## 运行(CLI)
@@ -41,7 +43,7 @@ dnsb COMMAND CONFIG_FILE [OPTIONS]
 - `-f/--log-file`: 保存log文件
 - `-i/--incremental`: 启用增量构建缓存
 - `-w/--workdir WORKDIR`: 指定工作目录
-  - 默认为运行命令的当前目录
+  - 默认为配置文件所在目录（输出为该目录下的 `output/<name>`）
   - `@config` 代表配置文件所在目录
   - 也可使用相对路径（相对于当前目录）或绝对路径
 
@@ -68,3 +70,19 @@ dnsb --ui
 ```
 
 - 目前仅有API
+
+## DNSSEC 工具
+
+```yaml
+util_mode: host
+# util_auto_install: true  # 仅在明确允许自动安装时打开
+```
+
+在没有宿主机 BIND 工具的环境中，可准备一个包含 `dnssec-signzone` 的本地镜像并使用：
+
+```yaml
+util_mode: docker
+util_image: bind:9.18.4
+```
+
+DNSBuilder 不会因为 `util_mode: docker` 自动从 registry 拉取镜像。

@@ -53,7 +53,7 @@ nav:
     - 自动化脚本: config/auto.md
   - 语法与规则:
     - 概览: rule/index.md
-    - 配置生成机制: config-generation.md
+    - 配置生成机制: rule/config-generation.md
     - 合并与覆盖规则: rule/merge-and-override.md
     - 标准服务模板: rule/build-templates.md
     - 行为 DSL: rule/behavior-dsl.md
