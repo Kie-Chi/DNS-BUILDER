@@ -22,6 +22,8 @@ from ..io import DNSBPath, FileSystem
 from ..exceptions import BuildError, DNSBuilderError, ImageDefinitionError, DefinitionError
 from ..auto import AutomationManager
 from ..utils.fstree import print_tree, count_files
+from ..utils.dnssec import is_dnssec_enabled
+from ..utils.dnssec_tools import create_dnssec_tool_runner
 from ..plugins import get_plugin_manager
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,11 @@ class Builder:
         context = context.model_copy(update={'resolved_builds': config_data['builds']})
         context.config.model = context.config.model.model_validate(config_data)
 
+        # Resolve build-time DNSSEC dependencies once, before service handlers
+        # start generating zones in parallel.  The signer and re-signer share
+        # this runner through BuildContext.
+        context = self._prepare_dnssec_tools(context)
+
         # Generate artifacts (Dockerfiles, configs) for each service
         logger.debug("[Builder] Invoking ServiceHandler for artifact generation...")
         compose_services = await self._generate(context)
@@ -129,6 +136,29 @@ class Builder:
         if need_context:
             return context
         return None
+
+    def _prepare_dnssec_tools(self, context: BuildContext) -> BuildContext:
+        """Create and preflight the shared DNSSEC tool runner when required."""
+        dnssec_services = [
+            name for name, build_conf in context.resolved_builds.items()
+            if is_dnssec_enabled(build_conf)
+        ]
+        if not dnssec_services:
+            logger.debug("[DNSSEC] No enabled DNSSEC builds; skipping tool preflight")
+            return context
+
+        config = context.config.model.model_dump(by_alias=True, exclude_none=True)
+        runner = create_dnssec_tool_runner(config)
+        # dnssec-signzone is always needed for the current signing and
+        # re-signing paths. dnssec-keygen is resolved lazily only when a zone
+        # has no complete pre-generated key pair.
+        runner.preflight(["dnssec-signzone"])
+        logger.info(
+            "[DNSSEC] Tool preflight complete using util_mode=%s for services=%s",
+            config.get("util_mode", "host"),
+            ",".join(sorted(dnssec_services)),
+        )
+        return context.model_copy(update={"dnssec_tools": runner})
 
     def _init_ctx(self) -> BuildContext:
         """Creates the initial build context and resolves images defined in the config."""

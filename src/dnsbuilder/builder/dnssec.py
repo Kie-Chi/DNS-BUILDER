@@ -10,6 +10,7 @@ from pathlib import Path
 from ..datacls import BuildContext
 from ..io import DNSBPath
 from ..utils.dnssec import get_dnssec_hooks
+from ..utils.dnssec_tools import create_dnssec_tool_runner, DnssecToolError
 from ..utils.zone import ZoneName
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ class DNSSECResigner:
         """
         self.context = context
         self.fs = context.fs
+        self.dnssec_tools = getattr(context, "dnssec_tools", None)
+        if self.dnssec_tools is None:
+            self.dnssec_tools = create_dnssec_tool_runner({"util_mode": "host"})
+            self.dnssec_tools.preflight(["dnssec-signzone"])
 
     def _execute_hook(
         self,
@@ -425,18 +430,15 @@ class DNSSECResigner:
                 
                 # Sign the zone
                 logger.debug(f"[DNSSEC-Resigner] Signing zone '{zone.fqdn}' with dnssec-signzone")
-                sign_result = subprocess.run(
+                sign_result = self.dnssec_tools.run(
+                    "dnssec-signzone",
                     [
-                        "dnssec-signzone",
                         "-3", hashlib.sha1(zone.fqdn.encode()).hexdigest()[:16],
                         "-N", "INCREMENT",
                         "-o", zone.fqdn,
                         str(unsigned_file)
                     ],
-                    cwd=temp_path,
-                    capture_output=True,
-                    text=True,
-                    check=True
+                    temp_path,
                 )
 
                 logger.debug(f"[DNSSEC-Resigner] dnssec-signzone output: {sign_result.stdout}")
@@ -463,6 +465,8 @@ class DNSSECResigner:
 
                 return (signed_content, ds_content)
 
+        except DnssecToolError:
+            raise
         except subprocess.CalledProcessError as e:
             logger.error(f"[DNSSEC-Resigner] dnssec-signzone failed for '{zone.fqdn}': {e.stderr}")
             return None

@@ -72,6 +72,15 @@ RECOGNIZED_PATTERNS = {
         r"\bpdns[_-]?recursor(?![a-zA-Z])",  # pdns_recursor or pdns-recursor
         r"\bpowerdns[_-]?recursor(?![a-zA-Z])",  # powerdns_recursor or powerdns-recursor
     ],
+    "pdns_auth": [
+        r"\bpdns[_-]?auth(?![a-zA-Z])",
+        r"\bpowerdns[_-]?auth(?:oritative)?(?![a-zA-Z])",
+    ],
+    # Input-only alias; normalize_software_name() maps it to pdns_recursor.
+    "pdns_recur": [
+        r"\bpdns[_-]?recur(?!sor|[a-zA-Z])",
+        r"\bpowerdns[_-]?recur(?!sor|[a-zA-Z])",
+    ],
     "knot_resolver6": [
         r"(?:^|/)knot[_-]resolver:(?:latest|v?6(?:\.\d+|\.x)?)",  # knot_resolver or knot-resolver
         r"(?:^|/)kresd:(?:latest|v?6(?:\.\d+|\.x)?)",  # kresd
@@ -85,6 +94,24 @@ RECOGNIZED_PATTERNS = {
         r"\btechnitium(?![a-zA-Z])",  # technitium_dns-server or technitium-dns-server
     ]
 }
+
+SOFTWARE_ALIASES = {
+    "pdns_recur": "pdns_recursor",
+    "pdns-recur": "pdns_recursor",
+    "powerdns_recur": "pdns_recursor",
+    "powerdns-recur": "pdns_recursor",
+    "pdns-recursor": "pdns_recursor",
+    "powerdns_recursor": "pdns_recursor",
+    "powerdns-recursor": "pdns_recursor",
+}
+
+
+def normalize_software_name(name: str) -> str:
+    """Normalize software aliases at factory/registry boundaries."""
+    if not isinstance(name, str):
+        return name
+    normalized = name.strip().lower().replace(" ", "_")
+    return SOFTWARE_ALIASES.get(normalized, normalized)
 
 
 # --- Behavior Types ---
@@ -137,7 +164,10 @@ DEFAULT_DEVICE_NAME = "bridge"
 # --- Reserved Keys in Build Configs ---
 RESERVED_BUILD_KEYS = {'image', 'volumes', 'cap_add', 'address', 'ref', 'behavior', 'build', 'mixins', 'mounts', 'files', 'auto', 'extra_conf', 'mirror', 'dnssec', 'vars'}
 
-RESERVED_CONFIG_KEYS = {'name', 'inet', 'images', 'builds', 'include', 'auto', 'mirror', 'vars', 'plugins'}
+RESERVED_CONFIG_KEYS = {
+    'name', 'inet', 'images', 'builds', 'include', 'auto', 'mirror', 'vars', 'plugins',
+    'util_mode', 'util_image', 'util_auto_install',
+}
 
 # -- Config constants ---
 MIRRORS = { 

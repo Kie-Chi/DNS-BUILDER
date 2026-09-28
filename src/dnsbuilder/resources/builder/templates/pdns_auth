@@ -1,0 +1,9 @@
+{
+    "auth": {
+        "entrypoint": ["/usr/local/sbin/pdns_server"],
+        "command": ["--config-dir=/usr/local/etc"],
+        "volumes": [
+            "resource:/configs/pdns_auth_base.conf:/usr/local/etc/pdns.conf:rw"
+        ]
+    }
+}

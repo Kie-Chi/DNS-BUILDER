@@ -837,8 +837,9 @@ class ExternalImage(Image, ABC):
             placeholder_content = matches[0].strip()
             
             # Check if the placeholder content is a supported software type
-            if placeholder_content in supported_software:
-                self.software = placeholder_content
+            placeholder_software = constants.normalize_software_name(placeholder_content)
+            if placeholder_software in supported_software:
+                self.software = placeholder_software
                 logger.debug(f"[{self.original_name}] Software type extracted from placeholder: {self.software}")
             else:
                 logger.debug(f"[{self.original_name}] Placeholder '{placeholder_content}' is not a supported software type")
@@ -885,10 +886,11 @@ class ExternalImage(Image, ABC):
         supported_software = image_registry.get_supports()
         name_lower = name.lower()
         for soft in constants.RECOGNIZED_PATTERNS.keys():
-            if soft in supported_software:
+            canonical = constants.normalize_software_name(soft)
+            if canonical in supported_software:
                 for pattern in constants.RECOGNIZED_PATTERNS[soft]:
                     if re.search(pattern, name_lower):
-                        return soft
+                        return canonical
             else:
                 logger.debug(f"[{self.original_name}] Software type '{soft}' is not supported, passed.")
         return "NaS"
@@ -1130,4 +1132,3 @@ class MasterBehavior(Behavior, ABC):
         else:
             rname = origin
         return rname
-

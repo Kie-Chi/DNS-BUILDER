@@ -97,7 +97,7 @@ class BehaviorRegistry(Registry[Tuple[str, str], Type[BehaviorProtocol]]):
             self.register(key, discovered_class)
 
     def behavior(self, software: str, behavior_type: str) -> Optional[Type[BehaviorProtocol]]:
-        return self.get((software, behavior_type))
+        return self.get((constants.normalize_software_name(software), behavior_type))
 
     def get_supports(self) -> Set[str]:
         """Get all supported software types."""
@@ -122,7 +122,7 @@ class ImageRegistry(Registry[str, Type[ImageProtocol]]):
             self.register(software, discovered_class)
 
     def image(self, software: str) -> Optional[Type[ImageProtocol]]:
-        return self.get(software)
+        return self.get(constants.normalize_software_name(software))
 
     def get_supports(self) -> Set[str]:
         return set(self.registry.keys())
@@ -143,7 +143,7 @@ class IncluderRegistry(Registry[str, Type[IncluderProtocol]]):
             self.register(software, discovered_class)
 
     def includer(self, software: str) -> Optional[Type[IncluderProtocol]]:
-        return self.get(software)
+        return self.get(constants.normalize_software_name(software))
 
     def get_supports(self) -> Set[str]:
         return set(self.registry.keys())
@@ -172,7 +172,7 @@ class ZoneGeneratorRegistry(Registry[str, Type[ZoneGeneratorProtocol]]):
 
     def generator(self, software: str) -> Optional[Type[ZoneGeneratorProtocol]]:
         """Get a zone generator class by software type."""
-        return self.get(software)
+        return self.get(constants.normalize_software_name(software))
 
     def get_supports(self) -> Set[str]:
         """Get all software types with registered zone generators."""
@@ -232,7 +232,7 @@ class SectionRegistry(Registry[str, Type[SectionProtocol]]):
 
     def section(self, software: str) -> Optional[Type[SectionProtocol]]:
         """Get a section class by software type."""
-        return self.get(software)
+        return self.get(constants.normalize_software_name(software))
 
     def get_supports(self) -> Set[str]:
         """Get all software types with registered sections."""
@@ -293,5 +293,4 @@ def initialize_registries(
             logger.debug(f"After plugins - Supported software types: {behavior_registry.get_supports()}")
             logger.debug(f"After plugins - Zone generators: {zone_generator_registry.get_supports()}")
             logger.debug(f"After plugins - Sections: {section_registry.get_supports()}")
-
 

@@ -78,6 +78,14 @@ class PdnsRecursorImage(InternalImage):
         """
         pass  # PowerDNS Recursor has nothing to do
 
+
+class PdnsAuthImage(InternalImage):
+    """Concrete Image class for PowerDNS Authoritative Server."""
+
+    @override
+    def _post_init_hook(self):
+        pass
+
 class KnotResolverImage(InternalImage):
     """
     Concrete Image class for Knot Resolver

@@ -1,6 +1,6 @@
 import yaml
 import logging
-from typing import Dict, Any, List, Set, Optional, Union
+from typing import Dict, Any, List, Set, Optional, Union, Literal
 from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict
 from pydantic.networks import IPv4Network
 
@@ -149,6 +149,9 @@ class ConfigModel(BaseModel):
     auto: Optional[AutomationModel] = Field(default_factory=AutomationModel)
     mirror: Dict[str, Any] = Field(default_factory=dict)
     vars: Dict[str, Any] = Field(default_factory=dict)
+    util_mode: Literal["host", "docker"] = "host"
+    util_image: Optional[str] = None
+    util_auto_install: bool = False
     model_config = ConfigDict(extra="allow")
     
     @model_validator(mode='after')

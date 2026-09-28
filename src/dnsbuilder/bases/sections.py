@@ -117,6 +117,18 @@ class BindSection(Section):
         }
 
 
+class PdnsAuthSection(BindSection):
+    """BIND-style sections accepted by PowerDNS Authoritative's bind backend.
+
+    This is a distinct registry entry even though the zone block syntax is
+    shared with BIND.
+    """
+
+    @classmethod
+    def get_sections(cls) -> Dict[str, SectionInfo]:
+        return BindSection.get_sections()
+
+
 # ============================================================================
 # UNBOUND SECTION
 # ============================================================================

@@ -13,6 +13,7 @@ from ..exceptions import NetworkDefinitionError
 from ..io import DNSBPath
 from ..auto.executor import ScriptExecutor
 from ..utils.dnssec import get_dnssec_hooks, get_dnssec_includes
+from ..utils.dnssec_tools import create_dnssec_tool_runner, DnssecToolError
 from ..utils.zone import ZoneName
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,12 @@ class ZoneGenerator:
         self.build_conf = build_conf or {}
         self.dnssec_hooks = get_dnssec_hooks(self.build_conf) if enable_dnssec else {}
         self.dnssec_includes = get_dnssec_includes(self.build_conf) if enable_dnssec else []
+        self.dnssec_tools = getattr(context, "dnssec_tools", None)
+        if enable_dnssec and self.dnssec_tools is None:
+            # ZoneGenerator is also usable directly by plugins/tests.  The
+            # normal Builder path injects one shared runner before generation.
+            self.dnssec_tools = create_dnssec_tool_runner({"util_mode": "host"})
+            self.dnssec_tools.preflight(["dnssec-signzone"])
         self._executor = ScriptExecutor(fs=context.fs) if self.dnssec_hooks else None
 
     def _find_keys_in_include(self, temp_path: Path) -> Optional[Tuple[str, str, str, str, str, str]]:
@@ -283,23 +290,19 @@ class ZoneGenerator:
                         logger.warning(f"[DNSSEC] No valid keys found in include directories, falling back to auto-generation for '{self.zone.fqdn}'")
 
                     logger.debug(f"Generating ZSK for '{self.zone.fqdn}' using dnssec-keygen")
-                    zsk_result = subprocess.run(
-                        ["dnssec-keygen", "-a", "ECDSAP256SHA256", "-n", "ZONE", self.zone.fqdn],
-                        cwd=temp_path,
-                        capture_output=True,
-                        text=True,
-                        check=True
+                    zsk_result = self.dnssec_tools.run(
+                        "dnssec-keygen",
+                        ["-a", "ECDSAP256SHA256", "-n", "ZONE", self.zone.fqdn],
+                        temp_path,
                     )
                     zsk_basename = zsk_result.stdout.strip()
                     logger.debug(f"Generated ZSK: {zsk_basename}")
 
                     logger.debug(f"Generating KSK for '{self.zone.fqdn}' using dnssec-keygen")
-                    ksk_result = subprocess.run(
-                        ["dnssec-keygen", "-a", "ECDSAP256SHA256", "-f", "KSK", "-n", "ZONE", self.zone.fqdn],
-                        cwd=temp_path,
-                        capture_output=True,
-                        text=True,
-                        check=True
+                    ksk_result = self.dnssec_tools.run(
+                        "dnssec-keygen",
+                        ["-a", "ECDSAP256SHA256", "-f", "KSK", "-n", "ZONE", self.zone.fqdn],
+                        temp_path,
                     )
                     ksk_basename = ksk_result.stdout.strip()
                     logger.debug(f"Generated KSK: {ksk_basename}")
@@ -329,18 +332,15 @@ class ZoneGenerator:
                 )
 
                 logger.debug(f"Signing zone '{self.zone.fqdn}' using dnssec-signzone")
-                sign_result = subprocess.run(
+                sign_result = self.dnssec_tools.run(
+                    "dnssec-signzone",
                     [
-                        "dnssec-signzone",
                         "-3", hashlib.sha1(self.zone.fqdn.encode()).hexdigest()[:16],
                         "-N", "INCREMENT",
                         "-o", self.zone.fqdn,
                         str(unsigned_file),
                     ],
-                    cwd=temp_path,
-                    capture_output=True,
-                    text=True,
-                    check=True
+                    temp_path,
                 )
 
                 logger.debug(f"dnssec-signzone output: {sign_result.stdout}")
@@ -377,9 +377,8 @@ class ZoneGenerator:
         except subprocess.CalledProcessError as e:
             logger.error(f"DNSSEC command failed for '{self.zone.fqdn}': {e.stderr}")
             return None
-        except FileNotFoundError as e:
-            logger.error(f"DNSSEC tools not found. Please install bind9-dnsutils: {e}")
-            return None
+        except DnssecToolError:
+            raise
         except Exception as e:
             logger.error(f"DNSSEC signing failed for '{self.zone.fqdn}': {e}")
             logger.exception(e)

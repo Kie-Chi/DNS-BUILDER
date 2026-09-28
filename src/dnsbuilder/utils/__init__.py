@@ -24,6 +24,14 @@ from .reflection import (
 )
 from .fstree import print_tree, count_files, get_tree_string, list_all_files
 from .dnssec import get_dnssec_config, is_dnssec_enabled, get_dnssec_includes
+from .dnssec_tools import (
+    DnssecToolError,
+    DnssecToolRunner,
+    HostDnssecToolRunner,
+    DockerDnssecToolRunner,
+    create_dnssec_tool_runner,
+)
+from .pdns_dnssec import PdnsDnssecMetadataError, write_bind_dnssec_db
 from .zone import Zone, ZoneName
 
 __all__ = [
@@ -48,8 +56,14 @@ __all__ = [
     'get_dnssec_config',
     'is_dnssec_enabled',
     'get_dnssec_includes',
+    'DnssecToolError',
+    'DnssecToolRunner',
+    'HostDnssecToolRunner',
+    'DockerDnssecToolRunner',
+    'create_dnssec_tool_runner',
+    'PdnsDnssecMetadataError',
+    'write_bind_dnssec_db',
     # Zone utilities
     'Zone',
     'ZoneName',  # Backward compatibility alias
 ]
-

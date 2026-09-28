@@ -17,6 +17,7 @@ from .abstractions import InternalImage
 from .io import FileSystem
 from .exceptions import ImageDefinitionError, CircularDependencyError, UnsupportedFeatureError, DefinitionError
 from .registry import behavior_registry, image_registry, includer_registry, initialize_registries
+from .constants import normalize_software_name
 
 if TYPE_CHECKING:
     from .datacls import ConfigFragment
@@ -78,6 +79,7 @@ class ImageFactory:
             # It's a preset image like "bind:9.18.18" not explicitly defined
             ref = None
             sw, version = name.split(":", 1)
+            sw = normalize_software_name(sw)
             config = {"name": name, "software": sw, "version": version}
 
         if not ref:
@@ -104,7 +106,8 @@ class ImageFactory:
 
     def _instantiate_from_config(self, config: Dict[str, Any]) -> ImageProtocol:
         """Helper to create a concrete Image instance from a resolved config."""
-        software_type = config.get("software")
+        software_type = normalize_software_name(config.get("software"))
+        config = {**config, "software": software_type}
         if not software_type:
             raise ImageDefinitionError(
                 f"Cannot instantiate image '{config['name']}': missing 'software' type for an internal image."
@@ -185,6 +188,7 @@ class BehaviorFactory:
         """
         behavior_type, args = self._parse_behavior(line)
 
+        software_type = normalize_software_name(software_type)
         behavior_class = behavior_registry.behavior(software_type, behavior_type)
 
         if not behavior_class:
@@ -230,6 +234,7 @@ class IncluderFactory:
             software_type: The DNS software type (e.g., "bind", "unbound")
             fragments: Optional list of ConfigFragments to register immediately
         """
+        software_type = normalize_software_name(software_type)
         includer_class = includer_registry.includer(software_type)
 
         if not includer_class:

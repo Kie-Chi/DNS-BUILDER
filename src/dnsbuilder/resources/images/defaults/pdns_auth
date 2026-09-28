@@ -1,0 +1,25 @@
+{
+    "default_deps": [
+        "build-essential",
+        "g++",
+        "pkg-config",
+        "wget",
+        "libboost-context-dev",
+        "libboost-dev",
+        "libboost-filesystem-dev",
+        "libboost-program-options-dev",
+        "libboost-serialization-dev",
+        "libboost-system-dev",
+        "libboost-test-dev",
+        "libboost-thread-dev",
+        "libssl-dev",
+        "libsqlite3-dev",
+        "liblua5.3-dev"
+    ],
+    "default_utils": [
+        "vim",
+        "dnsutils",
+        "tcpdump",
+        "tmux"
+    ]
+}

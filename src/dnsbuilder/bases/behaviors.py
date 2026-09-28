@@ -135,6 +135,19 @@ class BindMasterBehavior(MasterBehavior):
         return {"name": zone_name}
 
 
+class PdnsAuthMasterBehavior(MasterBehavior):
+    """Generate BIND-backend zone declarations for PowerDNS Authoritative."""
+
+    def generate_config_line(self, zone_name: str, file_path: str) -> str:
+        return f'type master; file "{file_path}";'
+
+    def get_section(self) -> str:
+        return "zone"
+
+    def get_section_params(self, zone_name: str) -> dict:
+        return {"name": zone_name}
+
+
 # ============================================================================
 # UNBOUND IMPLEMENTATIONS
 # ============================================================================

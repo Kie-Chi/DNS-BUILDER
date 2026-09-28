@@ -183,6 +183,29 @@ class PdnsRecursorIncluder(Includer):
         self.fs.append_text(global_config.src, comment)
 
 
+class PdnsAuthIncluder(Includer):
+    """Assemble PowerDNS Authoritative fragments without Recursor semantics.
+
+    The authoritative base config points ``bind-config`` at the generated
+    BIND-style zone file directly.  Zone fragments therefore remain mounted
+    at their requested container paths and must not be rewritten into the
+    Recursor ``include-dir``/``auth-zones+`` format.
+    """
+
+    def assemble(self) -> None:
+        # The generated zone file and optional pdns.conf fragments are mounted
+        # directly by ServiceHandler.  Keeping assembly as an explicit no-op
+        # prevents an invalid BIND ``include`` directive from being appended
+        # to pdns.conf while retaining an independent registry implementation.
+        if not self.main:
+            logger.debug("No PowerDNS Authoritative main config fragment found")
+            return
+        logger.debug(
+            "PowerDNS Authoritative uses direct bind-config mounts; skipped %d fragment(s)",
+            sum(len(self.get_pendings(section)) for section in self.get_all_sections()),
+        )
+
+
 class KnotResolverIncluder(Includer):
     """
     Knot Resolver configuration assembler.

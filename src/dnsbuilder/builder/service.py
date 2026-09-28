@@ -4,6 +4,8 @@ import collections
 import hashlib
 import json
 import threading
+import tempfile
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -14,7 +16,7 @@ from .zone import ZoneGenerator
 from .. import constants
 from ..io import DNSBPath, FileSystem, parse_sr
 from ..exceptions import BuildError, BehaviorError, DNSBPathNotFoundError, VolumeError, BuildDefinitionError
-from ..utils import get_dnssec_config
+from ..utils import get_dnssec_config, write_bind_dnssec_db
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +166,7 @@ class ServiceHandler:
         self.tmp_dir = DNSBPath(f"temp:/services/{self.service_name}")
         self.context.fs.mkdir(self.tmp_dir, parents=True, exist_ok=True)
         self.processed_volumes: List[str] = []
+        self._pdns_dnssec_zones: Dict[str, str] = {}
         
         ip_display = f"with IP '{self.ip}'" if self.ip else "with dynamic IP"
         logger.debug(f"ServiceHandler initialized for '{self.service_name}' {ip_display} and image '{self.image_name}'.")
@@ -235,6 +238,8 @@ class ServiceHandler:
         # Process volume mounts - Phase 1: Classification
         self.trace.add_stage("process_volumes", "Process volume mount configuration")
         fragments = self._process_volumes()
+        self._prepare_pdns_auth_includes_volume()
+        self._write_pdns_dnssec_metadata()
 
         # Phase 2 & 3: Register fragments and assemble
         self.trace.add_stage("config_assembly", "Assemble configuration fragments")
@@ -656,6 +661,8 @@ class ServiceHandler:
             # Generate config artifact using the primary zone file
             if primary_artifact:
                 behavior_obj = behavior_by_zone[zone]
+                if self.image_obj.software == "pdns_auth" and enable_dnssec:
+                    self._pdns_dnssec_zones[zone] = primary_artifact.content
                 # Use generate_artifact to get complete BehaviorArtifact with section info
                 config_artifact = behavior_obj.generate_artifact(zone, primary_artifact.container_path)
                 all_config_items[config_artifact.section].append({
@@ -665,7 +672,78 @@ class ServiceHandler:
             else:
                 logger.warning(f"No primary artifact found for zone '{zone}'")
 
+        if self.image_obj.software == "pdns_auth" and enable_dnssec:
+            self._prepare_pdns_dnssec_config(volumes)
         return all_config_items
+
+    def _prepare_pdns_dnssec_config(self, volumes: List[Any]) -> None:
+        """Add the PowerDNS metadata setting as a normal config fragment."""
+        if self.image_obj.software != "pdns_auth":
+            return
+        config_path = self.tmp_dir / "pdns_dnssec.conf"
+        if not self.context.fs.exists(config_path):
+            self.context.fs.write_text(
+                config_path,
+                "bind-dnssec-db=/usr/local/var/lib/pdns/bind-dnssec-db.sqlite3\n",
+            )
+            volumes.append(f"{config_path}:/usr/local/etc/includes/pdns_dnssec.conf")
+
+    def _prepare_pdns_auth_includes_volume(self) -> None:
+        """Declare the directory referenced by ``include-dir`` as a mount.
+
+        The internally-built image creates this directory in its Dockerfile,
+        but official/external PowerDNS images do not all ship it.  PowerDNS
+        treats a missing ``include-dir`` as a fatal configuration error.  The
+        compose short bind-mount syntax creates a missing host source
+        directory automatically, so the builder only needs to declare the
+        mount and does not need to materialize an empty directory itself.
+        """
+        if self.image_obj.software != "pdns_auth":
+            return
+
+        self.processed_volumes.append(
+            f"./{self.service_name}/contents/{constants.INCLUDE_SUBDIR}:"
+            "/usr/local/etc/includes:rw"
+        )
+
+    def _write_pdns_dnssec_metadata(self) -> None:
+        """Write the SQLite metadata artifact after temp files are materialized."""
+        if self.image_obj.software != "pdns_auth" or not self._pdns_dnssec_zones:
+            return
+        metadata_dir = self.contents_dir / "pdns-dnssec"
+        self.context.fs.mkdir(metadata_dir, parents=True, exist_ok=True)
+
+        # sqlite3 requires a local filesystem path.  Build the DB in a local
+        # temporary directory, then copy the bytes through the project's
+        # filesystem abstraction so MemoryFS and other test backends work too.
+        with tempfile.TemporaryDirectory(prefix="dnsbuilder-pdns-dnssec-") as temp_dir:
+            temporary_db = Path(temp_dir) / "bind-dnssec-db.sqlite3"
+            write_bind_dnssec_db(self._pdns_dnssec_zones, temporary_db)
+            destination = metadata_dir / "bind-dnssec-db.sqlite3"
+            self.context.fs.write_bytes(destination, temporary_db.read_bytes())
+
+        # Docker needs the directory and DB to be writable because PowerDNS
+        # may create SQLite WAL/SHM sidecars during startup.  chmod is applied
+        # only when the output backend is a real local path; in-memory backends
+        # have no POSIX mode to adjust.
+        try:
+            absolute_dir = self.context.fs.absolute(metadata_dir)
+            absolute_db = self.context.fs.absolute(destination)
+            if absolute_dir.is_disk():
+                Path(absolute_dir.__path__()).chmod(0o777)
+                Path(absolute_db.__path__()).chmod(0o666)
+        except (AttributeError, OSError, NotImplementedError):
+            logger.debug("Skipping POSIX permissions for non-disk metadata backend")
+
+        self.processed_volumes.append(
+            f"./{self.service_name}/contents/pdns-dnssec:"
+            "/usr/local/var/lib/pdns:rw"
+        )
+        logger.info(
+            "Generated PowerDNS BIND DNSSEC metadata DB for %s (%d zone(s))",
+            self.service_name,
+            len(self._pdns_dnssec_zones),
+        )
 
     def _process_behavior(self):
         """
