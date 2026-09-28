@@ -1,0 +1,114 @@
+name: dnssec-fault-pdns
+inet: 10.53.0.0/24
+
+# Standard authoritative scaffolding: provides `std` vars and auto DNSSEC wiring
+include: resource:/includes/std-auth.yml
+
+vars:
+  std:
+    dnssec: true   # sign every authoritative zone (root/com/cn/target.com/dlv.cn)
+
+images:
+  bind:
+    ref: bind:9.18.4        # root requires >=9.18; reused for every authoritative node
+    # When implementing the fault agent, add python3:
+    # util:
+    #   - python3
+  unbound:
+    ref: unbound:1.16.1     # diagram requires unbound >=1.16
+    util:
+      - nginx               # run nginx alongside unbound in rec-host
+  client:
+    ref: python:3.12.0
+
+builds:
+  # ==================== Recursive resolver: rec-host ====================
+  # Recursion + DNSSEC validation. nginx runs in this container; the python>=3.10 bypass is deferred.
+  # Base recursor config disables DNSSEC on purpose, so we re-add the trust anchor here.
+  rec-host:
+    image: unbound
+    ref: std:recursor
+    # `. hint auth-root` points to the internal root only -> isolated from public DNS.
+    behavior: |
+      . hint auth-root
+    # Run nginx (daemonized) first, then unbound in the foreground to keep the container alive.
+    # Keep Unbound in the foreground while nginx provides the optional bypass endpoint.
+    # `.config` avoids treating nginx syntax as an Unbound `.conf` fragment.
+    command: bash -c "nginx -c /etc/nginx/nginx.config && unbound -d -c /usr/local/etc/unbound/unbound.conf"
+    volumes:
+      - key:/root.key:/usr/etc/unbound/keys/root.key   # generated from root KSK at build time
+      - resource/nginx/nginx.conf:/etc/nginx/nginx.config  # optional bypass endpoint
+    files:
+      /usr/local/etc/unbound/unbound.conf.server: |
+        trust-anchor-file: /usr/etc/unbound/keys/root.key
+    # --- DEFERRED: python>=3.10 bypass sidecar (wire nginx -> python here) ---
+    # environment:
+    #   MGMT: ${srv.mgmt.ip}
+
+  # ==================== Root authority: auth-root (.) ====================
+  auth-root:
+    image: bind
+    ref: std:auth
+    behavior: |
+      . master com NS auth-com
+      . master cn NS auth-cn
+
+  # ==================== .com authority: auth-com ====================
+  # .com + fault agent (python3) with root privileges (deferred).
+  auth-com:
+    image: bind
+    ref: std:auth
+    behavior: |
+      com master target NS auth-target
+    # --- DEFERRED: fault agent + root privileges ---
+    # privileged: true        # diagram: root privileges
+    # volumes:
+    #   - resource/agent/fault-agent.py:/usr/local/bin/fault-agent.py
+    # command: bash -c "named -g -c /usr/local/etc/named.conf & python3 /usr/local/bin/fault-agent.py"
+
+  # ==================== .cn authority: auth-cn ====================
+  auth-cn:
+    # PowerDNS Authoritative serves the generated BIND-compatible zone file.
+    # The external image is intentionally referenced at the service level.
+    image: powerdns/pdns-auth-50:5.0.7
+    ref: std:auth
+    behavior: |
+      cn master dlv NS auth-dlv
+
+  # ==================== target.com authority: auth-target ====================
+  # target.com + fault agent (python3) on control port 8080 (deferred).
+  auth-target:
+    image: bind
+    ref: std:auth
+    behavior: |
+      target.com master www A 1.2.3.4
+    # --- DEFERRED: fault agent (control port 8080) ---
+    # ports:
+    #   - "8080:8080"
+    # volumes:
+    #   - resource/agent/fault-agent.py:/usr/local/bin/fault-agent.py
+    # command: bash -c "named -g -c /usr/local/etc/named.conf & python3 /usr/local/bin/fault-agent.py"
+
+  # ==================== dlv.cn registry authority: auth-dlv ====================
+  # Normal delegated subzone (delegated from .cn).
+  auth-dlv:
+    image: bind
+    ref: std:auth
+    behavior: |
+      dlv.cn master www A 5.6.7.8
+
+  # ==================== Client ====================
+  client:
+    image: client
+    command: tail -f /dev/null
+    environment:
+      R: ${srv.rec-host.ip}   # e.g. dig +dnssec @$R www.target.com
+      IP: ${ip}
+
+  # ==================== DEFERRED: management server (mgmt) ====================
+  # Bidirectional with rec-host; co-location with the resolver is not required.
+  # mgmt:
+  #   image: client
+  #   command: tail -f /dev/null
+  #   environment:
+  #     R: ${srv.rec-host.ip}

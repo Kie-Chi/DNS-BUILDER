@@ -4,6 +4,9 @@
 *.zip
 *.md
 *.yml
+*.pdf
+*.bib
+_docs/
 *.dot
 *.py
 !.gitignore
@@ -30,3 +33,14 @@
 *.Dockerfile
 *.db
 db.*
+
+# Keep the reviewed DNSSEC/PowerDNS example source visible while ignoring generated output.
+!examples/
+!examples/bugs/
+!examples/bugs/dnssec-fault/
+!examples/bugs/dnssec-fault/*.yml
+!examples/bugs/dnssec-fault/*.md
+!examples/bugs/dnssec-fault/*.sh
+!examples/bugs/dnssec-fault/resource/
+!examples/bugs/dnssec-fault/resource/nginx/
+!examples/bugs/dnssec-fault/resource/nginx/*.conf
