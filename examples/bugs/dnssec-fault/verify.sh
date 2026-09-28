@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-compose=(docker compose -f examples/bugs/dnssec-fault/output/dnssec-fault-pdns/docker-compose.yml)
+script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+compose=(docker compose -f "$script_dir/output/dnssec-fault-pdns/docker-compose.yml")
 client=("${compose[@]}" exec -T client)
 
 run() {
