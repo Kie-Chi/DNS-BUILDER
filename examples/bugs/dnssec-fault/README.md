@@ -33,3 +33,5 @@ docker compose -f examples/bugs/dnssec-fault/output/dnssec-fault-pdns/docker-com
 如果重复构建并复用已有容器，递归缓存可能保留旧签名；验证前使用 `docker compose ... up -d --force-recreate`，或执行 `unbound-control flush_zone .`。
 
 `resource/nginx/nginx.conf` 的挂载目标故意使用 `/etc/nginx/nginx.config`，启动命令显式传入 `nginx -c`。`.config` 后缀不会被 DNSBuilder 当作 DNS `.conf` 片段拼入 Unbound。
+
+PowerDNS 镜像必须和 Docker 主机架构匹配。用户提供的 `pdns-auth.tar` 若是 `linux/arm64`，不能直接在 `linux/amd64` 主机上运行；应加载同一固定 `5.0.7` tag 的匹配架构镜像，不能只重新标记 arm64 镜像。
