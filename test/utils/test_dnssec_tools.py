@@ -3,6 +3,7 @@ import os
 import pytest
 
 from dnsbuilder.utils.dnssec_tools import (
+    DEFAULT_DNSSEC_TOOL_IMAGE,
     DnssecToolError,
     DockerDnssecToolRunner,
     HostDnssecToolRunner,
@@ -46,6 +47,37 @@ def test_runner_factory_supports_explicit_docker_mode():
 
     assert isinstance(runner, DockerDnssecToolRunner)
     assert runner.image == "example/bind-tools:9.20"
+    assert runner.auto_build is False
+
+
+def test_runner_factory_uses_bundled_docker_image_by_default():
+    runner = create_dnssec_tool_runner({"util_mode": "docker"})
+
+    assert isinstance(runner, DockerDnssecToolRunner)
+    assert runner.image is None
+    assert runner.auto_build is True
+
+
+def test_default_docker_runner_builds_bundled_image(monkeypatch):
+    runner = DockerDnssecToolRunner()
+    commands = []
+
+    def fake_docker(args, check=True):
+        commands.append((list(args), check))
+        if args[:3] == ["image", "inspect", DEFAULT_DNSSEC_TOOL_IMAGE]:
+            from subprocess import CompletedProcess
+
+            return CompletedProcess(args, 1, "", "missing")
+        from subprocess import CompletedProcess
+
+        return CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(runner, "_docker", fake_docker)
+    runner.preflight(["dnssec-signzone"])
+
+    assert runner.image == DEFAULT_DNSSEC_TOOL_IMAGE
+    assert any(command[0] == "build" for command, _ in commands)
+    assert any(command[:3] == ["image", "inspect", DEFAULT_DNSSEC_TOOL_IMAGE] for command, _ in commands)
 
 
 def test_runner_factory_rejects_unknown_mode():

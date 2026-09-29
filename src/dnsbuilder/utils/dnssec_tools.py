@@ -95,6 +95,12 @@ KNOWN_TOOL_DIRS = (
     "/usr/local/opt/bind/bin",
 )
 
+# The default Docker runner is self-contained: it builds this local Dockerfile
+# when the image is absent.  Users with a private registry or a prebuilt BIND
+# image can still override it through the top-level ``util_image`` setting.
+DEFAULT_DNSSEC_TOOL_IMAGE = "dnsbuilder/dnssec-tools:9.18.4"
+DEFAULT_DNSSEC_TOOL_DOCKERFILE = "resources/images/dnssec_tools/Dockerfile"
+
 
 def _os_id() -> str:
     """Return a normalized host OS identifier."""
@@ -262,6 +268,7 @@ class DockerDnssecToolRunner(DnssecToolRunner):
     mode: str = "docker"
     image: Optional[str] = None
     docker_command: str = "docker"
+    auto_build: bool = True
 
     def _docker(self, args: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess:
         command = [self.docker_command, *args]
@@ -273,10 +280,47 @@ class DockerDnssecToolRunner(DnssecToolRunner):
             detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
             raise DnssecToolError(f"Docker command failed: {shlex.join(command)}: {detail}") from exc
 
+    def _default_dockerfile(self) -> Path:
+        package_root = Path(__file__).resolve().parents[1]
+        dockerfile = package_root / DEFAULT_DNSSEC_TOOL_DOCKERFILE
+        if not dockerfile.is_file():
+            raise DnssecToolError(
+                f"Bundled DNSSEC utility Dockerfile is missing: {dockerfile}"
+            )
+        return dockerfile
+
+    def _build_default_image(self) -> None:
+        dockerfile = self._default_dockerfile()
+        assert self.image is not None
+        logger.info(
+            "Building bundled DNSSEC utility image %s from %s",
+            self.image,
+            dockerfile,
+        )
+        self._docker(
+            [
+                "build",
+                "--pull=false",
+                "-f",
+                str(dockerfile),
+                "-t",
+                self.image,
+                str(dockerfile.parent),
+            ]
+        )
+
     def _check_image(self) -> None:
-        if not self.image:
-            raise DnssecToolError("util_mode=docker requires a top-level util_image")
-        self._docker(["image", "inspect", self.image])
+        if self.image is None:
+            self.image = DEFAULT_DNSSEC_TOOL_IMAGE
+        inspected = self._docker(["image", "inspect", self.image], check=False)
+        if inspected.returncode == 0:
+            return
+        if not self.auto_build:
+            raise DnssecToolError(
+                f"util_image={self.image!r} is not available locally; "
+                "load or build it before using util_mode=docker"
+            )
+        self._build_default_image()
 
     def resolve(self, tool: str) -> str:
         if tool in self.paths:
@@ -338,5 +382,9 @@ def create_dnssec_tool_runner(config: Mapping[str, object]) -> DnssecToolRunner:
     if mode == "host":
         return HostDnssecToolRunner(auto_install=_auto_install_enabled(config))
     if mode == "docker":
-        return DockerDnssecToolRunner(image=config.get("util_image") or None)
+        configured_image = config.get("util_image") or None
+        return DockerDnssecToolRunner(
+            image=configured_image,
+            auto_build=configured_image is None,
+        )
     raise DnssecToolError("util_mode must be either 'host' or 'docker'")

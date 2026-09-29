@@ -158,7 +158,7 @@ auto:
 
 ### 9. DNSSEC 预检与 barrier
 
-启用 DNSSEC 的服务会共享一个工具 runner。`util_mode: host` 解析宿主机工具，`util_mode: docker` 在 `util_image` 中运行临时容器。所有服务先完成初次行为和 zone 生成，再由 barrier 保证父子 zone 都已就绪。
+启用 DNSSEC 的服务会共享一个工具 runner。`util_mode: host` 解析宿主机工具；`util_mode: docker` 默认从仓库内置 Dockerfile 构建 `dnsbuilder/dnssec-tools:9.18.4`，也可以在 `util_image` 中指定已存在的自定义镜像，再运行临时容器。所有服务先完成初次行为和 zone 生成，再由 barrier 保证父子 zone 都已就绪。
 
 ### 10. DNSSEC Re-sign 与配置生成
 
