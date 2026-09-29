@@ -43,7 +43,7 @@ from .exceptions import (
 )
 from .attribute import AttributeLoader
 
-__version__ = "0.13.1"
+__version__ = "0.14.0"
 
 __all__ = [
     # Version

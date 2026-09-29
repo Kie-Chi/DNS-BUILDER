@@ -16,12 +16,15 @@ pip install .
 dnsb build config.yml
 # Or to run directly after building
 dnsb run config.yml
+# 检查新版本；安装时使用 dnsb update --upgrade
+dnsb update
 ```
 
 ## Features
 
 - Rapidly build complex DNS test environments
 - Docker-based containerized deployment
+- Version checks with opt-in upgrades from the tagged source revision
 - DNSSEC configuration support (host or Docker tool runner; PowerDNS metadata uses Python `sqlite3`)
 - Flexible configuration file format, even using Python scripts
 - Automated zone file generation and management, supporting BIND, Unbound, Knot Resolver, PowerDNS Authoritative (`pdns_auth`) and PowerDNS Recursor (`pdns_recursor`; `pdns_recur` is an alias)

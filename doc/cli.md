@@ -13,6 +13,7 @@ dnsb [OPTIONS] COMMAND [ARGS]
 - `--debug`: 启用调试日志输出
 - `-l, --log-levels TEXT`: 逐模块设置日志级别（如 `sub=DEBUG,res=INFO`）
 - `-f, --log-file TEXT`: 指定日志文件路径
+- `--no-update-check`: 禁用启动时的版本检查
 - `--version`: 显示版本信息
 - `--help`: 显示帮助信息
 
@@ -22,7 +23,29 @@ dnsb [OPTIONS] COMMAND [ARGS]
 dnsb build config.yml -i    # 使用增量模式构建
 dnsb clean --all            # 清理所有共享镜像
 dnsb ui                     # 启动 Web UI
+dnsb update                 # 检查新版本
+dnsb update --upgrade       # 确认后安装新版本
 ```
+
+### update
+
+检查 GitHub tags 中是否有比当前版本更新的 DNSBuilder。普通的 `build`、`run` 等命令也会按 24 小时缓存周期执行一次非阻塞检查；发现新版本时只显示提示，不会自动修改当前 Python 环境。
+
+```bash
+dnsb update                 # 强制检查并显示版本信息
+dnsb update --upgrade       # 询问后用当前 Python 的 pip 安装
+dnsb update --upgrade --yes # 不询问，直接安装
+```
+
+更新命令默认从 `Kie-Chi/DNS-BUILDER` 的 GitHub tags 获取版本，并从对应 tag 安装源码。可以通过环境变量调整行为：
+
+- `DNSB_UPDATE_CHECK=0`：关闭普通命令的启动检查（显式 `dnsb update` 仍会执行检查）；
+- `DNSB_UPDATE_INTERVAL=86400`：设置缓存有效期，单位为秒；
+- `DNSB_UPDATE_TIMEOUT=2`：设置网络请求超时，单位为秒；
+- `DNSB_UPDATE_URL`：替换 tags API 地址；
+- `DNSB_UPDATE_SOURCE`：替换 pip 的 Git 源地址。
+
+网络不可用、响应格式错误或缓存目录不可写时，检查会静默跳过，不影响 DNSBuilder 的构建和容器操作。`--upgrade` 需要显式确认；只有同时提供 `--yes` 时才会无询问安装。
 
 ## 命令列表
 

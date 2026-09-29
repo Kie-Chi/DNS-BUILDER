@@ -30,6 +30,7 @@ dnsb COMMAND CONFIG_FILE [OPTIONS]
 - `logs`: 查看容器日志
 - `ps`: 列出容器状态
 - `clean`: 清理镜像
+- `update`: 检查并可选安装新版本
 
 详细命令说明请查看 [CLI 命令参考](../cli.md)
 
@@ -46,6 +47,24 @@ dnsb COMMAND CONFIG_FILE [OPTIONS]
   - 默认为配置文件所在目录（输出为该目录下的 `output/<name>`）
   - `@config` 代表配置文件所在目录
   - 也可使用相对路径（相对于当前目录）或绝对路径
+
+### 版本检查与更新
+
+DNSBuilder 的普通命令会按缓存周期检查 GitHub tags；发现新版本时只显示提示，不会自动修改环境。需要手动检查时执行：
+
+```shell
+dnsb update
+```
+
+确认后安装新版本：
+
+```shell
+dnsb update --upgrade
+# 自动确认安装
+dnsb update --upgrade --yes
+```
+
+启动检查不会阻塞构建。可使用 `--no-update-check` 或 `DNSB_UPDATE_CHECK=0` 关闭；显式运行 `dnsb update` 仍会检查。检查周期、超时、API 地址和 pip 源的环境变量详见 [CLI 命令参考](../cli.md#update)。
 
 #### 日志示例
 
@@ -78,11 +97,17 @@ util_mode: host
 # util_auto_install: true  # 仅在明确允许自动安装时打开
 ```
 
-在没有宿主机 BIND 工具的环境中，可准备一个包含 `dnssec-signzone` 的本地镜像并使用：
+在没有宿主机 BIND 工具的环境中，DNSBuilder 会在 `util_mode: docker` 下使用仓库内置 Dockerfile 构建默认工具镜像：
 
 ```yaml
 util_mode: docker
-util_image: bind:9.18.4
 ```
 
-DNSBuilder 不会因为 `util_mode: docker` 自动从 registry 拉取镜像。
+默认镜像为 `dnsbuilder/dnssec-tools:9.18.4`，Dockerfile 基于明确的 `docker.1ms.run/library/debian:12.11-slim`，安装 `bind9-utils` 后只用于构建期签名。若已有自己的工具镜像，可以覆盖：
+
+```yaml
+util_mode: docker
+util_image: my-registry.example/bind-tools:9.18.4
+```
+
+自定义 `util_image` 必须预先在本地存在；DNSBuilder 不会自动拉取或构建覆盖镜像。默认工具镜像只会从仓库内置 Dockerfile 执行 `docker build --pull=false`，因此缺少基础镜像时会明确失败并提示准备镜像。

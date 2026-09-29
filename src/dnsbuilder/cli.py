@@ -20,6 +20,7 @@ from .exceptions import (
 )
 from .api.main import app
 from . import __version__
+from .utils.update import check_for_update, install_update, update_notice
 
 def complete_config_files(ctx, param, incomplete):
     """Auto-complete .yml and .yaml config files in current directory"""
@@ -608,13 +609,48 @@ def do_restart(config_file: str, workdir: str, output_dir: str, services: tuple)
         raise
 
 
+def do_update(upgrade: bool, yes: bool):
+    """Check for a newer DNSBuilder version and optionally install it."""
+    if yes and not upgrade:
+        raise click.UsageError("--yes requires --upgrade")
+
+    # An explicit update command remains useful even when the user disabled
+    # background checks globally with DNSB_UPDATE_CHECK=0.
+    info = check_for_update(force=True, allow_disabled=True)
+    if info is None:
+        click.echo(f"DNSBuilder {__version__} is up to date.")
+        return
+
+    click.echo(
+        f"A newer DNSBuilder version is available: {info.current_version} "
+        f"-> {info.latest_version}\n{info.url}"
+    )
+    if not upgrade:
+        click.echo("Run 'dnsb update --upgrade' to install it.")
+        return
+
+    if not yes and not click.confirm(
+        f"Install DNSBuilder {info.latest_version} in the current Python environment?"
+    ):
+        click.echo("Update cancelled.")
+        return
+
+    result = install_update(info)
+    if result.returncode != 0:
+        raise click.ClickException(
+            f"DNSBuilder update failed with exit code {result.returncode}."
+        )
+    click.echo(f"DNSBuilder {info.latest_version} installed.")
+
+
 @click.group()
 @click.option('--debug', is_flag=True, help='Enable debug logging')
 @click.option('-l', '--log-levels', help="Comma-separated per-module log levels (e.g., 'sub=DEBUG,res=INFO')")
 @click.option('-f', '--log-file', help='Path to log file')
+@click.option('--no-update-check', is_flag=True, help='Disable the startup version check')
 @click.version_option(version=__version__, prog_name='dnsbuilder')
 @click.pass_context
-def cli(ctx, debug, log_levels, log_file):
+def cli(ctx, debug, log_levels, log_file, no_update_check):
     """DNS Builder - Build DNS infrastructure from configuration files
     
     \b
@@ -626,6 +662,23 @@ def cli(ctx, debug, log_levels, log_file):
     ctx.ensure_object(dict)
     ctx.obj['debug'] = debug
     setup_logging(debug, log_levels, log_file)
+    # Startup checks are cached and non-fatal.  The explicit update command
+    # performs its own forced check, so do not perform a duplicate request.
+    if not no_update_check and ctx.invoked_subcommand != 'update':
+        try:
+            info = check_for_update()
+            if info:
+                click.echo(update_notice(info), err=True)
+        except Exception as exc:
+            logging.debug("Version update check failed: %s", exc)
+
+
+@cli.command()
+@click.option('--upgrade', is_flag=True, help='Install the newer version with pip')
+@click.option('--yes', is_flag=True, help='Do not ask for confirmation (requires --upgrade)')
+def update(upgrade, yes):
+    """Check for and optionally install a newer DNSBuilder version."""
+    do_update(upgrade, yes)
 
 
 @cli.command()
@@ -844,4 +897,4 @@ def ui(ctx):
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":
-    cli() 
+    cli()

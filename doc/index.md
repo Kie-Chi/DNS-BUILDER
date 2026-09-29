@@ -20,6 +20,7 @@ DNSBuilder 是用于构建与模拟 DNS 环境的工具，包含：
 ## 快速路径
 
 - **CLI 命令**：查看[CLI 命令参考](cli.md)了解所有可用命令和选项
+- **版本更新**：使用 `dnsb update` 检查新版本，使用 `dnsb update --upgrade` 安装
 - **文件路径与挂载**：建议先阅读资源路径与文件系统的说明，了解 `resource:/`、相对/绝对路径的复制与挂载行为。详见[文件路径与FS](rule/paths-and-fs.md)
 - **快速开始**：[按要求安装](root/install.md)后，参考[快速开始](root/getting-started.md)，按示例运行 `dnsb build config.yml`
 - **容器管理**：使用 `dnsb run`、`dnsb up`、`dnsb down` 等命令管理容器生命周期
