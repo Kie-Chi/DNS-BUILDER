@@ -110,7 +110,7 @@
 
 - `util_mode`：`host`（默认）或 `docker`。`host` 依次查找 `BIND_DNSSEC_KEYGEN`、`BIND_DNSSEC_SIGNZONE`、`BIND_DNSSEC_DSFROMKEY`、`BIND_DNSSEC_CHECKZONE`、PATH 和常见路径；`docker` 默认使用仓库内置的 DNSSEC 工具 Dockerfile 构建临时工具镜像。
 - `util_image`：可选，覆盖 `docker` 模式的默认工具镜像，例如 `bind:9.18.4`。设置后 DNSBuilder 只检查该镜像是否已在本地，不会替用户拉取或构建它。
-- 默认工具镜像名为 `dnsbuilder/dnssec-tools:9.18.4`，Dockerfile 位于 `src/dnsbuilder/resources/images/dnssec_tools/Dockerfile`，基于明确的 `docker.1ms.run/library/debian:12.11-slim` 安装 `bind9-utils`。默认镜像缺失时，DNSBuilder 会用该本地 Dockerfile 执行 `docker build --pull=false`。
+- 默认工具镜像名为 `dnsbuilder/dnssec-tools:9.18.4`，Dockerfile 位于 `src/dnsbuilder/resources/images/dnssec_tools/Dockerfile`，基于明确的 `docker.1ms.run/library/debian:12.11-slim` 安装 `bind9-utils`。默认镜像缺失时，DNSBuilder 会用该本地 Dockerfile 构建；Docker 只会按 Dockerfile 中声明的基础镜像地址使用本地缓存或获取基础镜像。
 - `util_auto_install`：默认 `false`；设置为 `true` 才允许按操作系统尝试安装 BIND 工具包。环境变量 `DNSSEC_AUTO_INSTALL=1` 也可显式开启。
 
 工具只用于构建期签名，不会成为 PowerDNS、BIND 或 Unbound 运行时的必要依赖。

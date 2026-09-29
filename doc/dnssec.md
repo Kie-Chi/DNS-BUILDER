@@ -2,7 +2,7 @@
 
 DNSBuilder 的 DNSSEC 链路使用 BIND DNSSEC 工具生成预签名 zonefile，并在构建阶段建立 DS 信任链。工具依赖与运行时 DNS 服务分开处理。
 
-默认 `util_mode: host`，按 `BIND_DNSSEC_*` 环境变量、PATH 和常见系统路径查找 `dnssec-signzone`、`dnssec-keygen` 等工具；`util_auto_install: true` 才会根据宿主机尝试安装 `bind9-utils`/`bind-utils`/`bind-tools` 或 macOS Homebrew `bind`。设置 `util_mode: docker` 时，DNSBuilder 默认使用仓库内置的 `src/dnsbuilder/resources/images/dnssec_tools/Dockerfile` 构建 `dnsbuilder/dnssec-tools:9.18.4`，然后在临时容器中运行工具；设置 `util_image` 可以覆盖默认镜像。工具镜像构建使用 `--pull=false`，不会自动从未知 registry 拉取，也不会把工具安装到最终服务镜像。
+默认 `util_mode: host`，按 `BIND_DNSSEC_*` 环境变量、PATH 和常见系统路径查找 `dnssec-signzone`、`dnssec-keygen` 等工具；`util_auto_install: true` 才会根据宿主机尝试安装 `bind9-utils`/`bind-utils`/`bind-tools` 或 macOS Homebrew `bind`。设置 `util_mode: docker` 时，DNSBuilder 默认使用仓库内置的 `src/dnsbuilder/resources/images/dnssec_tools/Dockerfile` 构建 `dnsbuilder/dnssec-tools:9.18.4`，然后在临时容器中运行工具；设置 `util_image` 可以覆盖默认镜像。默认 Dockerfile 的基础镜像地址固定为 `docker.1ms.run/library/debian:12.11-slim`，Docker 只会使用本地缓存或获取这个明确地址的基础镜像，不会拉取未知 registry 的内容，也不会把工具安装到最终服务镜像。
 
 PowerDNS Authoritative 使用预签名 zonefile 时还需要 BIND DNSSEC metadata DB。DNSBuilder 使用 Python 标准库 `sqlite3` 生成该数据库，因此 `pdnsutil` 不是必要依赖。
 

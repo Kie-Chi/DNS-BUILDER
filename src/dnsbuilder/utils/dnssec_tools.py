@@ -300,7 +300,6 @@ class DockerDnssecToolRunner(DnssecToolRunner):
         self._docker(
             [
                 "build",
-                "--pull=false",
                 "-f",
                 str(dockerfile),
                 "-t",

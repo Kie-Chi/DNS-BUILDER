@@ -110,4 +110,4 @@ util_mode: docker
 util_image: my-registry.example/bind-tools:9.18.4
 ```
 
-自定义 `util_image` 必须预先在本地存在；DNSBuilder 不会自动拉取或构建覆盖镜像。默认工具镜像只会从仓库内置 Dockerfile 执行 `docker build --pull=false`，因此缺少基础镜像时会明确失败并提示准备镜像。
+自定义 `util_image` 必须预先在本地存在；DNSBuilder 不会自动拉取或构建覆盖镜像。默认工具镜像从仓库内置 Dockerfile 构建；该 Dockerfile 只声明 `docker.1ms.run/library/debian:12.11-slim` 作为基础镜像，Docker 会优先使用本地缓存，缺失时获取这个明确地址的镜像。
