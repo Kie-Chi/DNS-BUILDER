@@ -1,0 +1,4 @@
+interface:
+  display_name: "DNS-BUILDER"
+  short_description: "通过动态拓扑、委派、DNSSEC 和报文观测构建 DNS 漏洞复现环境"
+  default_prompt: "使用 $dns-builder 根据论文、PoC 或实验需求配置 DNS 角色与拓扑，组合服务生成、委派、动态端点和 DNSSEC hooks，构建环境并执行查询、抓包与结果验证。"

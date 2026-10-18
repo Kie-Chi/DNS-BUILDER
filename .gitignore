@@ -37,6 +37,7 @@ db.*
 # Keep the reviewed DNSSEC/PowerDNS example source visible while ignoring generated output.
 !examples/
 !examples/bugs/
+!examples/bugs/**
 !examples/bugs/dnssec-fault/
 !examples/bugs/dnssec-fault/*.yml
 !examples/bugs/dnssec-fault/*.md
@@ -44,3 +45,10 @@ db.*
 !examples/bugs/dnssec-fault/resource/
 !examples/bugs/dnssec-fault/resource/nginx/
 !examples/bugs/dnssec-fault/resource/nginx/*.conf
+
+# Keep the repository skill source and its executable helpers versioned.
+!skills/
+!skills/**
+skills/**/__pycache__/
+skills/**/*.pyc
+evaluation-runs/

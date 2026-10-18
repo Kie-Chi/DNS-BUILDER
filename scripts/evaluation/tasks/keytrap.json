@@ -1,0 +1,69 @@
+{
+  "task_id": "keytrap",
+  "title": "KeyTrap DNSSEC validation CPU-exhaustion environment",
+  "paper": "evaluation-inputs/keytrap.pdf",
+  "paper_needles": [
+    "KeyTrap",
+    "DNSSEC",
+    "DNSKEY",
+    "RRSIG",
+    "Unbound",
+    "validation"
+  ],
+  "instructions": "仅根据 KeyTrap 论文 PDF 复现其中描述的 DNSSEC 环境，生成一个自包含、隔离、可启动和可验证的项目。自行识别 validating resolver、权威委派、DNSKEY/RRSIG payload、触发查询和预期的验证开销/失败行为；所有文件必须随交付项目保存。",
+  "reference_files": [
+    "doc/config/index.md",
+    "doc/config/builds.md",
+    "doc/config/auto.md",
+    "doc/dnssec.md"
+  ],
+  "source_project": "scripts/evaluation/fixtures/keytrap",
+  "fixture_config_path": "main.yml",
+  "fixture_expected": {
+    "project_name": "keytrap",
+    "min_services": 7,
+    "required_services": [
+      "client",
+      "resolver",
+      "sld"
+    ],
+    "config_assertions": [
+      {
+        "service_glob": "resolver",
+        "path": "contents/unbound_recursor_base.conf",
+        "contains": [
+          "trust-anchor-file"
+        ]
+      },
+      {
+        "service_glob": "sld",
+        "path": "contents/db.example.com",
+        "contains": [
+          "DNSKEY",
+          "RRSIG"
+        ]
+      }
+    ]
+  },
+  "fixture_runtime": {
+    "checks": [
+      {
+        "name": "keytrap-query",
+        "service": "client",
+        "command": [
+          "python3",
+          "/usr/local/etc/query.py"
+        ]
+      }
+    ]
+  },
+  "human_review": {
+    "criteria": [
+      "真实 validating resolver 的版本、算法支持、validation 开关和隔离信任链来自本次论文或有依据的偏差说明",
+      "DNSKEY/RRSIG 关系、载荷生成方式和查询参数由本次证据推导，不以普通无签名 mock 或旧 fixture 字节替代",
+      "保留正常 DNSSEC 验证对照、正式触发及真实处理开销/资源观察；普通 SERVFAIL、timeout 或人为 sleep 不足以证明机制",
+      "所有源码、构建输入和验证入口自包含，不依赖公开 DNS、隐藏镜像或旧 episode；私钥按任务要求处理",
+      "模型实际执行有界验证与 cleanup，并保存原始命令、日志、指标和独立重跑结果"
+    ]
+  }
+}

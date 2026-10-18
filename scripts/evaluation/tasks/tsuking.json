@@ -1,0 +1,78 @@
+{
+  "task_id": "tsuking",
+  "title": "TsuKing chained DNS resolver amplification environment",
+  "paper": "dnsbuilder.pdf",
+  "instructions": "仅根据论文 PDF 复现其中描述的 DNS 环境，生成一个自包含、隔离、可实际启动和验证的交付项目。请自行从论文识别节点角色、拓扑关系、软件与版本、配置、触发步骤和预期行为；自行选择实现工具、镜像、配置格式和验证方法。不要依赖未提供的仓库文件、预置素材、公开 DNS 或未记录的外部服务，并把所需文件全部放入交付目录。",
+  "reference_files": [
+    "doc/config/index.md",
+    "doc/config/builds.md",
+    "doc/rule/behavior-dsl.md",
+    "doc/config/auto.md"
+  ],
+  "source_project": "scripts/evaluation/fixtures/tsuking",
+  "fixture_config_path": "main.yml",
+  "fixture_expected": {
+    "project_name": "tsuking-chain",
+    "min_services": 35,
+    "required_services": [
+      "auth",
+      "victim",
+      "traffic"
+    ],
+    "prefix_counts": {
+      "fl-": 16,
+      "rl-": 16
+    },
+    "config_assertions": [
+      {
+        "service_glob": "fl-*",
+        "path": "contents/generated_zones.conf",
+        "contains": [
+          "forward-zone:",
+          "name: \".\"",
+          "forward-addr:"
+        ]
+      },
+      {
+        "service_glob": "rl-*",
+        "path": "contents/generated_zones.conf",
+        "contains": [
+          "stub-zone:",
+          "name: \"example.com\"",
+          "stub-addr:"
+        ]
+      }
+    ]
+  },
+  "fixture_runtime": {
+    "checks": [
+      {
+        "name": "authoritative-referral",
+        "service": "auth",
+        "command": [
+          "python3",
+          "-c",
+          "from dnslib import DNSRecord; import json; q=DNSRecord.question('x.example.com','A'); wire=q.send('auth',53,timeout=3); r=DNSRecord.parse(wire); metric={'query_bytes':len(q.pack()),'response_bytes':len(wire),'amplification_factor':round(len(wire)/len(q.pack()),3),'answer_count':len(r.rr),'authority_count':len(r.auth),'additional_count':len(r.ar),'rcode':r.header.rcode}; print(json.dumps(metric,sort_keys=True)); assert r.header.rcode == 0 and len(r.rr) == 0 and len(r.auth) >= 1 and len(r.ar) >= len(r.auth), r"
+        ]
+      },
+      {
+        "name": "resolver-chain",
+        "service": "fl-0",
+        "command": [
+          "sh",
+          "-c",
+          "set +e; output=$(dig +time=2 +tries=1 @127.0.0.1 x.example.com A 2>&1); code=$?; printf '%s\\n' \"$output\"; printf '%s\\n' \"$output\" | grep -Eq 'status: SERVFAIL|communications error|no servers could be reached'"
+        ]
+      }
+    ]
+  },
+  "human_review": {
+    "criteria": [
+      "论文中的节点角色、软件版本、下一跳、查询与响应关系可追溯本次证据，不要求旧 fixture 的固定服务名或路径",
+      "链路由真实解析器及允许的受控端点执行，而不是普通 A mock 或自写 resolver 替代被研究软件",
+      "真实 resolver 路径、查询/字节放大与正常对照可观察；单个权威响应比率或最终 SERVFAIL/timeout 不足以证明链式机制",
+      "项目和依赖自包含，可从记录的干净环境构建/运行，不依赖 DNS-BUILDER checkout、隐藏材料、公共 DNS 或旧镜像",
+      "模型实际执行准备、启动、触发、断言、cleanup 并保存日志和独立重跑证据，人工审核不替代模型执行"
+    ]
+  }
+}

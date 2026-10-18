@@ -43,6 +43,7 @@ nav:
     - 安装与运行: root/install.md
     - 快速开始: root/getting-started.md
   - CLI 命令参考: cli.md
+  - LLM → 可复现环境评估: evaluation.md
   - 配置参考:
     - 概览: config/index.md
     - 配置处理流程: config/processing-pipeline.md

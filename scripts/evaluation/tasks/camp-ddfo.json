@@ -1,0 +1,83 @@
+{
+  "task_id": "camp-ddfo",
+  "title": "CAMP deep-delegation and fan-out DNS amplification environment",
+  "paper": "evaluation-inputs/camp.pdf",
+  "paper_needles": [
+    "CAMP",
+    "deep delegation",
+    "fan-out",
+    "resolver",
+    "amplification"
+  ],
+  "instructions": "仅根据论文 PDF 复现 CAMP DD-FO 变体，生成一个自包含、隔离、可实际启动和验证的 DNS 环境。自行识别节点角色、委派链、触发查询、软件版本和预期放大/失败行为；将所有文件放入交付目录并提供端到端验证脚本。",
+  "reference_files": [
+    "doc/config/index.md",
+    "doc/config/builds.md",
+    "doc/rule/behavior-dsl.md",
+    "doc/config/auto.md"
+  ],
+  "source_project": "scripts/evaluation/fixtures/camp-ddfo",
+  "fixture_config_path": "main.yml",
+  "fixture_expected": {
+    "project_name": "camp-dd-fo",
+    "min_services": 18,
+    "required_services": [
+      "primary",
+      "secondary",
+      "unbound",
+      "aux-0",
+      "aux-9"
+    ],
+    "prefix_counts": {
+      "aux-": 10
+    },
+    "config_assertions": [
+      {
+        "service_glob": "primary",
+        "path": "contents/db.example.com",
+        "contains": [
+          "trigger",
+          "CNAME",
+          "l10.l9.l8.l7.l6.l5.l4.l3.l2.l1.l0.example.com"
+        ]
+      },
+      {
+        "service_glob": "aux-0",
+        "path": "contents/db.l0.example.com",
+        "contains": [
+          "NS",
+          "fan-0-0.attacker.com"
+        ]
+      },
+      {
+        "service_glob": "aux-9",
+        "path": "contents/db.l9.l8.l7.l6.l5.l4.l3.l2.l1.l0.example.com",
+        "contains": [
+          "NS",
+          "fan-9-0.attacker.com"
+        ]
+      }
+    ]
+  },
+  "fixture_runtime": {
+    "checks": [
+      {
+        "name": "camp-trigger",
+        "service": "client",
+        "command": [
+          "python3",
+          "/usr/local/dump/poc_trigger.py"
+        ]
+      }
+    ]
+  },
+  "human_review": {
+    "criteria": [
+      "角色、软件版本、委派关系和参数可追溯本次论文；等价实现不要求旧 fixture 的命名、目录或触发脚本",
+      "论文定义的委派与名称依赖由真实权威/递归器执行，而不是普通 CNAME mock 或人为 sleep",
+      "真实查询路径、额外 resolver 查询/字节和正常对照可观察；单次 SERVFAIL/通信错误/timeout 不足以证明放大",
+      "源码、镜像依赖和验证入口自包含，可以在记录的干净环境部署，且流量不依赖公开 DNS 或隐藏材料",
+      "模型执行了完整有界验证和 cleanup，并留下命令、报文/日志和独立重跑证据"
+    ]
+  }
+}

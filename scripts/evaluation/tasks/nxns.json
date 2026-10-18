@@ -1,0 +1,68 @@
+{
+  "task_id": "nxns",
+  "title": "NXNS DNS resolver query-amplification environment",
+  "paper": "evaluation-inputs/nxns.pdf",
+  "paper_needles": [
+    "NXNS",
+    "amplification",
+    "recursive resolver",
+    "NS",
+    "authoritative"
+  ],
+  "instructions": "仅根据 NXNSAttack 论文 PDF 复现其中描述的 DNS 环境，生成一个自包含、隔离、可启动和可验证的项目。自行识别恶意权威、递归 resolver、触发查询、NS fan-out 和预期 resolver 行为；将所有源码和验证脚本放入交付目录。",
+  "reference_files": [
+    "doc/config/index.md",
+    "doc/config/builds.md",
+    "doc/rule/behavior-dsl.md"
+  ],
+  "source_project": "scripts/evaluation/fixtures/nxns",
+  "fixture_config_path": "main.yml",
+  "fixture_expected": {
+    "project_name": "nxns",
+    "min_services": 3,
+    "required_services": [
+      "attacker",
+      "resolver",
+      "auth"
+    ],
+    "config_assertions": [
+      {
+        "service_glob": "resolver",
+        "path": "contents/generated_zones.conf",
+        "contains": [
+          "stub-zone",
+          "example.com"
+        ]
+      },
+      {
+        "service_glob": "auth",
+        "path": "contents/nxns-server.py",
+        "contains": [
+          "add_auth",
+          "100"
+        ]
+      }
+    ]
+  },
+  "fixture_runtime": {
+    "checks": [
+      {
+        "name": "nxns-trigger",
+        "service": "attacker",
+        "command": [
+          "python3",
+          "/usr/local/bin/trigger.py"
+        ]
+      }
+    ]
+  },
+  "human_review": {
+    "criteria": [
+      "角色、软件版本和配置决定可追溯本次论文；不要求沿用旧 fixture 的服务名、源码关键词或文件路径",
+      "真实递归器处理论文定义的 NS referral 与名称解析流程，不以普通 A 响应或自写 resolver mock 替代",
+      "放大证据来自真实 resolver 的额外查询数或字节，并保留正常对照与一致缓存前提；单个权威报文比例或 timeout 不足以通过",
+      "源码、镜像依赖与验证入口自包含，可以按记录从干净环境部署；不依赖隐藏项目镜像、公开 DNS 或未记录外部服务",
+      "模型实际执行了准备、启动、正式触发、断言和 cleanup，保留原始日志/命令及独立重跑结果"
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+name: basic
+inet: 10.88.0.0/24
+
+include: resource:/includes/std-auth.yml
+
+images:
+  bind:
+    ref: bind:9.18.4
+  unbound:
+    ref: unbound:1.19.0
+  client:
+    ref: python:3.12.0
+
+builds:
+  resolver:
+    image: unbound
+    ref: std:recursor
+    behavior: . hint root
+
+  root:
+    image: bind
+    ref: std:auth
+    behavior: . master com NS tld
+
+  tld:
+    image: bind
+    ref: std:auth
+    behavior: com master example NS auth
+
+  auth:
+    image: bind
+    ref: std:auth
+    behavior: example.com master www A 1.2.3.4
+
+  client:
+    image: client
+    command: tail -f /dev/null
