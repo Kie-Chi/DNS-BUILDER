@@ -30,6 +30,7 @@ builds:
 - `util_mode: host`：使用宿主 BIND 工具，按 `BIND_DNSSEC_*`、PATH 和常见目录查找。
 - `util_mode: docker`：使用独立的工具容器；默认工具镜像由内置 Dockerfile 构建。设置 `util_image` 时，预先在本地准备该镜像。
 - 工具安装由 `util_auto_install` 或 `DNSSEC_AUTO_INSTALL` 控制。记录 `dnssec-signzone -V` 与运行时权威软件的版本，分别管理构建与服务依赖。
+- `util_mode` 控制框架的工具 runner；项目在 setup 中直接调用的 subprocess 仍在宿主执行。为这些脚本单独准备工具/Python 依赖，或显式调用选定的工具容器，并检查输出文件。
 - `BIND_DNSSEC_KEYGEN`、`BIND_DNSSEC_SIGNZONE`、`BIND_DNSSEC_DSFROMKEY`、`BIND_DNSSEC_CHECKZONE` 可指定可执行文件。Docker 模式下，指定容器内路径。
 
 <a id="signing-order"></a>
@@ -144,7 +145,7 @@ dnssec-verify -o example.com. run/example.com.signed
 
 <a id="keytrap-records"></a>
 
-## 5. 配置 KeyTrap 类 DNSSEC 校验输入
+## 5. 配置 DNSSEC 候选记录与校验输入
 
 将输入分为签名密钥、附加 DNSKEY、目标 RRSIG 和父区 DS 四组，分别控制生成数量与注入阶段：
 
@@ -164,6 +165,52 @@ dnssec-verify -o example.com. run/example.com.signed
 DS 密集变体通过父区的有效 `RRSIG(DS)` 将候选集送入后续匹配。若 mid 修改的区自身也会被重签，处理其 `.ds` 再生成顺序；需要直接控制最终父区内容时，在父区 unsigned 上准备记录并重签。需要旧签名失配时，使用父区 post。
 
 对正常输入与修改后输入使用相同的 resolver 版本、缓存准备和查询条件。记录解析器 CPU 时间、响应延迟、DNSKEY/RRSIG 数量和验证日志；使用 TCP 查询检查完整的大 RRset，再测试 UDP、TC 和 TCP 回退。
+
+<a id="signature-links"></a>
+
+### 检查候选记录与目标签名的关联
+
+先选择目标 owner/type covered，再从最终区文件统计候选关系。以下函数用于普通数据、DNSKEY 或父区 DS 的结构检查；`now` 使用 UTC Unix 秒，时间窗口按 DNSSEC 32 位序号计算：
+
+```python
+from collections import Counter
+import dns.dnssec
+import dns.rdatatype
+
+
+def inspect_signature_links(parsed, owner, covered, now):
+    kind = dns.rdatatype.from_text(covered)
+    records = parsed.get_rdataset(owner, kind)
+    keys = parsed.get_rdataset(parsed.origin, 'DNSKEY')
+    signatures = parsed.get_rdataset(owner, 'RRSIG', kind)
+    if records is None or keys is None or signatures is None:
+        raise ValueError('Missing data, DNSKEY, or covering RRSIG')
+    groups = Counter(
+        (key.algorithm, dns.dnssec.key_id(key))
+        for key in keys if key.protocol == 3 and key.flags & 256
+    )
+    rows = []
+    for signature in signatures:
+        lifetime = (signature.expiration - signature.inception) & 0xffffffff
+        age = (int(now) - signature.inception) & 0xffffffff
+        rows.append({
+            'algorithm': int(signature.algorithm),
+            'key_tag': signature.key_tag,
+            'candidate_keys': groups[(signature.algorithm, signature.key_tag)],
+            'signer_matches': signature.signer.derelativize(parsed.origin).canonicalize() == parsed.origin.canonicalize(),
+            'current_window': age <= lifetime < 0x80000000,
+            'labels': signature.labels,
+            'original_ttl': signature.original_ttl,
+            'observed_ttl': records.ttl,
+        })
+    return rows
+```
+
+- 正常与候选匹配实验检查 signer、时间窗口和预期候选数；专门构造失配时，记录预期改变的字段以及实际失败位置。
+- 生成候选材料时固定 flags/protocol/algorithm，再按实际 key tag 分组；同组记录使用不同 RDATA。保留签名密钥、公钥候选和签名材料各自的来源与参数。
+- 按 owner 解释 labels，通配符签名单独核对其展开规则；对比 original TTL 与实际 TTL，区分正常 TTL 递减和改变签名数据。
+- 结构检查、加密校验与运行开销分别记录。使用真实工具验证正常签名及 DNSKEY 信任链；公钥格式、算法支持和签名字节的有效性由实际 signer/validator 检查。
+- 按 `正常输入 → 改一类 RRset → 改第二类 RRset → 组合` 对照，分别改变密钥候选、签名候选或 DS 候选数。先核对传输成功和目标 RRset 被查询，再测 CPU、延迟和缓存。
 
 ## 6. 检查自动建链与跨软件配置
 

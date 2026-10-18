@@ -15,6 +15,18 @@
 
 每个 DNSSEC hook 接收当前服务 `config`、`zone`、`service_name`、`fs` 和 `workdir`；mid/post 还接收 `zone_graph`。同一服务管理多个 zone 时，使用 origin 条件限定修改对象。
 
+### 为记录材料填写输入与预期
+
+| 材料 | 输入检查 | 发布后的检查 |
+| --- | --- | --- |
+| DNSKEY | 显式 apex FQDN、TTL、flags/protocol/algorithm、公钥编码、去重后的数量 | 与实际签名公钥取并集后的数量、候选分组、RRSIG(DNSKEY) |
+| RRSIG | owner/type covered、signer、tag/algorithm、labels、original TTL、有效期 | 目标 RRset 与覆盖签名关联，明确保留、追加或替换哪些签名 |
+| DS | 子区 owner、tag/algorithm、digest type/内容、数量 | 父区实际发布集合与 RRSIG(DS)，以及更上一层的 DS |
+
+片段中的材料文件使用完整 FQDN；先以根 origin 解析，再检查唯一的目标 RRset，使混入其他区的记录也进入输入检查。最终整区文件仍按实际 zone origin 解析。
+
+在项目参数中定义预期字段和数量，依次比较生成材料、hook 输入、最终挂载文件及实际报文。用 [记录关联检查](dnssec.md#signature-links) 定位不匹配字段，再用正常签名验证与运行查询定位失败阶段。
+
 ## 2. pre：添加随后签名的记录
 
 在拥有 example.com 的 `auth` 服务追加 TXT：
@@ -55,9 +67,9 @@ builds:
             from dnsbuilder.io import DNSBPath
             source = workdir / 'resource' / 'records' / f'{zone.label}.ds'
             text = fs.read_text(source)
-            parsed = dns.zone.from_text(text, origin=zone.fqdn, check_origin=False)
-            if parsed.get_rdataset('@', dns.rdatatype.DS) is None:
-              raise ValueError('No DS at the expected child apex')
+            parsed = dns.zone.from_text(text, origin='.', relativize=False, check_origin=False)
+            if parsed.get_rdataset(zone.fqdn, dns.rdatatype.DS) is None or len(list(parsed.iterate_rdatasets())) != 1:
+              raise ValueError('Expected one DS RRset at the expected child apex')
             destination = DNSBPath(f'key:/{service_name}/{zone.label}.ds')
             fs.write_text(destination, text)
 ```
@@ -165,14 +177,15 @@ builds:
             import dns.zone
             from dnsbuilder.io import DNSBPath
             source = workdir / 'resource' / 'records' / 'additional-dnskeys.rr'
-            extra = dns.zone.from_text(fs.read_text(source), origin=zone.fqdn, relativize=False, check_origin=False)
+            import dns.name
+            extra = dns.zone.from_text(fs.read_text(source), origin='.', relativize=False, check_origin=False)
             keys = extra.get_rdataset(zone.fqdn, dns.rdatatype.DNSKEY)
             if keys is None or len(list(extra.iterate_rdatasets())) != 1:
               raise ValueError('Expected one apex DNSKEY RRset')
             if any(key.protocol != 3 for key in keys):
               raise ValueError('Expected DNSKEY protocol 3')
             path = DNSBPath(f'temp:/services/{service_name}/zones/{zone.filename}.unsigned')
-            fs.write_text(path, fs.read_text(path) + '\n' + keys.to_text(name=extra.origin, relativize=False) + '\n')
+            fs.write_text(path, fs.read_text(path) + '\n' + keys.to_text(name=dns.name.from_text(zone.fqdn), relativize=False) + '\n')
 ```
 
 签名后查询 apex DNSKEY，比较实际候选集合与输入，并检查 `RRSIG(DNSKEY)`。使用 `dns.dnssec.key_id` 分组统计 tag/algorithm；DNSKEY 与目标 RRSIG 的对应关系见 [dnssec.md](dnssec.md#keytrap-records)。
@@ -200,7 +213,7 @@ builds:
             owner = config['vars']['signature_owner']
             covered = dns.rdatatype.from_text(config['vars']['covered_type'])
             source = workdir / 'resource' / 'records' / 'target-signatures.rr'
-            extra = dns.zone.from_text(fs.read_text(source), origin=zone.fqdn, relativize=False, check_origin=False)
+            extra = dns.zone.from_text(fs.read_text(source), origin='.', relativize=False, check_origin=False)
             signatures = extra.get_rdataset(owner, dns.rdatatype.RRSIG, covered)
             if signatures is None or len(list(extra.iterate_rdatasets())) != 1:
               raise ValueError('Expected one covering RRSIG RRset at the selected owner')

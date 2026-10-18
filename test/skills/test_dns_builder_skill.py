@@ -7,11 +7,21 @@ import json
 import os
 import re
 import shutil
+import socketserver
 import sqlite3
+import struct
 import subprocess
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import dns.dnssec
+import dns.flags
+import dns.message
+import dns.name
+import dns.query
+import dns.rdata
 import dns.rdatatype
 import dns.zone
 import pytest
@@ -31,6 +41,16 @@ SKILL_ROOT = REPO_ROOT / "skills/dns-builder"
 def yaml_blocks(name: str) -> list[dict]:
     text = (SKILL_ROOT / "references" / name).read_text()
     return [yaml.safe_load(block) for block in re.findall(r"```yaml\n(.*?)\n```", text, flags=re.S)]
+
+
+def python_function(document: str, name: str):
+    source = (SKILL_ROOT / "references" / document).read_text()
+    blocks = re.findall(r"```python\n(.*?)\n```", source, flags=re.S)
+    matches = [block for block in blocks if re.search(rf"^def {re.escape(name)}\(", block, flags=re.M)]
+    assert len(matches) == 1, (document, name)
+    namespace = {}
+    exec(compile(matches[0], document, "exec"), namespace)
+    return namespace[name]
 
 
 def mounted_text(output: Path, service: str, destination: str) -> str:
@@ -375,6 +395,7 @@ def test_source_routes_use_allocated_ips_as_keys_and_values(tmp_path: Path) -> N
         "behavior": "example.net master www A 192.0.2.20",
     }
     data["vars"]["endpoint_routes"] = {"resolver": ["auth", "secondary"], "secondary": ["auth"]}
+    data["vars"]["route_sources"] = ["resolver", "secondary"]
     output, context = build_config(tmp_path, data)
     raw = mounted_text(output, "endpoint", "/usr/local/etc/routes.json")
     assert "${" not in raw
@@ -390,6 +411,7 @@ def test_source_routes_use_allocated_ips_as_keys_and_values(tmp_path: Path) -> N
 def test_source_routes_require_existing_services(tmp_path: Path, routes: dict) -> None:
     data = deep_merge(yaml_blocks("configuration.md")[0], yaml_blocks("topology.md")[5])
     data["vars"]["endpoint_routes"] = routes
+    data["vars"]["route_sources"] = list(routes)
     with pytest.raises(ValueError, match="unavailable service"):
         build_config(tmp_path, data)
 
@@ -404,6 +426,14 @@ def test_explicit_ns_fanout_preserves_names_without_automatic_glue(tmp_path: Pat
     assert {rr.target.to_text() for rr in zone.get_rdataset("child.example.com.", "NS")} == set(names)
     for name in names:
         assert text.count(name) == 1
+
+
+@pytest.mark.parametrize("names", [["ns.example.net.", "NS.EXAMPLE.NET."], ["relative"]])
+def test_static_fanout_checks_dns_name_identity(tmp_path: Path, names: list) -> None:
+    data = deep_merge(yaml_blocks("configuration.md")[0], yaml_blocks("topology.md")[6])
+    data["vars"] = {"delegation": {"parent_zone": "example.com", "child_label": "child", "ns_names": names}}
+    with pytest.raises(ValueError, match="distinct absolute NS names"):
+        build_config(tmp_path, data)
 
 
 def add_signed_child(data: dict) -> None:
@@ -592,6 +622,8 @@ def test_documented_signing_commands_and_hooks_with_real_bind_tools(tmp_path: Pa
     signed_path = output / "auth/contents/db.example.com"
     original = dns.zone.from_text(signed_path.read_text(), origin="example.com.")
     assert set(original.get_rdataset("@", "DNSKEY")) == expected_keys | set(extra_keys)
+    inventory = python_function("dnssec.md", "inspect_signature_links")(original, "www", "A", time.time())
+    assert inventory and all(row["candidate_keys"] > 0 and row["signer_matches"] and row["current_window"] for row in inventory)
     parent = dns.zone.from_text((output / "tld/contents/db.com").read_text(), origin="com.")
     expected_ds = dns.zone.from_text("$TTL 300\n" + (keys_dir / "example.com.ds").read_text(), origin="example.com.", check_origin=False)
     assert set(expected_ds.get_rdataset("@", "DS")) <= set(parent.get_rdataset("example", "DS"))
@@ -616,3 +648,316 @@ def test_documented_signing_commands_and_hooks_with_real_bind_tools(tmp_path: Pa
     zone = dns.zone.from_text(mutated.read_text(), origin="example.com.")
     assert {rr.address for rr in zone.get_rdataset("www", "A")} == {"192.0.2.20"}
     assert zone.get_rdataset("www", "RRSIG", "A") is not None
+
+
+@pytest.mark.parametrize("network, reverse", [("10.92.0.0/24", False), ("10.93.0.0/24", True)])
+def test_route_compilation_survives_renaming_reordering_and_network_changes(tmp_path: Path, network: str, reverse: bool) -> None:
+    data = deep_merge(yaml_blocks("configuration.md")[0], yaml_blocks("topology.md")[5])
+    data["inet"] = network
+    builds = data["builds"]
+    builds["authority"] = builds.pop("auth")
+    builds["recursive"] = builds.pop("resolver")
+    builds["recursive"]["behavior"] = "example.com stub authority"
+    builds["peer"] = copy.deepcopy(builds["recursive"])
+    builds["client"]["environment"]["RESOLVER"] = "${srv.recursive.ip}"
+    data["vars"]["route_sources"] = ["recursive", "peer"]
+    data["vars"]["endpoint_routes"] = {"peer": ["authority"], "recursive": ["authority"]}
+    if reverse:
+        data["builds"] = dict(reversed(list(builds.items())))
+    output, context = build_config(tmp_path, data)
+    routes = json.loads(mounted_text(output, "endpoint", "/usr/local/etc/routes.json"))
+    assert routes == {context.service_ips[name]: [context.service_ips["authority"]] for name in ("recursive", "peer")}
+    assert all(address.startswith(network.rsplit(".", 1)[0] + ".") for address in routes)
+    config = (output / "recursive/contents/generated_zones.conf").read_text()
+    assert f"stub-addr: {context.service_ips['authority']}" in config
+
+
+@pytest.mark.parametrize("sources, routes", [
+    (["resolver", "auth"], {"resolver": ["auth"]}),
+    (["resolver"], {"resolver": ["auth"], "auth": ["resolver"]}),
+    (["resolver", "resolver"], {"resolver": ["auth"]}),
+])
+def test_route_source_coverage_is_checked_independently(tmp_path: Path, sources: list, routes: dict) -> None:
+    data = deep_merge(yaml_blocks("configuration.md")[0], yaml_blocks("topology.md")[5])
+    data["vars"].update(route_sources=sources, endpoint_routes=routes)
+    with pytest.raises(ValueError, match="coverage mismatch"):
+        build_config(tmp_path, data)
+
+
+@pytest.mark.parametrize("targets", [[], "auth", ["auth", "auth"]])
+def test_route_target_lists_are_explicit_and_distinct(tmp_path: Path, targets) -> None:
+    data = deep_merge(yaml_blocks("configuration.md")[0], yaml_blocks("topology.md")[5])
+    data["vars"]["endpoint_routes"]["resolver"] = targets
+    with pytest.raises(ValueError, match="distinct route targets"):
+        build_config(tmp_path, data)
+
+
+def flow_plan():
+    roles = {"entry": "relay", "left": "resolver", "right": "resolver", "sink": "terminal"}
+    edges = {"entry": ["left", "right"], "left": ["sink"], "right": ["sink"]}
+    steps = [["relay", "resolver"], ["resolver", "terminal"], ["resolver", "relay"]]
+    return roles, edges, steps
+
+
+def test_generic_role_flow_accepts_a_branching_dag() -> None:
+    roles, edges, steps = flow_plan()
+    check = python_function("topology.md", "check_acyclic_flow")
+    assert check(roles, edges, "entry", ["sink"], steps) == sorted(roles)
+    renamed = {name: f"renamed-{index}" for index, name in enumerate(reversed(roles))}
+    new_roles = {renamed[name]: role for name, role in roles.items()}
+    new_edges = {renamed[source]: [renamed[target] for target in targets] for source, targets in edges.items()}
+    assert check(new_roles, new_edges, renamed["entry"], [renamed["sink"]], steps) == sorted(new_roles)
+
+
+@pytest.mark.parametrize("case, message", [
+    ("missing", "Missing next hop"), ("unknown", "Invalid role transition"),
+    ("wrong-role", "Invalid role transition"), ("cycle", "Unexpected cycle"),
+    ("terminal", "Terminal has outgoing"), ("unreachable", "Unreachable nodes"),
+    ("duplicate", "Invalid target list"), ("unknown-source", "Invalid entry"),
+])
+def test_generic_role_flow_rejects_incomplete_or_misdirected_paths(case: str, message: str) -> None:
+    roles, edges, steps = flow_plan()
+    if case == "missing":
+        del edges["left"]
+    elif case == "unknown":
+        edges["left"] = ["absent"]
+    elif case == "wrong-role":
+        edges["entry"] = ["sink"]
+    elif case == "cycle":
+        edges["left"] = ["entry"]
+    elif case == "terminal":
+        edges["sink"] = ["entry"]
+    elif case == "unreachable":
+        roles["orphan"] = "relay"
+        edges["orphan"] = ["left"]
+    elif case == "duplicate":
+        edges["entry"] = ["left", "left"]
+    elif case == "unknown-source":
+        edges["absent"] = ["sink"]
+    with pytest.raises(ValueError, match=message):
+        python_function("topology.md", "check_acyclic_flow")(roles, edges, "entry", ["sink"], steps)
+
+
+@pytest.mark.parametrize("length, depth", [(2, 3), (3, 2), (1, 0)])
+def test_resolution_plan_keeps_label_depth_and_reference_count_independent(length: int, depth: int) -> None:
+    labels = [f"l{index}" for index in range(depth)]
+    names = [".".join([*labels, f"n{index}", "example.net."]) for index in range(length)]
+    required = [(name, kind) for name in names for kind in ("A", "AAAA")]
+    positive = [(name.upper(), "a") for name in names]
+    negative = [(name, "AAAA") for name in names]
+    check = python_function("topology.md", "check_resolution_plan")
+    check(required, positive, negative)
+    with pytest.raises(ValueError, match="Missing resolution paths"):
+        check(required, positive[:-1], negative)
+
+
+@pytest.mark.parametrize("required, positive, negative, message", [
+    ([("relative", "A")], [], [], "absolute owner"),
+    ([("host.example.", "A")], [("host.example.", "A")], [("HOST.example.", "a")], "Conflicting"),
+    ([("host.example.", "AAAA")], [("host.example.", "A")], [], "Missing resolution"),
+])
+def test_resolution_plan_distinguishes_types_and_explicit_negative_responses(required, positive, negative, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        python_function("topology.md", "check_resolution_plan")(required, positive, negative)
+
+
+def test_referral_fragment_preserves_query_and_declares_response_fields() -> None:
+    make_referral = python_function("runtime.md", "make_referral")
+    query = dns.message.make_query("www.child.example.", "AAAA", want_dnssec=True)
+    query.flags |= dns.flags.AD
+    targets = ["ns.child.example.", "ns.other.example."]
+    addresses = {targets[0]: ["192.0.2.10", "2001:db8::10"]}
+    reply = make_referral(query, "child.example.", targets, addresses, ttl=45)
+    decoded = dns.message.from_wire(reply.to_wire())
+    assert decoded.id == query.id and decoded.question == query.question
+    assert decoded.flags & dns.flags.RD
+    assert not decoded.flags & (dns.flags.AA | dns.flags.RA | dns.flags.AD)
+    assert decoded.rcode() == 0 and not decoded.answer
+    assert decoded.authority[0].name.to_text() == "child.example."
+    assert {record.target.to_text() for record in decoded.authority[0]} == set(targets)
+    assert {rrset.rdtype for rrset in decoded.additional} == {dns.rdatatype.A, dns.rdatatype.AAAA}
+    assert all(rrset.name.to_text() == targets[0] and rrset.ttl == 45 for rrset in decoded.additional)
+    assert not make_referral(query, "child.example.", targets, {}).additional
+
+
+@pytest.mark.parametrize("case, message", [
+    ("relative", "absolute cut"), ("empty", "nonempty NS"),
+    ("duplicate", "Duplicate NS"), ("owner", "Address owner"), ("cut", "outside the delegated"),
+])
+def test_referral_fragment_rejects_mismatched_names(case: str, message: str) -> None:
+    query = dns.message.make_query("www.child.example.", "A")
+    cut, targets, addresses = "child.example.", ["ns.child.example."], {}
+    if case == "relative":
+        targets = ["relative"]
+    elif case == "empty":
+        targets = []
+    elif case == "duplicate":
+        targets += ["NS.child.example."]
+    elif case == "owner":
+        addresses = {"other.child.example.": ["192.0.2.10"]}
+    elif case == "cut":
+        cut = "elsewhere.example."
+    with pytest.raises(ValueError, match=message):
+        python_function("runtime.md", "make_referral")(query, cut, targets, addresses)
+
+
+def test_referral_serialization_distinguishes_udp_truncation_from_complete_data() -> None:
+    query = dns.message.make_query("www.child.example.", "A")
+    targets = [f"ns-{index}.child.example." for index in range(40)]
+    reply = python_function("runtime.md", "make_referral")(query, "child.example.", targets, {})
+    complete = reply.to_wire(max_size=65535)
+    truncated = reply.to_wire(max_size=512, prefer_truncation=True)
+    assert len(complete) > 512 and len(truncated) <= 512
+    assert dns.message.from_wire(truncated).flags & dns.flags.TC
+    decoded = dns.message.from_wire(complete)
+    assert sum(len(rrset) for rrset in decoded.authority) == len(targets)
+
+
+@pytest.mark.parametrize("transport", ["udp", "tcp"])
+def test_referral_fragment_roundtrips_over_loopback_dns(transport: str) -> None:
+    make_referral = python_function("runtime.md", "make_referral")
+
+    def read_exact(connection, size):
+        result = bytearray()
+        while len(result) < size:
+            chunk = connection.recv(size - len(result))
+            if not chunk:
+                raise EOFError('Incomplete DNS frame')
+            result.extend(chunk)
+        return bytes(result)
+
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self):
+            if transport == "udp":
+                wire, connection = self.request
+            else:
+                connection = self.request
+                connection.settimeout(2)
+                size = struct.unpack("!H", read_exact(connection, 2))[0]
+                wire = read_exact(connection, size)
+            query = dns.message.from_wire(wire)
+            response = make_referral(query, "child.example.", ["ns.child.example."], {"ns.child.example.": ["192.0.2.10"]})
+            wire = response.to_wire()
+            if transport == "udp":
+                connection.sendto(wire, self.client_address)
+            else:
+                connection.sendall(struct.pack("!H", len(wire)) + wire)
+
+    server_type = socketserver.UDPServer if transport == "udp" else socketserver.TCPServer
+    with server_type(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        thread.start()
+        try:
+            query = dns.message.make_query("www.child.example.", "A")
+            query_function = dns.query.udp if transport == "udp" else dns.query.tcp
+            reply = query_function(query, "127.0.0.1", port=server.server_address[1], timeout=2)
+            assert reply.id == query.id and reply.question == query.question
+            assert reply.authority[0].name.to_text() == "child.example."
+            assert reply.additional[0][0].address == "192.0.2.10"
+        finally:
+            server.shutdown()
+            thread.join(timeout=3)
+            assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("block_index, filename, record, hook", [
+    (1, "example.com.ds", f"example.com. 300 IN DS 10001 13 2 {'ab' * 32}\n", "mid"),
+    (4, "additional-dnskeys.rr", "example.com. 300 IN DNSKEY 256 3 13 AQIDBA==\n", "pre"),
+    (5, "target-signatures.rr", "www.example.com. 300 IN RRSIG A 13 3 300 20300101000000 20200101000000 10002 example.com. AQIDBA==\n", "post"),
+])
+def test_record_import_checks_foreign_records_instead_of_filtering_them(tmp_path: Path, block_index: int, filename: str, record: str, hook: str) -> None:
+    from dnsbuilder.utils.zone import ZoneName
+
+    fs = create_app_fs(chroot=DNSBPath(tmp_path), cache_root=DNSBPath(tmp_path / ".dnsb_cache"))
+    source = tmp_path / "resource/records" / filename
+    source.parent.mkdir(parents=True)
+    source.write_text(record + "foreign.example.net. 300 IN A 192.0.2.44\n")
+    config = yaml_blocks("zone-mutation.md")[block_index]["builds"]["auth"]
+    with pytest.raises(ValueError, match="Expected one"):
+        exec(config["dnssec"]["hooks"][hook], {"zone": ZoneName("example.com"), "service_name": "auth", "fs": fs, "workdir": DNSBPath(tmp_path), "config": config})
+
+
+def signed_metadata_zone():
+    """Build metadata-only records; cryptographic validation is tested with BIND."""
+    key_text = "256 3 13 AQIDBA=="
+    key = dns.rdata.from_text("IN", "DNSKEY", key_text)
+    tag = dns.dnssec.key_id(key)
+    text = (
+        "$TTL 300\n"
+        "@ IN SOA ns.example.com. hostmaster.example.com. 1 3600 600 86400 300\n"
+        "@ IN NS ns.example.com.\n"
+        f"@ IN DNSKEY {key_text}\n@ IN DNSKEY {key_text}\n"
+        "www IN A 192.0.2.10\n"
+        f"www IN RRSIG A 13 3 300 20300101000000 20200101000000 {tag} example.com. AQIDBA==\n"
+        f"@ IN RRSIG DNSKEY 13 2 300 20300101000000 20200101000000 {tag} example.com. AQIDBA==\n"
+    )
+    return dns.zone.from_text(text, origin="example.com.", relativize=False)
+
+
+def test_signature_inventory_uses_distinct_keys_and_selected_covered_type() -> None:
+    parsed = signed_metadata_zone()
+    inventory = python_function("dnssec.md", "inspect_signature_links")(parsed, "www.example.com.", "A", 1767225600)
+    assert len(inventory) == 1
+    assert inventory[0]["candidate_keys"] == 1
+    assert inventory[0]["signer_matches"] and inventory[0]["current_window"]
+    assert inventory[0]["labels"] == 3
+    assert inventory[0]["original_ttl"] == inventory[0]["observed_ttl"] == 300
+    with pytest.raises(ValueError, match="Missing data"):
+        python_function("dnssec.md", "inspect_signature_links")(parsed, "www.example.com.", "AAAA", 1767225600)
+
+
+@pytest.mark.parametrize("changes, field, expected, now", [
+    ({"key_tag": 0}, "candidate_keys", 0, 1767225600),
+    ({"algorithm": 14}, "candidate_keys", 0, 1767225600),
+    ({"signer": dns.name.from_text("elsewhere.example.")}, "signer_matches", False, 1767225600),
+    ({"expiration": 1735689600}, "current_window", False, 1767225600),
+    ({"inception": 1798761600}, "current_window", False, 1767225600),
+    ({"inception": 4294967290, "expiration": 10}, "current_window", True, 4294967300),
+])
+def test_signature_inventory_reports_mismatch_and_time_window(changes: dict, field: str, expected, now: int) -> None:
+    parsed = signed_metadata_zone()
+    signatures = parsed.get_rdataset("www.example.com.", "RRSIG", "A")
+    changed = next(iter(signatures)).replace(**changes)
+    signatures.clear()
+    signatures.add(changed, 300)
+    inventory = python_function("dnssec.md", "inspect_signature_links")(parsed, "www.example.com.", "A", now)
+    assert inventory[0][field] == expected
+
+
+@pytest.mark.parametrize("changes", [{"flags": 0}, {"protocol": 2}])
+def test_signature_inventory_checks_zone_key_flag_and_protocol(changes: dict) -> None:
+    parsed = signed_metadata_zone()
+    keys = parsed.get_rdataset("example.com.", "DNSKEY")
+    changed = next(iter(keys)).replace(**changes)
+    keys.clear()
+    keys.add(changed, 300)
+    signatures = parsed.get_rdataset("www.example.com.", "RRSIG", "A")
+    signature = next(iter(signatures)).replace(key_tag=dns.dnssec.key_id(changed))
+    signatures.clear()
+    signatures.add(signature, 300)
+    inventory = python_function("dnssec.md", "inspect_signature_links")(parsed, "www.example.com.", "A", 1767225600)
+    assert inventory[0]["candidate_keys"] == 0
+
+
+@pytest.mark.parametrize("updates, missing, expected", [
+    ({}, [], "pass"), ({}, ["path"], "not_run"), ({}, ["mechanism"], "not_run"),
+    ({"cleanup": "fail"}, [], "fail"), ({"ready": "fail"}, ["mechanism"], "fail"),
+    ({"path": "not_run"}, [], "not_run"),
+])
+def test_required_phase_statuses_are_independent(updates: dict, missing: list, expected: str) -> None:
+    required = ["structure", "ready", "endpoint", "path", "mechanism", "cleanup"]
+    checks = dict.fromkeys(required, "pass")
+    checks.update(updates)
+    checks["query"] = "pass"
+    for name in missing:
+        del checks[name]
+    assert python_function("reproduction.md", "summarize_checks")(checks, required) == expected
+
+
+def test_phase_summary_requires_explicit_check_names_and_statuses() -> None:
+    summarize = python_function("reproduction.md", "summarize_checks")
+    with pytest.raises(ValueError, match="Declare required"):
+        summarize({}, [])
+    with pytest.raises(ValueError, match="Invalid check status"):
+        summarize({"mechanism": "SERVFAIL"}, ["mechanism"])
+    assert summarize({}, ["mechanism"]) == "not_run"

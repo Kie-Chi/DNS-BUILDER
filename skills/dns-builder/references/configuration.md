@@ -4,7 +4,7 @@
 
 ## 1. 镜像、角色和记录
 
-以下单区配置建立 `resolver → auth`，供后续片段组合：
+dnsb 输入使用 `name/inet/images/builds`，服务定义放在 `builds`；构建输出才是 Compose 的 `services/networks`。先检查这些输入字段，再运行构建。以下单区配置建立 `resolver → auth`，供后续片段组合：
 
 ```yaml
 name: teaching
@@ -112,6 +112,8 @@ hook 文件操作使用 `fs.read_text(DNSBPath(...))`、`fs.write_text(...)` 或
 | Compose 写出 → `auto.post` | 检查 Compose、导出地址与记录清单 | `output_dir` |
 
 全局 setup/modify 脚本先于对应服务脚本执行；全局列表串行，各服务可并行。将共享拓扑生成放在全局脚本，将服务文件生成放在局部脚本。
+
+组合多个片段时，将同阶段 `auto` 操作合成一个脚本或有序脚本列表：先创建节点，再检查具名关系，再准备地址占位符。跨脚本共享的数据写入 `config['vars']`；需要复用的函数放入项目模块或同一脚本。DNSSEC 的同阶段 hooks 合成一段脚本文本。检查合并结果，保留前一片段需要执行的操作。
 
 模板的 setup 在 ref 展开前执行。批量创建实例时，直接填写行为，或将 setup 脚本及其 vars 显式放到实例上。modify 使用已经展开的字段和值；新服务、ref、include 和待替换占位符在更早阶段生成。
 

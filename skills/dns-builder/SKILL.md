@@ -28,13 +28,24 @@ description: 根据论文、PoC 或实验需求，使用 DNS-BUILDER 构建并�
 | 命令计时、资源指标和重建比较 | [evaluation.md](references/evaluation.md) |
 | 文档、通用示例和源码函数定位 | [source-map.md](references/source-map.md) |
 
+## 从机制选择操作路径
+
+先按机制选读，再替换项目中的名称、软件和规模；同一条操作路径可用于不同漏洞。
+
+| 机制与代表场景 | 阅读顺序 | 首先检查的产物 |
+| --- | --- | --- |
+| NS 地址解析与扇出：NXNS、NRDelegation | [委派](references/topology.md#delegation) → [响应表](references/runtime.md#response-contract) → [NXNS 组合](references/example-patterns.md#nxns) | NS 名称所属区、地址查询路径与实际出站计数 |
+| 来源驱动的查询链：TsuKing、多级转发 | [实例](references/topology.md#layers) → [路由检查](references/topology.md#flow-check) → [TsuKing 组合](references/example-patterns.md#tsuking) | 完整出口映射、组间方向和链尾接收记录 |
+| 委派/别名/QMIN 组合：CAMP | [名称计划](references/topology.md#resolution-plan) → [CAMP 组合](references/example-patterns.md#camp) → [自定义区](references/zone-mutation.md#custom-zone) | 各维度独立、zone cut 与真实遍历层级 |
+| 签名记录与验证行为：KeyTrap、DNSSEC fault | [签名时序](references/dnssec.md#signing-order) → [记录关联](references/dnssec.md#signature-links) → [RRset 修改](references/zone-mutation.md) | 正常信任链、最终记录集合与验证开销 |
+
 ## 构建步骤
 
 ### 1. 填写实验参数
 
 从论文或 PoC 填写软件版本、节点角色、QNAME/QTYPE、RD/DO/CD、传输协议、缓存状态和目标现象。将深度、宽度、TTL、时延、记录数量和终止条件设为独立参数。
 
-分别列出 `hint`、`forward`、`stub`、父子 NS 委派、NS 名称地址查询和 CNAME 依赖。为每条关系标明起点、名称、下一跳和最终响应，按 [reproduction.md](references/reproduction.md) 配置对应的查询与观测。
+分别列出 `hint`、`forward`、`stub`、父子 NS 委派、NS 名称地址查询和 CNAME 依赖。为每条关系填写“输入查询 → 响应规则 → 下一次查询 → 观测服务”，再映射到 DSL、端点或 hook。先验证正常解析，再验证一条边、小规模组合，最后改变参数；阶段检查见 [reproduction.md](references/reproduction.md#mechanism-checks)。
 
 ### 2. 组合配置与资源
 
@@ -69,7 +80,7 @@ docker compose -f "$compose" up -d
 - 放大实验统计客户端输入和解析器实际出站查询，按目的服务、QTYPE 和时间窗分类。
 - DNSSEC 实验对比普通递归与 CD 查询，并记录验证日志、CPU 时间和查询延迟。
 - 缓存实验记录填充、到期、刷新与再次查询的时刻；跨软件实验使用相同输入和缓存准备步骤。
-- 给查询、采集和等待设置次数与时长，保存原始报文、日志和命令退出码。
+- 给查询、采集和等待设置次数与时长，保存原始报文、日志和命令退出码。将超时、SERVFAIL 作为查询结果记录；机制检查使用实际路径、出站计数、缓存变化或验证开销及其对照结果。
 
 ### 5. 保存与重建
 

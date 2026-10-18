@@ -51,7 +51,7 @@
 
 ## 4. 回归检查入口
 
-- `test/skills/test_dns_builder_skill.py`：skill 配置片段、地址映射、DNSSEC hooks、引用与内容检查。
+- `test/skills/test_dns_builder_skill.py`：配置片段、角色/名称计划、地址迁移、UDP/TCP 响应、DNSSEC 关联与 hooks、引用检查；BIND 工具可用时执行真实签名验证。
 - `test/utils/test_dnssec_tools.py`：工具选择、host/docker runner。
 - `test/utils/test_zone.py`：zone 名称与路径。
 - `test/utils/test_pdns_dnssec.py`、`test/test_powerdns.py`：PowerDNS 配置与签名 metadata。

@@ -211,6 +211,7 @@ TsuKing 类端点需要区分发来查询的出口解析器。用服务名保存
 
 ```yaml
 vars:
+  route_sources: [resolver]
   endpoint_routes:
     resolver: [auth]
 builds:
@@ -233,7 +234,13 @@ auto:
   setup: |
     builds = config['builds']
     rows = []
-    for source, targets in config['vars']['endpoint_routes'].items():
+    expected = config['vars']['route_sources']
+    routes = config['vars']['endpoint_routes']
+    if len(expected) != len(set(expected)) or set(routes) != set(expected):
+      raise ValueError('Route source coverage mismatch')
+    for source, targets in routes.items():
+      if not isinstance(targets, list) or not targets or len(targets) != len(set(targets)):
+        raise ValueError('Use a nonempty list of distinct route targets')
       if any(name not in builds or not builds[name].get('build', True) for name in [source, *targets]):
         raise ValueError('Route references an unavailable service')
       rows.append({
@@ -243,7 +250,7 @@ auto:
     builds['endpoint'].setdefault('vars', {})['resolved_routes'] = rows
 ```
 
-将端点的 `command` 改为项目响应程序，读取路由文件，并使用接收到的源地址查表。日志记录 `source_ip/qname/qtype/next_hops`；使用不同出口分别查询，检查返回的 NS/glue 与路由表一致。host network、NAT 或代理场景下，以实际接收地址建立映射。
+`route_sources` 从节点角色表独立派生，列出所有预期查询来源；与 `endpoint_routes` 一起填写。将端点的 `command` 改为项目响应程序，读取路由文件，并使用接收到的源地址查表。日志记录 `source_ip/qname/qtype/next_hops`；使用不同出口分别查询，检查返回的 NS/glue 与路由表一致。host network、NAT 或代理场景下，以实际接收地址建立映射。
 
 <a id="fanout"></a>
 
@@ -254,9 +261,11 @@ auto:
 ```yaml
 auto:
   setup: |
+    import dns.name
     spec = config['vars']['delegation']
     names = spec['ns_names']
-    if not names or len(set(names)) != len(names) or any(not name.endswith('.') for name in names):
+    parsed_names = [dns.name.from_text(name, origin=None) for name in names]
+    if not names or len(set(parsed_names)) != len(names) or any(not name.is_absolute() for name in parsed_names):
       raise ValueError('Use distinct absolute NS names')
     auth = config['builds']['auth']
     lines = [auth.get('behavior', '').rstrip()]
@@ -270,5 +279,87 @@ auto:
 逐层委派时，为每层生成独立的 parent/child/NS 记录数据，并为下一层 zone 配置对应服务。将“NS 名称需要继续解析”和“NS 地址直接访问下一层”分别表达为名称依赖与地址映射。
 
 组合深层委派、扇出和别名时，分别设置委派深度、每层 NS 数量、CNAME 长度和 NS 名称的标签深度。逐层直接查询父区与名称支撑区，再经递归器统计实际出站查询。组合方法见 [example-patterns.md](example-patterns.md#camp)。
+
+<a id="flow-check"></a>
+
+## 9. 按角色检查具名查询路径
+
+为本次路径单独准备 `roles={服务名: 逻辑角色}`、`edges={服务名: 下一跳列表}`、入口和终端集合。将控制端点的决策展开为逻辑边：例如组内的入口→出口来自 forward 配置，出口→下一组入口来自响应路由表。权威的控制查询另行观测。
+
+以下函数适用于应当结束的无环路径，放入项目校验脚本或节点生成后的 setup 脚本。`allowed_steps` 由项目提供角色对，适配转发、递归、权威或接收端等不同组合：
+
+```python
+def check_acyclic_flow(roles, edges, entry, terminals, allowed_steps):
+    nodes, terminals = set(roles), set(terminals)
+    allowed_steps = {tuple(step) for step in allowed_steps}
+    if entry not in nodes or not terminals or not terminals <= nodes or set(edges) - nodes:
+        raise ValueError('Invalid entry, terminal, or edge source')
+    for source in nodes:
+        targets = edges.get(source, [])
+        if not isinstance(targets, list) or len(targets) != len(set(targets)):
+            raise ValueError(f'Invalid target list: {source}')
+        if source in terminals:
+            if targets:
+                raise ValueError(f'Terminal has outgoing edges: {source}')
+        elif not targets:
+            raise ValueError(f'Missing next hop: {source}')
+        for target in targets:
+            if target not in nodes or (roles[source], roles[target]) not in allowed_steps:
+                raise ValueError(f'Invalid role transition: {source} -> {target}')
+    visited, active = set(), set()
+    def visit(source):
+        if source in active:
+            raise ValueError(f'Unexpected cycle: {source}')
+        if source in visited:
+            return
+        active.add(source)
+        for target in edges.get(source, []):
+            visit(target)
+        active.remove(source)
+        visited.add(source)
+    visit(entry)
+    if visited != nodes:
+        raise ValueError(f'Unreachable nodes: {sorted(nodes - visited)}')
+    return sorted(visited)
+```
+
+- 将该检查视图中的节点限定为本次预期路径；分别验证多个入口与不同模式。
+- 从角色表派生全部出口，再检查 `route_sources` 与路由键一致。生成 IP 路由后逐项对照 Compose；服务重排和换子网后重做检查。
+- 为未知来源单独定义响应与日志，例如记录 unmapped-source 并返回 REFUSED；探测入口需要默认行为时，明确区分探测来源和出口来源。
+- 循环类实验改为核对显式声明的环成员和回边，分别统计进入环、重复路径及退出/截止条件。
+- 静态边表描述候选路径；运行时依据时间、QNAME/QTYPE、源/目的服务重建实际路径，统计重试与分支选择。
+
+<a id="resolution-plan"></a>
+
+## 10. 让名称引用随参数一起变化
+
+分别给链长、标签深度、分支数和出口数命名。先生成委派/别名的引用清单，再从清单派生名称支撑数据。链位置用链长遍历，标签用标签深度遍历；用 `length=2, depth=3` 和交换后的参数检查两者独立。
+
+在名称已解析为 FQDN 后，对每个预期查询检查正向路径或预设负响应。`required/positive/negative` 均为 `(owner, qtype)` 列表；positive 表示可得到相应类型数据的路径，包含已经规划的别名追踪，negative 表示预设的 NXDOMAIN/NODATA 等终止响应：
+
+```python
+import dns.name
+import dns.rdatatype
+
+
+def check_resolution_plan(required, positive, negative):
+    def normalize(rows):
+        result = set()
+        for owner, qtype in rows:
+            name = dns.name.from_text(owner, origin=None)
+            if not name.is_absolute():
+                raise ValueError(f'Use an absolute owner: {owner}')
+            result.add((name.canonicalize(), dns.rdatatype.from_text(qtype)))
+        return result
+    required, positive, negative = map(normalize, (required, positive, negative))
+    if positive & negative:
+        raise ValueError('Conflicting response plans')
+    if required - positive - negative:
+        raise ValueError('Missing resolution paths')
+```
+
+A 与 AAAA 分别列出；将计划中的负响应与遗漏的地址路径区分开。同名 A 正向与 AAAA NODATA 可以并存，NXDOMAIN 则是名称级结果，需检查与同名正向数据的一致性。用 [响应表](runtime.md#response-contract) 为同一清单逐项发送查询，检查实际 owner、RCODE、SOA 和后续查询。
+
+对层层委派检查 `parent origin → child owner → NS 名称 → 地址所属区 → 下一层服务`。普通权威会选择其承载 zone 中与查询名称最长匹配的一项；逐层遍历时，将路径上的嵌套 zone 分到相应权威实例，防止直接选中更深的 zone。别名链同样检查是否被权威一次性打包返回。
 
 源码定位：`src/dnsbuilder/auto/manager.py` 的 `AutomationManager.setup`；`src/dnsbuilder/abstractions.py` 的 `MasterBehavior.generate`；`src/dnsbuilder/builder/net.py` 的 `NetworkManager`；`src/dnsbuilder/builder/substitute.py` 的 `VariableSubstitutor`。

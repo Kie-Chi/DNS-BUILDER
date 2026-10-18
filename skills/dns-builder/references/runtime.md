@@ -134,6 +134,64 @@ UDP 接收与 TCP 长度前缀、重试分别实现。大 RRset 查询先检查 
 
 通用报文生成接口可定位 `examples/app/error/test_custom.yml` 与 `examples/app/error/custom_packets.py` 的函数，将所需生成函数作为项目探测输入。
 
+<a id="response-contract"></a>
+
+### 用响应表连接协议输入与后续查询
+
+为每个端点列出匹配顺序，并单独列出未匹配来源、名称和 QTYPE 的处理。将每行关联到日志字段与一个直接查询用例：
+
+| 输入条件 | 响应内容 | 后续检查 |
+| --- | --- | --- |
+| 当前权威区 apex 的 NS/SOA | NOERROR，正常权威应答的 AA=1、RA=0，ANSWER 为所问 RRset | zone 已加载，返回可达的权威名称 |
+| 需要继续委派的名称 | NOERROR、空 ANSWER，AUTHORITY 中为委派 owner 的 NS；普通 referral 使用 AA=0、RA=0 | 解析器查询下一权威，或解析 NS 的 A/AAAA |
+| NS 地址查询有数据 | 相应 A/AAAA；按需要另设 CNAME 分支 | owner、地址、别名链尾与服务一致 |
+| 名称存在但所问类型不存在 | NOERROR、空 ANSWER，按区提供 SOA | 记录 NODATA 与该 QTYPE 的负缓存 |
+| 名称不存在 | NXDOMAIN，按区提供 SOA | 记录名称负缓存及后续查询的变化 |
+| 来源不在该模式的路由中 | 项目选定的明确响应，例如 REFUSED，日志写出 unmapped-source | 修正来源或映射后重试，核对是否恢复预期路径 |
+
+先处理特定名称/类型，再处理范围较大的后缀规则。基础就绪查询与实验分支分别匹配；使用相同查询名称时记录状态变化和缓存准备。
+
+下面只构造普通 IN 类 referral，可嵌入项目端点的对应分支。`cut` 和 `targets` 使用 FQDN，`addresses` 为 NS 名称到地址列表的映射；空映射表示省略地址记录：
+
+```python
+import ipaddress
+import dns.flags
+import dns.message
+import dns.name
+import dns.rdataclass
+import dns.rrset
+
+
+def make_referral(query, cut, targets, addresses, ttl=60):
+    cut = dns.name.from_text(cut, origin=None)
+    targets = [dns.name.from_text(name, origin=None) for name in targets]
+    if not cut.is_absolute() or not targets or any(not name.is_absolute() for name in targets):
+        raise ValueError('Use an absolute cut and nonempty NS targets')
+    if len(targets) != len(set(targets)):
+        raise ValueError('Duplicate NS target')
+    if len(query.question) != 1 or query.question[0].rdclass != dns.rdataclass.IN:
+        raise ValueError('Expected one IN question')
+    if not query.question[0].name.is_subdomain(cut):
+        raise ValueError('Question is outside the delegated name')
+    reply = dns.message.make_response(query)
+    reply.flags &= ~(dns.flags.AA | dns.flags.RA | dns.flags.AD)
+    reply.authority.append(dns.rrset.from_text(cut, ttl, 'IN', 'NS', *(name.to_text() for name in targets)))
+    for owner, values in addresses.items():
+        owner = dns.name.from_text(owner, origin=None)
+        if owner not in targets:
+            raise ValueError('Address owner is not an NS target')
+        addresses_by_family = [ipaddress.ip_address(value) for value in values]
+        for kind, version in (('A', 4), ('AAAA', 6)):
+            values = [str(value) for value in addresses_by_family if value.version == version]
+            if values:
+                reply.additional.append(dns.rrset.from_text(owner, ttl, 'IN', kind, *values))
+    return reply
+```
+
+该片段保留请求 ID、QUESTION 和 RD；将特殊 flags/RCODE 作为其他明确的响应模式。按父区、委派 owner 和 NS 名称关系检查地址的 bailiwick，观察解析器是否采用 ADDITIONAL 或另发地址查询。
+
+序列化 UDP 响应时按请求的 EDNS payload 和服务上限选择大小，记录 TC；TCP 使用两字节长度前缀并循环读取完整帧。先确认完整 DNS 消息可在 65535 字节内编码，再测试 UDP 截断与 TCP 回退。输入记录数量、去重后的 RR 数和实际 wire 长度分别保存。
+
 ## 6. 网络、挂载与抓包
 
 - 使用项目 bridge 中的服务名发起容器内查询；需要宿主访问时配置 `127.0.0.1:<host-port>:<container-port>`。
@@ -160,15 +218,27 @@ auto:
 
 该设置作用于 app_net；同时检查服务使用的其他网络、network_mode 和端口。镜像准备由宿主 Docker daemon 完成。在该 post 后导出拓扑清单，记录最终网络配置。
 
-## 7. 定位运行问题
+<a id="diagnostics"></a>
 
-| 现象 | 检查与操作 |
-| --- | --- |
-| 构建失败 | 查看 include/ref、资源路径、变量替换、网络容量和日志中的首个服务错误 |
-| Compose 校验失败 | 检查额外字段、environment 标量、挂载目标与 entrypoint/command |
-| daemon 退出 | 在目标镜像中运行配置检查器，检查 UID/GID、区文件语法和启动日志 |
-| 权威查询超时 | 检查监听地址、端口、ACL、TCP/UDP 和 zone 加载状态 |
-| resolver SERVFAIL | 分别查询 referral、NS 地址、父区 DS 与根锚，关联实际查询路径 |
-| 修改后仍返回旧值 | 检查复制后的挂载源、reload、journal 与递归缓存 |
-| 放大链在中途结束 | 检查该层 QNAME/QTYPE、缓存命中、NS 可达性、重试与 fetch 参数 |
-| DNSSEC 响应过大 | 分别检查 UDP 长度、TC、TCP 服务和完整 RRset 的传输 |
+## 7. 按失败阶段定位问题
+
+先保存失败命令和首个根因，再修改该阶段的输入并重跑同一检查：
+
+| 现象 | 检查与修正 | 重查方式 |
+| --- | --- | --- |
+| `inet Field required` 或出现 Compose 的 services 输入 | 用 `name/inet/images/builds` 编写 dnsb 配置；检查传给 CLI 的文件 | 重新运行 dnsb build，核对服务名 |
+| 动态节点缺失或 behavior 为空 | 查看 setup/ref 顺序、实例的 `build: true`、实例 vars 和最终合并配置 | 比较角色清单与 Compose 服务集合 |
+| 占位符未解析、地址为 none、来源落入默认分支 | setup 创建节点与占位符，modify 输出 IP 表；从角色表检查映射覆盖 | 对照实际地址，从每个预期来源查询端点 |
+| 多个服务出现 barrier 错误 | 找到最先失败的服务与 hook；检查文件路径、依赖、签名 stderr；服务等待上限为 30 秒 | 修正根因，将耗时材料准备移到签名前，再构建 |
+| build 返回成功但签名/修改缺失 | 检查签名日志、最终 RRset、DS/根锚和预期 hook 产物 | 执行 zone 检查、记录关联检查与正常验证查询 |
+| 宿主脚本或容器缺少模块/工具 | 宿主生成器用项目 Python 环境；端点依赖安装到其镜像；分别预检签名工具 | 在实际执行环境检查 import、工具版本与工作目录 |
+| Docker API 不可用 | 用 `docker info` 检查 daemon/连接；保留已完成的静态结果 | 恢复 daemon 后重跑运行阶段，未执行项为 not_run |
+| Compose 校验失败或 daemon 退出 | 检查额外字段、environment 标量、entrypoint/argv、Section、UID/GID；在目标镜像执行配置检查器 | Compose config、软件检查器、启动日志、SOA 查询 |
+| Python 报 shell 变量未定义 | 用 argv 或环境变量传入 compose、工作目录和输出路径 | 单独运行验证脚本并检查非零退出码 |
+| 权威查询超时 | 检查监听地址、端口、ACL、zone 加载、UDP/TCP，先查基础 SOA | 同一网络中的直接查询与抓包 |
+| resolver SERVFAIL 或链中断 | 从最后可见查询检查 referral owner、NS 地址、RD、缓存、DS/根锚与重试 | 正常对照、逐边探测、递归器出站路径 |
+| 委派层被跳过或别名链只查一次 | 检查同一权威上的最长 zone 匹配，以及响应内携带的完整 CNAME 链 | 调整区/服务分布后，统计实际遍历层级 |
+| 改资源后仍返回旧值 | 从 Compose 定位复制快照或目录挂载，检查 reload、journal 与递归缓存 | 先直接权威查询，再按缓存条件查递归器 |
+| 大 RRset 导致超时或截断 | 检查编码大小、EDNS、TC、TCP 服务和完整帧读取 | 分别测试小集合、完整 TCP、UDP 回退 |
+
+运行报告每次初始化；命令、查询、机制和清理各自记录实际结果。单次超时先进入上表的连接、协议、路径或验证分支，再由对应观测确定原因。
