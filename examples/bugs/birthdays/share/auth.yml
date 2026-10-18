@@ -1,0 +1,69 @@
+# -----------------------------------------------------------------------------
+#
+# SHARED AUTHORITATIVE SERVERs
+#
+# -----------------------------------------------------------------------------
+# This file defines the DNS hierarchy for the Cuckoo attack simulation.
+# It includes:
+# 1. Root Server (.)
+# 2. TLD Server (.net, .hit)
+# 3. SLD Server (Legitimate infrastructure simulation)
+# 4. Bad SLD Server (Attacker infrastructure)
+
+# We use the standard BIND image for all authoritative servers
+include: resource:/includes/std-auth.yml
+
+images:
+  bind:
+    ref: bind:9.20.3
+  python:
+    ref: python:3.12.0
+
+builds:
+
+  # ----------------------------
+  #      ROOT SERVER (.)
+  # ----------------------------
+  root:
+    image: bind
+    ref: std:auth
+    behavior: |
+      # DSL Syntax: <zone> master <subdomain> NS <container_name>
+      
+      # Attack Network: Delegate `.hit` (the attack zone) to the 'tld' container
+      . master com NS tld
+
+  # ----------------------------
+  #      TLD SERVER (.net, .hit)
+  # ----------------------------
+  tld:
+    image: bind
+    ref: std:auth
+    behavior: |
+      # -- Attack Structure (.com) --
+      # Delegate `example.com` to the attacker's nameserver ('bad_sld')
+      com master example NS sld
+
+  # ----------------------------
+  #      BAD SLD (Attacker)
+  # ----------------------------
+  # This server hosts the malicious zones.
+  # bad_sld:
+  #   image: bind
+  #   ref: std:auth
+  #   behavior: |
+  #     # The attacker zone `example.com`.
+  #     # Subdomains `attacker` and `victim` are delegated to THIS server.
+  #     example.com master test A 11.45.1.4
+  #     example.com master * A 1.2.3.4
+  sld:
+    image: python
+    command: python3 /usr/local/bin/server.py
+    auto:
+      setup: |
+        _f = workdir / "resource" / "rebirth-server.py"
+        files = config.setdefault("files", {})
+        content = fs.read_text(_f)
+        content = content.replace("{ATTACKER}", "\"${srv.attacker.ip}\"")
+        files["/usr/local/bin/server.py"] = content
+

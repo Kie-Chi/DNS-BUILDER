@@ -1,0 +1,71 @@
+name: tsuname-cname
+inet: 10.10.10.0/24
+
+include: resource:/includes/std-auth.yml
+
+images:
+  bind:
+    ref: "bind:9.18.0"
+  root:
+    ref: "bind:9.18.0"
+  tld:
+    ref: "bind:9.18.0"
+  sld:
+    ref: "bind:9.18.0"
+  attacker:
+    ref: "python:3.12.0"
+  monitor:
+    ref: "python:3.12.0"
+
+builds:
+
+  attacker:
+    image: "attacker"
+    command: "tail -f /dev/null"
+    environment:
+      R: ${srv.resolver.ip}
+      IP: ${ip}
+
+  resolver:
+    image: "bind"
+    ref: "std:recursor"
+    behavior: . hint root
+  
+  root:
+    image: "root"
+    ref: "std:auth"
+    behavior: |
+      . master com NS tld
+  tld:
+    image: "tld"
+    ref: "std:auth"
+    behavior: |
+      com master a NS sld1
+      com master b NS sld2
+  sld1:
+    image: "sld"
+    ref: "std:auth"
+    behavior: |
+      a.com master loop1 CNAME ns.loop2.a.com.
+      a.com master loop2 CNAME ns.loop1.a.com.
+  sld2:
+    image: "sld"
+    ref: "std:auth"
+    behavior: |
+      b.com master www A 1.1.1.1
+      b.com master mail A 2.3.4.5
+
+auto:
+  post:
+    - | 
+      # patch
+      import re
+      from pathlib import Path
+      for srv in config["builds"].keys():
+        if re.match(r"bind.*?$", srv) or srv == "monitor":
+          _dir = Path(workdir / "output" / config["name"] / srv / "contents")
+          _dir.chmod(0o777)
+          for item in _dir.rglob("*"):
+            item.chmod(0o777)
+
+

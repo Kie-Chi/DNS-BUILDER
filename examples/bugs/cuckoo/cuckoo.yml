@@ -1,0 +1,239 @@
+name: cuckoo
+
+include: resource:/includes/std-auth.yml
+
+# ## Network Configuration
+# Defines the internal Docker network subnet.
+# Note: DNS-Builder currently supports internal networks only.
+inet: 10.10.10.0/24
+
+# ## Docker Image Definitions
+# Defines the base images used by the containers.
+images:
+
+  # Use the official BIND9 image. 
+  # This serves as the base for Authoritative servers and the BIND Resolver.
+  bind:
+    ref: bind:9.20.3
+
+  # Use a standard Python image for the client container to run scripts/tools.
+  client:
+    ref: python:3.12.0
+
+# ## Container Build Definitions
+builds:
+
+  # ----------------------------
+  #
+  #     CLIENT CONFIGURATION
+  #
+  # ----------------------------
+  # The client container is responsible for sending DNS queries to the resolver.
+  client:
+    image: client
+    # Keep the container running indefinitely so we can exec into it.
+    command: tail -f /dev/null
+    environment:
+      # Inject the Resolver's IP address into the environment variable $R.
+      # Usage inside container: `dig @$R example.com`
+      R: ${srv.resolver.ip}
+
+  # ----------------------------
+  #
+  #   RESOLVER CONFIGURATION
+  #
+  # ----------------------------
+
+  # ## Abstract Resolver Entry
+  # This is the main entry point for the resolver service.
+  # The specific implementation (Bind, Unbound, etc.) is decided dynamically
+  # by the `auto.setup` Python script at the bottom of this file.
+  resolver:
+    # This 'ref' is a placeholder. It will be overwritten by `auto.setup`
+    # to point to `bind-resolver`, `unbound-resolver`, etc., based on env vars.
+    ref: just-a-placeholder 
+    # DNS-Builder DSL: Configure the resolver to use our custom 'root' container
+    # as the Root Hints file (instead of the real Internet root servers).
+    behavior: . hint root
+
+  # A dummy build definition to prevent validation errors before the dynamic switch happens.
+  just-a-placeholder:
+    image: just-a-placeholder
+    build: false
+
+  # ## BIND Implementation
+  # Standard recursive configuration inheriting from `std:recursor` template.
+  bind-resolver:
+    image: bind
+    ref: std:recursor
+    privileged: true # Required for BIND to handle certain permission ops in Docker.
+    build: false
+
+  # ## Unbound Implementation
+  unbound-resolver:
+    image: mvance/unbound:1.22.0
+    ref: std:recursor
+    # Override default command to ensure config file path is correct.
+    command: unbound -d -c /usr/local/etc/unbound/unbound.conf
+    behavior: . hint root
+    build: false
+
+  # ## Knot Resolver Implementation
+  knot-resolver:
+    image: cznic/knot-resolver:v6.0.9
+    ref: std:recursor
+    command: -c /usr/local/etc/kresd.yml
+    behavior: . hint root
+    build: false
+
+  # ## PowerDNS Implementation
+  pdns-resolver:
+    image: powerdns/pdns-recursor-49:4.9.9
+    ref: std:recursor
+    command: --config-dir=/usr/local/etc
+    behavior: . hint root
+    build: false
+
+
+  # ----------------------------
+  #
+  #   AUTHORITATIVE SERVERS
+  #
+  # ----------------------------
+  # The hierarchy simulates both a "clean" network (.net) and an "attack" network (.hit).
+
+  # ## Root Server (.)
+  # Acts as the root of the simulation.
+  root:
+    image: bind
+    ref: std:auth # Inherit standard authoritative server config
+    behavior: |      
+      # Mocking Real Network: Delegate `.net` to the 'tld' container.
+      . master net NS tld
+      
+      # Attack Network: Delegate `.hit` (the attack zone) to the 'tld' container.
+      . master hit NS tld
+
+  # ## TLD Server (.net, .hit)
+  # Handles top-level domains.
+  tld:
+    image: bind
+    ref: std:auth
+    behavior: |
+
+      # -- Attack Structure (.hit) --
+      # Delegates `root.hit` (note the naming) to the 'bad_sld' container.
+      hit master root NS bad_sld
+  
+  # ## SLD Server (Infrastructure Simulation)
+  # This server mocks the IP addresses of the "Real" DNS infrastructure (root-servers.net).
+  # It creates the "Glue" records.
+  sld:
+    image: bind
+    ref: std:auth
+    behavior: |
+
+      # -- Attack Records --
+      # This is tricky: It makes legitimate-looking domains point to the Attacker.
+      # for bad_sld master the `*.root.hit` as well as `*.victim.root.hit`
+      # `ns.servers.net` -> IP of 'bad_sld'.
+      # `a.sld-servers.net` -> IP of 'bad_sld'.
+      # This allows the attacker to use `ns.servers.net` as a nameserver for the attack.
+      servers.net master ns A bad_sld
+      sld-servers.net master a A bad_sld
+
+  # ## Bad SLD Server (The Attacker)
+  # This container hosts the malicious zones used for the Cuckoo attack.
+  bad_sld:
+    image: bind
+    ref: std:auth
+    behavior: |
+      # Define the zone `root.hit`.
+      # Subdomains `attacker` and `victim` are delegated to THIS server ('bad_sld').
+      root.hit master attacker NS bad_sld
+      root.hit master victim NS bad_sld
+      
+      # The victim domain resolves to a target IP (2.2.2.2).
+      victim.root.hit master * A 2.2.2.2
+
+    # ## Dynamic Zone Generation
+    # Python script to generate a large number of attacker subdomains automatically.
+    # This is often used for resource exhaustion or cache pollution tests.
+    auto:
+      setup: |
+        atk = 6 # Number of attacker records to generate
+        # Append formatted string to the existing 'behavior' config.
+        # Creates: attacker.root.hit, attacker0.root.hit, attacker1.root.hit...
+        # All pointing to 114.5.14.x IPs.
+        config["behavior"] = config["behavior"] + "\n".join([
+          f"attacker.root.hit master * A 114.5.14.{i}" if i == 0 else
+          f"attacker{i}.root.hit master * A 114.5.14.{i}"
+          for i in range(atk)
+        ])
+
+
+
+# ----------------------------
+#
+#      AUTOMATION HOOKS
+#
+# ----------------------------
+auto:
+  # ## Pre-Build Setup Hook
+  # Runs BEFORE DNS-Builder build all container. Used to modify the configuration dynamically.
+  setup: |
+    import os
+
+    # 1. Read the 'CUCKOO' environment variable from the host machine.
+    #    Default is 'bind'. Options: bind, unbound, knot, pdns.
+    res = ["bind", "unbound", "knot", "pdns"]
+    resv = os.getenv("CUCKOO", "bind").lower()
+    
+    # 2. Validate the selection.
+    if resv not in res:
+      raise ValueError(f"invalid CUCKOO resolver: {resv}, should be one of {res}")
+    
+    print("info: using resolver:", resv)
+    
+    # 3. Dynamically update the abstract 'resolver' build's reference.
+    #    e.g., changes 'just-a-placeholder' to 'unbound-resolver'.
+    config["builds"]["resolver"]["ref"] = f"{resv}-resolver"
+
+  # ## Post-Generation Restriction/Patch Hook
+  # Runs AFTER Dockerfiles/configs are generated but BEFORE containers start.
+  # Used here to fix file permission issues, specifically for BIND.
+  restrict: |
+    from pathlib import Path
+    
+    # Helper function to check if a service uses the BIND image.
+    def _is_bind(srv):
+      # Check direct image definition
+      if config.get("builds", {}).get(srv, {}).get("image") == "bind":
+        return True
+      # Check reference chain (e.g., ref -> ... -> bind)
+      ref = config.get("builds", {}).get(srv, {}).get("ref", "")
+      while ref and not ref.startswith("std:"):
+        img = config.get("builds", {}).get(ref, {}).get("image", "")
+        if img == "bind":
+          return True
+        ref = config.get("builds", {}).get(ref, {}).get("ref", "")
+      return False
+
+    # Iterate through all defined builds.
+    for srv in config.get("builds", {}):
+      if not _is_bind(srv):
+        continue
+      
+      # If it is a BIND service, recursively chmod 777 its generated content directory.
+      # This ensures the 'bind' user inside the container can read/write 
+      # the config files mounted from the host.
+      dir = Path(workdir / "output" / config["name"] / srv / "contents")
+      dir.chmod(0o777)
+      for item in dir.rglob("*"):
+        if item.is_file():
+          item.chmod(0o777)
+        elif item.is_dir():
+          item.chmod(0o777)
+    
+    # Return PASS to indicate the hook finished successfully.
+    result = "PASS"

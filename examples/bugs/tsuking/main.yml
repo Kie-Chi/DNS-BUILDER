@@ -1,0 +1,47 @@
+name: "tsuking-chain"
+inet: 10.66.0.0/24
+include: resource:/includes/traffic.yml
+images:
+  - name: "unbound"
+    ref: "unbound:1.17.1"
+  - name: "python39"
+    ref: "python:3.9.0"
+
+builds:
+  - auth:
+      image: "python39"
+      volumes:
+        - resource/tsuking-server.py:/usr/local/etc/server.py
+      command: ["python3", "/usr/local/etc/server.py"]
+  - victim:
+      image: "python39"
+      command: ["tail", "-f", ">", "/dev/null"]
+  - fl:
+      image: "unbound"
+      volumes:
+        - conf/weak.conf:/usr/local/etc/unbound/unbound.conf
+      build: false
+  - rl:
+      image: "unbound"
+      volumes:
+        - conf/weak.conf:/usr/local/etc/unbound/unbound.conf
+      behavior: example.com stub auth
+      build: false
+  - name: "fl-{{ i }}"
+    for_each:
+      range: 16
+    template:
+      ref: "fl"
+      behavior: ". forward rl-{{ i }}"
+  - name: "rl-{{ i }}"
+    for_each:
+      range: 16
+    template:
+      ref: "rl"
+  - traffic:
+      environment:
+        - "RNAME=" # dns_analyzer will fail for null
+        - "ANAME=attacker"
+        - "FILTER=udp and port 53 and dst host ${services.victim.ip}"
+        - "POLL_GAP=3000"
+      container_name: ${project.name}-${name}

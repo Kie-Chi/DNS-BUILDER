@@ -1,0 +1,31 @@
+name: "loopy"
+inet: 10.103.0.0/24
+include: resource:/includes/traffic.yml
+images:
+  - name: "python39"
+    ref: "python:3.9.0"
+builds:
+  resolved:
+    image: img/resolved.Dockerfile
+    files:
+      /etc/resolved/zones/root.hints: |
+        .           3600000 NS  ns-root.ns.
+        ns-root.ns. 3600000 A   8.8.8.8
+  hickory:
+    image: img/hickory.Dockerfile
+    files:
+      /usr/local/etc/hickory-dns/root.hints: |
+        .           3600000 NS  ns-root.ns.
+        ns-root.ns. 3600000 A   8.8.8.8
+      /usr/local/etc/hickory-dns/hickory-dns.toml: |
+        listen_addrs_ipv4 = [ "0.0.0.0" ]
+        listen_addrs_ipv6 = []
+        log_level = "debug"
+        [[zones]]
+        zone = "."
+        zone_type = "Hint"
+        stores = { type = "recursor", roots = "/usr/local/etc/hickory-dns/root.hints" }
+  traffic:
+    environment:
+      - "RNAME=" # dns_analyzer will fail for null
+      - "ANAME=" # dns_analyzer will fail for null

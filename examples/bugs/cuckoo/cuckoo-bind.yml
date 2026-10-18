@@ -1,0 +1,48 @@
+# Import shared client and auth server definitions
+include:
+  - share/cuckoo-client.yml
+  - share/cuckoo-auth.yml
+
+name: cuckoo-bind
+inet: 10.10.11.0/24
+
+images:
+  bind:
+    ref: bind:9.20.3
+
+builds:
+
+  # ----------------------------
+  #
+  #      BIND RESOLVER
+  #
+  # ----------------------------
+  resolver:
+    image: bind
+    ref: std:recursor
+    privileged: true # Required for BIND in Docker
+    # Configure BIND to use our 'root' container as the Root Hints
+    behavior: . hint root
+
+# ----------------------------
+#
+#      PERMISSION PATCH
+#
+# ----------------------------
+# BIND drops privileges to user 'bind', but Docker mounts config as 'root'.
+# This script runs after config generation to fix permissions.
+auto:
+  restrict: |
+    from pathlib import Path
+    
+    # Target the generated contents of the 'resolver' service
+    target_path = Path(workdir / "output" / config["name"] / "resolver" / "contents")
+    
+    if target_path.exists():
+      # Recursively chmod 777
+      target_path.chmod(0o777)
+      for item in target_path.rglob("*"):
+        if item.is_file() or item.is_dir():
+          item.chmod(0o777)
+    
+    result = "PASS"

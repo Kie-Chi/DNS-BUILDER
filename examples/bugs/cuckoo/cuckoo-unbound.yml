@@ -1,0 +1,23 @@
+include:
+  - share/cuckoo-client.yml
+  - share/cuckoo-auth.yml
+
+name: cuckoo-unbound
+inet: 10.10.12.0/24
+
+# No Built-in Images Needed
+
+builds:
+
+  # ----------------------------
+  #
+  #    UNBOUND RESOLVER
+  #
+  # ----------------------------
+  resolver:
+    image: mvance/unbound:1.22.0
+    ref: std:recursor
+    # Explicit command to use the generated config file
+    command: unbound -d -c /usr/local/etc/unbound/unbound.conf
+    # Configure Unbound to use our 'root' container as the Root Hints
+    behavior: . hint root

@@ -1,0 +1,90 @@
+# -----------------------------------------------------------------------------
+#
+# SHARED AUTHORITATIVE SERVERs
+#
+# -----------------------------------------------------------------------------
+# This file defines the DNS hierarchy for the Cuckoo attack simulation.
+# It includes:
+# 1. Root Server (.)
+# 2. TLD Server (.net, .hit)
+# 3. SLD Server (Legitimate infrastructure simulation)
+# 4. Bad SLD Server (Attacker infrastructure)
+include: resource:/includes/std-auth.yml
+
+# We use the standard BIND image for all authoritative servers
+images:
+  bind:
+    ref: bind:9.20.3
+
+builds:
+
+  # ----------------------------
+  #      ROOT SERVER (.)
+  # ----------------------------
+  root:
+    image: bind
+    ref: std:auth
+    behavior: |
+      # DSL Syntax: <zone> master <subdomain> NS <container_name>
+      
+      # Mocking Real Network: Delegate `.net` to the 'tld' container
+      . master net NS tld
+      
+      # Attack Network: Delegate `.hit` (the attack zone) to the 'tld' container
+      . master hit NS tld
+
+  # ----------------------------
+  #      TLD SERVER (.net, .hit)
+  # ----------------------------
+  tld:
+    image: bind
+    ref: std:auth
+    behavior: |
+      # -- Attack Structure (.hit) --
+      # Delegate `root.hit` to the attacker's nameserver ('bad_sld')
+      hit master root NS bad_sld
+  
+  # ----------------------------
+  #      SLD SERVER (Infrastructure)
+  # ----------------------------
+  # This server hosts the "Glue Records" for the infrastructure.
+  sld:
+    image: bind
+    ref: std:auth
+    behavior: |
+
+      # -- Cuckoo Attack Glue Records --
+      # This is the core of the attack setup:
+      # Legitimate-looking domains point to the Attacker's IP ('bad_sld').
+      # The attacker will use `ns.servers.net` as the nameserver for the attack zone.
+      servers.net master ns A bad_sld
+      sld-servers.net master a A bad_sld
+
+  # ----------------------------
+  #      BAD SLD (Attacker)
+  # ----------------------------
+  # This server hosts the malicious zones.
+  bad_sld:
+    image: bind
+    ref: std:auth
+    behavior: |
+      # The attacker zone `root.hit`.
+      # Subdomains `attacker` and `victim` are delegated to THIS server.
+      root.hit master attacker NS bad_sld
+      root.hit master victim NS bad_sld
+      
+      # The victim domain resolves to a target IP.
+      victim.root.hit master * A 2.2.2.2
+
+    # -- Dynamic Zone Generation --
+    # Python script runs before build to generate massive amounts of subdomains
+    # (attacker0.root.hit, attacker1.root.hit...)
+    auto:
+      setup: |
+        atk = 6 # Number of attacker records
+        config["behavior"] = config["behavior"] + "\n".join([
+          f"attacker.root.hit master * A 114.5.14.{i}" if i == 0 else
+          f"attacker{i}.root.hit master * A 114.5.14.{i}"
+          for i in range(atk)
+        ])
+

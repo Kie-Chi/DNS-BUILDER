@@ -1,0 +1,98 @@
+include: share/base.yml
+
+vars:
+  # primary -> example.com, can change
+  # secondary -> attacker.com, can change
+  # aux -> none, can change
+  length: 10 # CNAME-Chain length
+  depth: 10 # QMIN depth
+  zone_tpl: |
+    $TTL 3600
+    @	IN	SOA	ns.aux.example.com. admin.example.com. ( 1 3600 1800 604800 60 )
+      IN	NS	{SEC_DOMAIN}
+    www	IN {NEXT_CHAIN}
+  conf_tpl: |
+    zone "{DOMAIN}" IN {{
+        type master;
+        file "/usr/local/etc/zones/db.{DOMAIN}";
+    }};
+
+trigger: www.trigger-0.${vars.primary}
+
+builds:
+  primary:
+    auto:
+      setup: |
+        origin = config.get("behavior", "")
+        behavs = []
+
+        length = config.get("vars", {}).get("length", 10)
+        depth = config.get("vars", {}).get("depth", 10)
+        pri_pf = "trigger-"
+        pri_domain = "${vars.primary}"
+        qm_pf = ".".join([ f"l{i}" for i in range(depth, -1, -1) ]) + "."
+        sec_pf = f"{qm_pf}qm-"
+        sec_domain = "${vars.secondary}"
+        
+        for i in range(length):
+          pri_name = pri_pf + str(i)
+          sec_name = sec_pf + str(i)
+          behavs.append(f"{pri_domain} master {pri_name} NS ns.aux.example.com.")  
+          if i != 0: # special for first trigger
+            behavs.append(f"{pri_domain} master {pri_name} NS {sec_name}.{sec_domain}.")
+        behavs.append(f"{pri_domain} master ns.aux.example.com. A ${{srv.aux.ip}}")
+        origin += "\n".join(behavs)
+        config["behavior"] = origin
+
+  aux:
+    build: true
+    auto:
+      setup: |
+        files = config.setdefault("files", {})
+        conf_tpl = config.get("vars", {}).get("conf_tpl", "")
+        zone_tpl = config.get("vars", {}).get("zone_tpl", "")
+        print(config)
+        print(config.get("vars", {}))
+        print(zone_tpl)
+        print(conf_tpl)
+        zonconf = []
+
+        length = config.get("vars", {}).get("length", 10)
+        depth = config.get("vars", {}).get("depth", 10)
+        pri_pf = "trigger-"
+        pri_domain = config.get("vars", {}).get("primary", "")
+        qm_pf = ".".join([ f"l{i}" for i in range(depth, -1, -1) ]) + "."
+        sec_pf = f"{qm_pf}qm-"
+        sec_domain = config.get("vars", {}).get("secondary", "")
+
+        for i in range(length):
+          full_pri_name = f"{pri_pf}{i}.{pri_domain}"
+          files["/usr/local/etc/zones/db." + full_pri_name] = zone_tpl.format(
+            **{
+              "SEC_DOMAIN": f"{sec_pf}{i}.{sec_domain}.",
+              "NEXT_CHAIN": f"CNAME www.{pri_pf}{i + 1}.{pri_domain}." if i + 1 < length else "A 10.10.9.254",
+            })
+          zonconf.append(conf_tpl.format(
+            **{
+              "DOMAIN": full_pri_name,
+            }))
+        files["/usr/local/etc/zones.conf"] = "\n".join(zonconf)
+
+  secondary:
+    auto:
+      setup: |
+        origin = config.get("behavior", "")
+        behavs = []
+
+        depth = config.get("vars", {}).get("depth", 10)
+        qm_pf = ".".join([ f"l{i}" for i in range(depth, -1, -1) ]) + "."
+        sec_pf = f"{qm_pf}qm-"
+        sec_domain = "${vars.secondary}"
+        aux_ip = "${srv.aux.ip}"
+
+        for i in range(depth):
+          sec_name = sec_pf + str(i)
+          behavs.append(f"{sec_domain} master {sec_name}.{sec_domain}. A {aux_ip}")
+         
+        origin += "\n".join(behavs)
+        config["behavior"] = origin

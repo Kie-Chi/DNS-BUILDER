@@ -1,0 +1,25 @@
+include: share/deauth.yml
+name: dnspun
+inet: 10.10.10.0/24
+
+images:
+  client:
+    ref: python:3.12.0
+  aliyun:
+    ref: python:3.12.0
+
+builds:
+
+  resolver:
+    image: mvance/unbound:1.22.0
+    ref: std:recursor
+    command: unbound -d -c /usr/local/etc/unbound/unbound.conf
+    behavior: |
+      . hint root
+  
+  # resolver:
+  #   image: powerdns/pdns-recursor-49:4.9.3
+  #   ref: std:recursor
+  #   command: --config-dir=/usr/local/etc
+  #   behavior: |
+  #     . hint root

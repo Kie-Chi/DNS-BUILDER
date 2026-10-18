@@ -1,0 +1,78 @@
+name: disbalance
+inet: 10.10.10.0/24
+
+include: resource:/includes/std-auth.yml
+
+images:
+  # Base image for the client (Python 3.12)
+  client:
+    ref: python:3.12.0
+    util:
+      - scapy
+  auth:
+    ref: bind:9.18.4
+  resolver:
+    ref: bind:9.16.0
+  vic:
+    ref: python:3.12.0
+    util:
+      - tshark
+      - pv
+
+builds:
+  client:
+    image: client
+    # Keep the container alive indefinitely
+    command: tail -f /dev/null
+    environment:
+      # Inject the IP address of the service named 'resolver'.
+      # Usage: `dig @$R example.com`
+      R: ${srv.resolver.ip}
+      A: ${srv.bad_sld.ip}
+      V: ${srv.victim.ip}
+      IP: ${ip}
+
+  resolver:
+    image: resolver
+    ref: std:recursor
+    behavior: . hint root
+
+  root:
+    image: auth
+    ref: std:auth
+    behavior: . master com NS tld
+
+  tld:
+    image: auth
+    ref: std:auth
+    behavior: | 
+      com master example NS sld
+      com master example NS bind-sld
+      com master attacker NS sld
+    
+  sld:
+    image: client
+    volumes:
+      - resource/silence-server.py:/usr/local/bin/server.py
+    command: python3 /usr/local/bin/server.py --domain example.com --delay 0 --ip ${ip} --ttl 3600
+
+  bind-sld:
+    image: client
+    volumes:
+      - resource/silence-server.py:/usr/local/bin/server.py
+    command: python3 /usr/local/bin/server.py --domain example.com --delay 0.2 --ip ${ip} --ttl 3600
+
+auto:
+  post: |
+    from pathlib import Path
+
+    # Target the generated contents of the 'resolver' service
+    target_path = Path(workdir / "output" / config["name"] / "resolver" / "contents")
+    
+    if target_path.exists():
+      # Recursively chmod 777
+      target_path.chmod(0o777)
+      for item in target_path.rglob("*"):
+        if item.is_file() or item.is_dir():
+          item.chmod(0o777)
+

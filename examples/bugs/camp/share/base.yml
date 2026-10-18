@@ -1,0 +1,164 @@
+include: resource:/includes/std-auth.yml
+
+name: camp
+inet: 10.10.9.0/24
+
+images:
+  client:
+    ref: python:3.12.0
+  auth:
+    ref: bind:9.18.4
+  unbound:
+    ref: unbound:1.22.0
+  bind:
+    ref: bind:9.18.32
+  asdns:
+    ref: python:3.12.0
+
+vars:
+  # domains to be used in the camp dimission
+  primary: example.com
+  secondary: attacker.com
+  aux: none.none # unused, may be used in the future
+
+builds:
+  client:
+    image: client
+    command: tail -f /dev/null
+    environment:
+      ub: ${srv.unbound.ip}
+      bd: ${srv.bind.ip}
+      ad: ${srv.asdns.ip}
+      # pd: ${srv.pdns.ip}
+      # kd: ${srv.knot.ip}
+      # md: ${srv.maradns.ip}
+      # tm: ${srv.technitium.ip}
+
+  unbound: # do not use default configuration
+    image: unbound
+    # command: "unbound -d -c /usr/local/etc/unbound/unbound.conf"
+    volumes:
+      - conf/unbound.conf:/usr/local/etc/unbound/unbound.conf:ro
+    behavior: . hint root
+
+  bind: # do not use default configuration
+    image: bind
+    ref: std:recursor
+    behavior: . hint root
+
+  pdns:
+    image: img/pdns-recursor.Dockerfile
+    ref: std:recursor
+    command: tail -f /dev/null
+    behavior: . hint root
+
+  knot:
+    image: img/knot-resolver:v6.Dockerfile
+    ref: std:recursor
+    behavior: . hint root
+    # command: "/tmp/kr/sbin/kresd -n -v -c /usr/local/etc/kresd.conf"
+    command: tail -f /dev/null
+
+  maradns:
+    image: maradns:3.5.0036
+    command: /usr/local/sbin/Deadwood -f /usr/local/etc/maradns.conf
+    auto:
+      setup: |
+        cfg = workdir / "conf" / "maradns.conf"
+        cts = fs.read_text(cfg)
+        cts = cts.replace("{ROOT_HINT}", "${srv.root.ip}")
+        config.setdefault("files", {})["/usr/local/etc/maradns.conf"] = cts
+
+  # technitium:
+  #   image: technitium:13.6.0
+  #   command: /etc/technitium/start.sh
+  #   environment:
+  #     root: ${srv.root.ip}
+  #     self: ${srv.technitium.ip}
+
+  root:
+    image: auth
+    ref: std:auth
+    behavior: |
+      # root hints
+      . master com NS tld
+  
+  tld:
+    image: auth
+    ref: std:auth
+    auto:
+      setup: |
+        pri = config.get("vars", {}).get("primary", "example.com")
+        sec = config.get("vars", {}).get("secondary", "attacker.com")
+
+        origin = config.get("behavior", "")
+        behavs = []
+
+        behavs.append(f"{pri.split('.')[-1]} master {pri.split('.')[-2]} NS primary")
+        behavs.append(f"{sec.split('.')[-1]} master {sec.split('.')[-2]} NS secondary")
+        
+        origin += "\n".join(behavs)
+        config["behavior"] = origin
+
+  primary:
+    image: auth
+    ref: std:auth
+    behavior: |
+      # zone for first domain
+      ${vars.primary} master test A 11.4.15.4
+  
+  secondary:
+    image: auth
+    ref: std:auth
+    behavior: |
+      # zone for second domain
+      ${vars.secondary} master test A 6.6.6.6
+
+  aux:
+    image: auth
+    ref: std:auth
+    build: false
+    # auxiliary server for attack
+
+  # you can use more auxiliary servers if needed
+
+
+trigger: trigger-for-camp # should be replaced
+
+auto:
+  setup:
+    - |
+      # setup vars for all builds
+      for srv in config.get("builds", {}).keys():
+        vars = config.get("builds", {}).get(srv, {}).setdefault("vars", {})
+        for k, v in config.get("vars", {}).items():
+          vars[k] = v
+  modify: 
+    - |
+      # insert trigger to client
+      config.get("builds", {}).get("client", {}).setdefault("environment", {})["T"] = config.get("trigger", "")
+    - |
+      # clean vars before generating docker-compose
+      for srv in config.get("builds", {}).keys():
+        config.get("builds", {}).get(srv, {}).pop("vars", None)
+      config.pop("vars", None)
+
+      # clean trigger
+      config.pop("trigger", None)
+    - |
+      # add share dir to /usr/local/dump
+      for srv in config.get("builds", {}).keys():
+        vols = config.get("builds", {}).get(srv, {}).setdefault("volumes", [])
+        vols.append("${origin}./share:/usr/local/dump:rw")
+  post: |
+    from pathlib import Path
+    
+    # Target the generated contents of the 'bind' service
+    target_path = Path(workdir / "output" / config["name"] / "bind" / "contents")
+    
+    if target_path.exists():
+      # Recursively chmod 777
+      target_path.chmod(0o777)
+      for item in target_path.rglob("*"):
+        if item.is_file() or item.is_dir():
+          item.chmod(0o777)

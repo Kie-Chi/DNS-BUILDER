@@ -1,0 +1,33 @@
+name: "kaminsky"
+inet: 10.102.0.0/24
+include: 
+  - resource:/includes/traffic.yml
+images:
+  - name: "bind"
+    ref: "bind:9.18.0"
+  - name: "myrecursor"
+    ref: "bind:9.4.3"
+  - name: "attacker"
+    ref: "python:3.9.0"
+
+builds:
+  recursor:
+    image: "myrecursor"
+    ref: "std:recursor"
+    behavior: . hint fake-auth
+  auth:
+    image: "bind"
+    ref: "std:auth"
+    behavior: |
+      . master com NS auth
+      com master example NS auth
+      example.com master www A 1.2.3.4
+  fake-auth:
+    image: "attacker"
+    volumes:
+      - resource/kaminsky-server.py:/usr/local/etc/server.py
+    command: ["python3", "/usr/local/etc/server.py"]
+  traffic:
+    environment:
+      - "RNAME=recursor"
+      - "ANAME=attacker"

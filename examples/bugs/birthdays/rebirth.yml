@@ -1,0 +1,43 @@
+name: rebirthday
+inet: 10.10.10.0/24
+
+include:
+  - share/client.yml
+  - share/auth.yml
+
+images:
+  attacker:
+    ref: python:3.12.0
+
+builds:
+  attacker:
+    image: attacker
+    command: tail -f /dev/null
+    environment:
+      R: ${srv.resolver.ip}
+      A: ${srv.bad_sld.ip}
+      IP: ${ip}
+
+  resolver:
+    image: mvance/unbound:1.22.0
+    ref: std:recursor
+    command: unbound -d -c /usr/local/etc/unbound/unbound.conf
+    behavior: |
+      . hint root
+
+  # resolver:
+  #   image: powerdns/pdns-recursor-52:5.2.2
+  #   ref: std:recursor
+  #   # Explicit command to use the generated config dir
+  #   command: --config-dir=/usr/local/etc --enable-old-settings
+  #   # Configure PowerDNS to use our 'root' container as the Root Hints
+  #   behavior: | 
+  #     . hint root
+  #   files:
+  #     /usr/local/etc/includes/ecs.conf: |
+  #       use-incoming-edns-subnet=yes
+  #       edns-subnet-allow-list=0.0.0.0/0
+  #       ecs-ipv4-bits=24
+  #       ecs-ipv4-cache-bits=24
+  #       ecs-ipv6-bits=128
+  #       ecs-ipv6-cache-bits=128

@@ -1,0 +1,60 @@
+include: resource:/includes/std-auth.yml
+
+name: inject
+inet: 10.10.10.0/24
+
+vars:
+  std:
+    dnssec: false
+
+images:
+  client:
+    ref: python:3.12.0
+  bind:
+    ref: bind:9.18.4
+
+builds:
+  client:
+    image: client
+    command: tail -f /dev/null
+    environment:
+      R: ${srv.resolver.ip}
+  
+  resolver:
+    image: mvance/unbound:1.22.0
+    ref: std:recursor
+    command: unbound -d -c /usr/local/etc/unbound/unbound.conf
+    behavior: . hint root
+
+
+  root:
+    image: bind
+    ref: std:auth
+    behavior: . master com NS tld
+
+  tld:
+    image: bind
+    ref: std:auth
+    behavior: | 
+      com master example NS sld
+      com master victim NS vic
+
+  vic:
+    image: bind
+    ref: std:auth
+    behavior: |
+      victim.com master www A 6.6.6.6
+
+  sld:
+    image: bind
+    ref: std:auth
+    behavior: |
+      example.com master test1 CNAME www.victim.com\000.example.com.
+      example.com master www.victim.com\000.example.com. A 1.2.3.4
+
+      example.com master test2 CNAME www\.victim.com.
+      example.com master www\.victim.com. A 1.2.3.4
+    files:
+      /usr/local/etc/check.conf.options: |
+        check-names master ignore;
+

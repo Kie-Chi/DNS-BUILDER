@@ -1,0 +1,90 @@
+name: ghost
+inet: 10.10.10.0/24
+
+include: resource:/includes/std-auth.yml
+
+images:
+  # Base image for the client (Python 3.12)
+  client:
+    ref: python:3.12.0
+    util:
+      - scapy
+  auth:
+    ref: bind:9.18.4
+  resolver:
+    ref: unbound:1.16.1
+
+builds:
+  client:
+    image: client
+    # Keep the container alive indefinitely
+    command: tail -f /dev/null
+    volumes:
+      - resource/ghost-server.py:/usr/local/bin/ghost.py
+    files:
+      /usr/local/bin/attack.sh:
+        # !/bin/bash
+        python3 /usr/local/bin/ghost.py $R example.com --ttl 15 --delay 14
+    environment:
+      # Inject the IP address of the service named 'resolver'.
+      # Usage: `dig @$R example.com`
+      R: ${srv.resolver.ip}
+      A: ${srv.bad_sld.ip}
+      IP: ${ip}
+
+  resolver:
+    image: resolver
+    ref: std:recursor
+    behavior: . hint root
+
+  root:
+    image: auth
+    ref: std:auth
+    behavior: . master com NS tld
+
+  tld:
+    image: auth
+    ref: std:auth
+    behavior: | 
+      com master example NS 15 ns.example.com.
+      com master ns.example.com. A 15 ${srv.sld.ip}
+  sld:
+    image: client
+    volumes:
+      - resource/server.py:/usr/local/bin/server.py
+    command: python3 /usr/local/bin/server.py --domain example.com --delay 0.5 --ttl 15 --ip ${ip}
+  # sld:
+  #   image: auth
+  #   ref: std:auth
+  #   behavior: | 
+  #     example.com master ns.example.com. A 60 ${ip}
+  #     example.com master www A 15 1.2.3.4
+  #   auto:
+  #     setup: |
+  #       layer = 10
+  #       behavior = config.get("behavior", "")
+  #       behavs = []
+
+  #       target = "example.com"
+  #       for i in range(layer):
+  #         target = f"l{i}." + target
+  #         behavs.append(f"{target} master l{i + 1} NS 60 ns.example.com.")
+  #         behavs.append(f"{target} master ns.example.com. A 60 ${{ip}}")
+  #         behavs.append(f"{target} master * A 1.1.1.1")
+
+  #       config["behavior"] = behavior + "\n".join(behavs)
+
+auto:
+  post: |
+    from pathlib import Path
+
+    # Target the generated contents of the 'resolver' service
+    target_path = Path(workdir / "output" / config["name"] / "resolver" / "contents")
+    
+    if target_path.exists():
+      # Recursively chmod 777
+      target_path.chmod(0o777)
+      for item in target_path.rglob("*"):
+        if item.is_file() or item.is_dir():
+          item.chmod(0o777)
+

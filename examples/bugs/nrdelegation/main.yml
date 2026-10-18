@@ -1,0 +1,39 @@
+name: nrdg
+inet: 10.10.66.0/24
+
+images:
+  auth:
+    ref: bind:9.18.0
+  attacker:
+    ref: python:3.12.0
+  resolver:
+    ref: unbound:1.16.0
+
+builds:
+  attacker:
+    image: attacker
+    command: "tail -f /dev/null"
+    environment:
+      R: ${srv.resolver.ip}
+      IP: ${ip}
+
+  resolver:
+    image: resolver
+    ref: std:recursor
+    behavior: |
+      example.com stub auth1
+      victim.com stub auth2
+
+  auth1:
+    image: attacker
+    volumes:
+      - resource/nrdg-server1.py:/usr/local/bin/server.py
+    command: python3 /usr/local/bin/server.py
+
+  auth2:
+    image: attacker
+    volumes:
+      - resource/nrdg-server2.py:/usr/local/bin/server.py
+    command: python3 /usr/local/bin/server.py
+
+

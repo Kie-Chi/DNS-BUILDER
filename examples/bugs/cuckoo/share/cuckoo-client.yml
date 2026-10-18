@@ -1,0 +1,22 @@
+# -----------------------------------------------------------------------------
+#
+# SHARED CLIENT CONFIGURATION
+#
+# -----------------------------------------------------------------------------
+# This file defines the 'client' container used to send DNS queries.
+# It is included by the specific cuckoo-*.yml configurations.
+
+images:
+  # Base image for the client (Python 3.12)
+  client:
+    ref: python:3.12.0
+
+builds:
+  client:
+    image: client
+    # Keep the container alive indefinitely
+    command: tail -f /dev/null
+    environment:
+      # Inject the IP address of the service named 'resolver'.
+      # Usage: `dig @$R example.com`
+      R: ${srv.resolver.ip}

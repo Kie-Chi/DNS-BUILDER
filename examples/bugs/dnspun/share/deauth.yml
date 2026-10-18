@@ -1,0 +1,55 @@
+include: resource:/includes/std-auth.yml
+
+images:
+  python:
+    ref: python:3.12.0
+
+builds:
+  
+  root:
+    image: def-auth
+    ref: std:auth
+    behavior: |
+      . master com NS com
+
+  com:
+    image: def-auth
+    ref: std:auth
+    behavior: |
+      com master victim NS victim
+      com master attacker NS attacker
+  
+  # for RATE LIMIT I
+  # for RATE LIMIT II
+  # victim:
+  #   image: def-auth
+  #   ref: std:auth
+  #   behavior: |
+  #     victim.com master * A 11.4.51.4
+  
+
+  # for DNS BAN
+  victim:
+    image: python
+    volumes:
+      - resource/random-server.py:/usr/local/bin/server.py
+    command: python3 /usr/local/bin/server.py
+
+  # for RATE LIMIT I
+  # for DNS BAN
+  attacker:
+    image: def-auth
+    ref: std:auth
+    behavior: |
+      attacker.com master test A 1.1.1.1
+      attacker.com master a NS victim
+      attacker.com master b NS victim
+
+  # for RATE LIMIT II
+  # attacker:
+  #   image: python
+  #   volumes:
+  #     - resource/servfail-server.py:/usr/local/bin/server.py
+  #   command: python3 /usr/local/bin/server.py
+    
+

@@ -1,0 +1,56 @@
+include: share/base.yml
+
+vars:
+  # primary -> example.com, can change
+  # secondary -> attacker.com, can change
+  # aux -> none, can change
+  length: 10 # NS-Chain length
+  width: 10 # Fan-Out width
+
+trigger: trigger-0.${vars.primary}
+
+builds:
+  primary:
+    auto:
+      setup: |
+        origin = config.get("behavior", "")
+        behavs = []
+
+        length = config.get("vars", {}).get("length", 10)
+        pri_pf = "trigger-"
+        pri_domain = "${vars.primary}"
+        sec_pf = "fo-trigger-"
+        sec_domain = "${vars.secondary}"
+        
+        for i in range(length):
+          pri_name = pri_pf + str(i)
+          later_name = pri_pf + str(i + 1)
+          sec_name = sec_pf + str(i)
+          behavs.append(f"{pri_domain} master {pri_name} NS {sec_name}.{sec_domain}.")
+          behavs.append(f"{pri_domain} master {pri_name} NS {later_name}")
+        
+        origin += "\n".join(behavs)
+        config["behavior"] = origin
+
+
+  secondary:
+    auto:
+      setup: |
+        origin = config.get("behavior", "")
+        behavs = []
+
+        length = config.get("vars", {}).get("length", 10)
+        width = config.get("vars", {}).get("width", 10)
+        sec_pf = "fo-trigger-"
+        sec_domain = "${vars.secondary}"
+        fan_pf = "fan-"
+        
+        for i in range(length):
+          sec_name = sec_pf + str(i)
+          for j in range(width):
+            fan_name = fan_pf + str(i) + "-" + str(j)
+            behavs.append(f"{sec_domain} master {sec_name} NS {fan_name}.{sec_domain}.")
+            behavs.append(f"{sec_domain} master {fan_name} A 10.51.{i}.{j + 1}")
+        
+        origin += "\n".join(behavs)
+        config["behavior"] = origin

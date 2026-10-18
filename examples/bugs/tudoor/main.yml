@@ -1,0 +1,81 @@
+name: tudoor
+inet: 10.0.0.0/24
+
+include: resource:/includes/std-auth.yml
+
+images:
+  client:
+    ref: python:3.12.0
+    util:
+      - scapy
+  pauth:
+    ref: python:3.12.0
+  auth:
+    ref: bind:9.18.4
+  bind:
+    ref: bind:9.18.14
+  unbound:
+    ref: unbound:1.17.1
+
+builds:
+  client:
+    image: client
+    # Keep the container alive indefinitely
+    command: tail -f /dev/null
+    environment:
+      # Inject the IP address of the service named 'resolver'.
+      # Usage: `dig @$R example.com`
+      R: ${srv.resolver.ip}
+      A: ${srv.bad_sld.ip}
+      IP: ${ip}
+
+  resolver:
+    image: bind
+    ref: std:recursor
+    behavior: . hint root
+
+  root:
+    image: auth
+    ref: std:auth
+    behavior: . master com NS tld
+
+  tld:
+    image: auth
+    ref: std:auth
+
+  sld-tpl:
+    build: false
+    image: pauth
+    volumes:
+      - resource/tudoor-server.py:/usr/local/bin/server.py
+    command: python3 /usr/local/bin/server.py --ip ${ip} --domain ${name}.com --attack-mode ${name} --rip ${srv.resolver.ip}
+
+
+auto:
+  setup: 
+   - |
+      modes = ['normal', 'formerr', 'null', 'short', 'garbage', 'icmp']
+      behavs = []
+      builds = config.setdefault('builds', {})
+      for mode in modes:
+        behavs.append(f'com master {mode} NS {mode}')
+        builds[mode] = {
+          'ref': 'sld-tpl',
+          'build': True,
+        }
+      
+      config['builds'].get('tld', {})['behavior'] = '\n'.join(behavs)
+  post: 
+    - |
+      from pathlib import Path
+
+      # Target the generated contents of the 'resolver' service
+      target_path = Path(workdir / "output" / config["name"] / "resolver" / "contents")
+      
+      if target_path.exists():
+        # Recursively chmod 777
+        target_path.chmod(0o777)
+        for item in target_path.rglob("*"):
+          if item.is_file() or item.is_dir():
+            item.chmod(0o777)
+

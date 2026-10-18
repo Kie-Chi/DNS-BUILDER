@@ -1,0 +1,21 @@
+include:
+  - share/cuckoo-client.yml
+  - share/cuckoo-auth.yml
+
+name: cuckoo-knot
+inet: 10.10.13.0/24
+
+builds:
+
+  # ----------------------------
+  #
+  #      KNOT RESOLVER
+  #
+  # ----------------------------
+  resolver:
+    image: cznic/knot-resolver:v6.0.9
+    ref: std:recursor
+    # Explicit command to use the generated config file
+    command: -c /usr/local/etc/kresd.yml
+    # Configure Knot to use our 'root' container as the Root Hints
+    behavior: . hint root

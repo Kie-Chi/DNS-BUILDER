@@ -1,0 +1,96 @@
+include: share/base.yml
+
+vars:
+  # primary -> example.com, can change
+  # secondary -> attacker.com, can change
+  # aux -> none, can change
+  depth: 10 # DDLG depth
+  width: 1 # Fan-Out width
+  setup_tpl: |
+    origin = config.get("behavior", "")
+    behavs = []
+
+    width = config.get("vars", {}).get("width", 10)
+    layer = int(config.get("environment", {}).get("DEPTH", "0"))
+    name = f"l{layer + 1}"
+    ori_domain = "${vars.primary}"
+    pri_domain = ".".join([ f"l{i}" for i in range(layer, -1, -1) ]) + f".{ori_domain}"
+    sec_pf = "fan-"
+    sec_domain = "${vars.secondary}"
+
+    for i in range(width):
+      behavs.append(f"{pri_domain} master {name} NS {sec_pf}{layer}-{i}.{sec_domain}.")
+
+    origin += "\n".join(behavs)
+    config["behavior"] = origin
+
+
+# please set trigger here
+# e.g., trigger: trigger-for-camp.example.com
+trigger: trigger.${vars.primary}
+
+builds:
+  primary:
+    auto:
+      setup: |
+        origin = config.get("behavior", "")
+        behavs = []
+
+        depth = config.get("vars", {}).get("depth", 10)
+        pri_domain = "${vars.primary}"
+        full_pf = "www." + ".".join([ f"l{i}" for i in range(depth, -1, -1) ]) + "."
+
+        behavs.append(f"{pri_domain} master trigger CNAME {full_pf}{pri_domain}.")
+        behavs.append(f"{pri_domain} master l0 NS aux-0")
+        
+        origin += "\n".join(behavs)
+        config["behavior"] = origin
+
+  secondary:
+    auto:
+      setup: |
+        origin = config.get("behavior", "")
+        behavs = []
+
+        depth = config.get("vars", {}).get("depth", 10)
+        width = config.get("vars", {}).get("width", 10)
+        sec_domain = "${vars.secondary}"
+        fan_pf = "fan-"
+
+        for layer in range(depth):
+          aux_ip = f"${{srv.aux-{layer + 1}.ip}}" if layer + 1 < depth else "${srv.primary.ip}"
+          for i in range(width):
+            name = f"{fan_pf}{layer}-{i}"
+            behavs.append(f"{sec_domain} master {fan_pf}{layer}-{i} A {aux_ip}")
+        
+        origin += "\n".join(behavs)
+        config["behavior"] = origin
+
+  aux-tpl:
+    image: auth
+    ref: std:auth
+    build: false
+    environment:
+      DEPTH: "which layer the aux server is in the DDLG"
+
+auto:
+  setup: 
+    - |
+      # create depth aux server help
+      depth = config.get("vars", {}).get("depth", 10)
+      for i in range(depth):
+        srv_name = f"aux-{i}"
+        if srv_name not in config.get("builds", {}):
+          aux_build = {
+            "build": True,
+            "ref": "aux-tpl",
+            "environment": {
+              "DEPTH": str(i)
+            },
+            "auto": {
+              "setup": config.get("vars", {}).get("setup_tpl", "")
+            }
+          }
+          for var in config.get("vars", {}):
+            aux_build.setdefault("vars", {})[var] = config["vars"][var]
+          config.setdefault("builds", {})[srv_name] = aux_build

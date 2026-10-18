@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------- #
+# Tsuking Attack Experiment Configuration
+# ${vars.DRS_NUM} DNS Resolver System, every system has 1 ingress, ${vars.DRS_WIDTH} egress
+# 
+# ---------------------------------------------------------------- #
+
+# --- Base Configuration ---
+name: tsuking
+inet: 10.66.0.0/24 # The IPv4 subnet allocated for this network topology
+
+vars:
+  # --- Experiment Parameters ---
+  # Number of DNS Resolver System generated all
+  DRS_NUM: 16
+  # Number of egress Resolver per DNS Resolver System
+  DRS_WIDTH: 1
+
+  URL: git://git-to-what-you-place-your-server
+
+  # Default path for the Unbound configuration file
+  UCFG: /usr/local/etc/unbound/unbound.conf
+
+images:
+  # --- Base Images ---
+  unbound:
+    ref: unbound:1.17.1 # Specific version of Unbound used for the experiment
+  python39:
+    ref: python:3.9.0
+
+builds:
+  # --- Base Node Definitions & Templates ---
+  auth:
+    # Custom Authoritative DNS Server controlled by the attacker
+    image: python39
+    volumes:
+      - resource/tsuking-server.py:/usr/local/etc/server.py
+    command: "python3 /usr/local/etc/server.py"
+    
+  victim:
+    image: python39
+    command: "tail -f /dev/null"
+    
+  fl:
+    # Template for Ingress Resolvers
+    image: unbound
+    volumes:
+      - ${vars.URL}#weak.conf:${vars.UCFG}
+    build: false # Marks this as a blueprint/template
+    
+  rl:
+    # Template for Egress Resolvers
+    image: unbound
+    volumes:
+      - ${vars.URL}#weak.conf:${vars.UCFG}
+    behavior: example.com stub auth # -> stub example.com to the attacker's Authoritative Server
+    build: false # Marks this as a blueprint/template
+
+auto:
+  # --- Dynamic Topology Generation Script ---
+  # Auto generate all the DRS
+  setup: |
+    drs = config.get('vars', {}).get('DRS_NUM', 16)
+    width = config.get('vars', {}).get('DRS_WIDTH', 1)
+    
+    # Loop to create 'drs' number of Front Resolvers (fl-0 to fl-15)
+    for i in range(drs):
+      config['builds'][f'fl-{i}'] = {
+        'ref': 'fl', # Inherits from the 'fl' template
+        # Instructs this Front Resolver to forward all traffic (root zone '.') 
+        # specifically to its corresponding Recursive Resolver(s)
+        'behavior': f'. forward {",".join(
+            [
+            f"rl-{i}-{j}" for j in range(width)
+            ]
+        )}'
+      }
+      
+      # Loop to create 'width' number of Recursive Resolvers per Front Resolver
+      # (In this case, creates rl-0-0, rl-1-0, ..., rl-15-0)
+      for j in range(width):
+        config['builds'][f'rl-{i}-{j}'] = {
+          'ref': 'rl' # Inherits from the 'rl' template
+        }

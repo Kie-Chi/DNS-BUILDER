@@ -1,0 +1,21 @@
+include:
+  - share/cuckoo-client.yml
+  - share/cuckoo-auth.yml
+
+name: cuckoo-pdns
+inet: 10.10.14.0/24
+
+builds:
+
+  # ----------------------------
+  #
+  #    POWERDNS RESOLVER
+  #
+  # ----------------------------
+  resolver:
+    image: powerdns/pdns-recursor-49:4.9.9
+    ref: std:recursor
+    # Explicit command to use the generated config dir
+    command: --config-dir=/usr/local/etc
+    # Configure PowerDNS to use our 'root' container as the Root Hints
+    behavior: . hint root

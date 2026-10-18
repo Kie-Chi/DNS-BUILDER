@@ -1,0 +1,51 @@
+name: forward
+inet: 10.10.6.0/24
+
+images:
+  client:
+    ref: python:3.12.0
+  vic:
+    ref: python:3.12.0
+  bind:
+    ref: bind:9.18.4
+  unbound:
+    ref: unbound:1.17.0
+
+builds:
+  client:
+    image: client
+    command: tail -f /dev/null
+    environment:
+      R: ${srv.forwarder.ip}
+      A: ${srv.auth.ip}
+      IP: ${ip}
+
+  forwarder:
+    image: img/dnsmasq.Dockerfile
+    auto:
+      setup: |
+        resol = workdir / "conf" / "dnsmasq.conf.tpl"
+        files = config.setdefault("files", {})
+        files["/etc/dnsmasq.conf"] = fs.read_text(resol).format(
+        **{
+          "IP_ADDRESS": "${srv.auth.ip}"
+        }
+        )
+
+  # forwarder:
+  #   image: bind
+  #   ref: std:forwarder
+  #   behavior: example.com forward auth
+  
+  # forwarder:
+  #   image: unbound
+  #   ref: std:forwarder
+  #   behavior: example.com forward auth
+
+  auth:
+    image: vic
+    volumes:
+      - resource/frag/server.py:/usr/local/bin/frag-server.py
+    command: python3 /usr/local/bin/frag-server.py
+
+
