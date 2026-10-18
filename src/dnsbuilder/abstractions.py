@@ -12,6 +12,7 @@ Dependencies:
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Tuple, TypeVar, Generic, Type, Set, ClassVar, TYPE_CHECKING
 import logging
+import threading
 import json
 import re
 import hashlib
@@ -381,6 +382,10 @@ class InternalImage(Image, ABC):
         # Cache for Dockerfile content and hash
         self._dcr_cache: Optional[str] = None
         self._img_cache: Optional[str] = None
+        # Service artifacts are generated concurrently.  Dockerfile template
+        # expansion mutates PkgInstaller's prerequisite set, so two callers
+        # must not compute the same shared image content at the same time.
+        self._dcr_lock = threading.Lock()
 
         if ":" in self.name:
             self._load_defaults()
@@ -540,20 +545,25 @@ class InternalImage(Image, ABC):
         Subclasses can override this to provide additional template variables.
         Result is cached to avoid redundant generation.
         """
-        # Return cached content if available
+        # Return cached content if available.  The same Image instance can be
+        # used by many service-generation workers; keep the check inside the
+        # lock as well as outside it to avoid racing through gen_cmds(), which
+        # records installed package-manager prerequisites.
         if self._dcr_cache is not None:
             return self._dcr_cache
-        
-        try:
-            template = self.fs.read_text(
-                DNSBPath(f"resource:/images/templates/{self.software}")
-            )
-        except FileNotFoundError:
-            raise ImageDefinitionError(f"Dockerfile template for '{self.software}' not found.")
+        with self._dcr_lock:
+            if self._dcr_cache is not None:
+                return self._dcr_cache
+            try:
+                template = self.fs.read_text(
+                    DNSBPath(f"resource:/images/templates/{self.software}")
+                )
+            except FileNotFoundError:
+                raise ImageDefinitionError(f"Dockerfile template for '{self.software}' not found.")
 
-        template_vars = self._get_template_vars()
-        self._dcr_cache = template.format(**template_vars)
-        return self._dcr_cache
+            template_vars = self._get_template_vars()
+            self._dcr_cache = template.format(**template_vars)
+            return self._dcr_cache
 
     def _get_template_vars(self) -> Dict[str, Any]:
         """Provides a dictionary of variables for formatting the Dockerfile template."""

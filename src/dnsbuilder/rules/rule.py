@@ -24,6 +24,14 @@ class Rule:
         
         if match:
             start_bracket, start_ver_str, end_ver_str, end_bracket = match.groups()
+
+            # The range grammar has exactly two version operands.  ``Version``
+            # intentionally accepts a few legacy shorthand forms and its
+            # fallback parser would otherwise treat a second comma as part of
+            # a prerelease string (for example ``[1.0, 2.0, 3.0]``).  Reject
+            # that malformed range before constructing either operand.
+            if "," in start_ver_str or "," in end_ver_str:
+                raise ValueError(f"Invalid version range: {self.rule_str}")
             
             start_ver = Version(start_ver_str)
             end_ver = Version(end_ver_str)
